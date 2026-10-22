@@ -1,4 +1,5 @@
 import type { AcceptanceCriterion, Decision, Document, Milestone, ParsedMarkdown, Task } from "../types/index.ts";
+import { type CustomFieldSchema, type CustomFieldValue, normalizeCustomFieldValue } from "../utils/custom-fields.ts";
 import { normalizeDueDate } from "../utils/due-date.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
 import { parseFrontmatter, preprocessFrontmatter } from "./frontmatter.ts";
@@ -78,9 +79,24 @@ function isStructuredDependency(value: unknown): boolean {
 	return Array.isArray(value) || Object.prototype.toString.call(value) === "[object Object]";
 }
 
-export function parseTask(content: string): Task {
+export function parseTask(content: string, schema?: CustomFieldSchema): Task {
 	const { frontmatter, content: rawContent } = parseMarkdown(content, ["created_date", "updated_date"]);
 	const id = String(frontmatter.id || "");
+	const customFields: Record<string, CustomFieldValue> = {};
+	const invalidFields: string[] = [];
+	for (const [name, definition] of Object.entries(schema?.fields ?? {})) {
+		if (!Object.hasOwn(frontmatter, name)) continue;
+		const normalized = normalizeCustomFieldValue(definition, frontmatter[name]);
+		if (normalized.ok) {
+			if (normalized.value !== undefined) customFields[name] = normalized.value;
+		} else {
+			customFields[name] = String(frontmatter[name]);
+			invalidFields.push(`${name}: ${normalized.error}`);
+		}
+	}
+	if (invalidFields.length) {
+		console.error(`Warning: task ${id || "(missing id)"} has invalid custom fields: ${invalidFields.join("; ")}`);
+	}
 	const dependencies = frontmatter.dependencies;
 	if (Array.isArray(dependencies)) {
 		const invalidIndex = dependencies.findIndex(isStructuredDependency);
@@ -134,6 +150,7 @@ export function parseTask(content: string): Task {
 		priority,
 		type: frontmatter.type ? String(frontmatter.type) : undefined,
 		project: frontmatter.project ? String(frontmatter.project) : undefined,
+		...(schema && Object.keys(schema.fields).length > 0 ? { customFields } : {}),
 		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
 		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
 	};

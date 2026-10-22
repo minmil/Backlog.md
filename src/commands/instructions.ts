@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Command } from "commander";
 import {
 	getInstructionGuideByKey,
@@ -6,6 +7,10 @@ import {
 	type InstructionGuideKey,
 	type WorkflowGuideDefinition,
 } from "../mcp/workflow-guides.ts";
+import { resolveBacklogDirectory } from "../utils/backlog-directory.ts";
+import { loadCustomFieldSchema } from "../utils/custom-fields.ts";
+import { getProjectRoot } from "../utils/find-backlog-root.ts";
+import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
 import { addHelpSchema, choiceType, renderConfiguredTaskIds } from "./help-schema.ts";
 
 type InstructionsOptions = {
@@ -66,7 +71,7 @@ export function registerInstructionsCommand(program: Command): void {
 	})
 		.description("show Backlog.md workflow instructions")
 		.option("--list", "list available instruction guides")
-		.action((guide: string | undefined, options: InstructionsOptions) => {
+		.action(async (guide: string | undefined, options: InstructionsOptions) => {
 			if (options.list || guide === undefined) {
 				process.stdout.write(formatInstructionGuideIndex());
 				return;
@@ -85,6 +90,16 @@ export function registerInstructionsCommand(program: Command): void {
 				process.exit(1);
 			}
 
-			process.stdout.write(formatInstructionGuideMarkdown(selectedGuide.resourceText));
+			let markdown = formatInstructionGuideMarkdown(selectedGuide.resourceText);
+			if (guide === "overview") {
+				const root = await getProjectRoot((await resolveRuntimeCwd()).cwd);
+				if (root) {
+					const backlogDir = resolveBacklogDirectory(root).backlogPath ?? join(root, "backlog");
+					if (Object.keys(loadCustomFieldSchema(backlogDir).fields).length > 0) {
+						markdown += "\nCustom fields are configured. Run `backlog fields` before creating or editing tasks.\n";
+					}
+				}
+			}
+			process.stdout.write(markdown);
 		});
 }

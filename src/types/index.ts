@@ -1,5 +1,7 @@
 export type TaskStatus = string;
 
+import type { CustomFieldCondition, CustomFieldValue } from "../utils/custom-fields.ts";
+
 /**
  * How a multi-label filter is combined. Interactive multi-select pickers use "any" so adding a
  * label widens the result set; callers that pass an explicitly typed label list (the CLI
@@ -77,6 +79,8 @@ export interface Task {
 	type?: string;
 	/** Monorepo project/component this task belongs to. Allowed values come from config `projects`; absent config means the field is unusable. */
 	project?: string;
+	/** Values for keys declared in backlog/fields.yml. */
+	customFields?: Record<string, CustomFieldValue>;
 	branch?: string;
 	ordinal?: number;
 	filePath?: string;
@@ -130,6 +134,7 @@ export interface TaskCreateInput {
 	priority?: string;
 	type?: string;
 	project?: string;
+	customFields?: Record<string, unknown>;
 	ordinal?: number;
 	milestone?: string;
 	labels?: string[];
@@ -156,6 +161,8 @@ export interface TaskUpdateInput {
 	priority?: string;
 	type?: string;
 	project?: string | null;
+	customFields?: Record<string, unknown>;
+	clearCustomFields?: string[];
 	milestone?: string | null;
 	labels?: string[];
 	addLabels?: string[];
@@ -203,6 +210,7 @@ export interface TaskListFilter {
 	unassigned?: boolean;
 	priority?: string;
 	project?: string | string[];
+	where?: CustomFieldCondition[];
 	milestone?: string;
 	parentTaskId?: string;
 	labels?: string[];

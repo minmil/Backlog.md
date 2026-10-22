@@ -8,6 +8,7 @@ import type {
 	Task,
 	TaskSearchResult,
 } from "../types/index.ts";
+import type { CustomFieldValue } from "../utils/custom-fields.ts";
 import type { DependencyGraph } from "../utils/dependency-graph.ts";
 import type { ListPage } from "../utils/list-window.ts";
 import type { TaskReadiness } from "../utils/readiness.ts";
@@ -23,6 +24,7 @@ type CompactTaskJson = {
 	type: string | null;
 	priority: string | null;
 	project: string | null;
+	customFields: Record<string, CustomFieldValue>;
 	assignees: string[];
 	reporter: string | null;
 	labels: string[];
@@ -141,6 +143,7 @@ function toCompactTaskJson(task: Task): CompactTaskJson {
 		type: nullable(task.type),
 		priority: nullable(task.priority),
 		project: nullable(task.project),
+		customFields: task.customFields ?? {},
 		assignees: task.assignee ?? [],
 		reporter: nullable(task.reporter),
 		labels: task.labels ?? [],

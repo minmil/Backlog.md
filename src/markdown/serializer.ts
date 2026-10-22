@@ -1,5 +1,6 @@
 import type { AcceptanceCriterion, Decision, Document, Task } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
+import type { CustomFieldSchema } from "../utils/custom-fields.ts";
 import { stringifyFrontmatter } from "./frontmatter.ts";
 import {
 	AcceptanceCriteriaManager,
@@ -8,6 +9,7 @@ import {
 	getStructuredSections,
 	updateStructuredSections,
 } from "./structured-sections.ts";
+import { taskFrontmatter } from "./task-frontmatter.ts";
 
 function normalizeOptionalText(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
@@ -46,32 +48,13 @@ function commentItemsEqual(left: Task["comments"], right: Task["comments"]): boo
 	});
 }
 
-export function serializeTask(task: Task, originalContent = ""): string {
+export function serializeTask(task: Task, originalContent = "", schema?: CustomFieldSchema): string {
 	normalizeAssignee(task);
 	// Omitted optional fields are still owned: clearing one must not recover its original entry.
-	const frontmatter = {
-		id: task.id,
-		title: task.title,
-		status: task.status,
-		assignee: task.assignee,
-		reporter: task.reporter || undefined,
-		created_date: task.createdDate,
-		updated_date: task.updatedDate || undefined,
-		due_date: task.dueDate || undefined,
-		labels: task.labels,
-		milestone: task.milestone || undefined,
-		dependencies: task.dependencies,
-		references: task.references?.length ? task.references : undefined,
-		documentation: task.documentation?.length ? task.documentation : undefined,
-		modified_files: task.modifiedFiles?.length ? task.modifiedFiles : undefined,
-		parent_task_id: task.parentTaskId || undefined,
-		subtasks: task.subtasks?.length ? task.subtasks : undefined,
-		priority: task.priority || undefined,
-		type: task.type || undefined,
-		project: task.project || undefined,
-		ordinal: task.ordinal,
-		onStatusChange: task.onStatusChange || undefined,
-	};
+	const frontmatter: Record<string, unknown> = taskFrontmatter(task);
+	for (const name of Object.keys(schema?.fields ?? {})) {
+		frontmatter[name] = task.customFields?.[name];
+	}
 
 	let contentBody = task.rawContent ?? "";
 	const rawContent = task.rawContent ?? "";

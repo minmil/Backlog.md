@@ -6,6 +6,12 @@ All examples use the `backlog` command, available after installing the `backlog.
 
 ## Project Setup
 
+### Custom fields
+
+Declare custom task fields in `<backlog-dir>/fields.yml`, then inspect them with `backlog fields` or `backlog fields --json`. The supported types are `bool`, `date`, `enum`, and `text`. Use repeatable `--field key=value` on task or draft creation and task or draft edit; use repeatable `--clear-field key` on edit. Enum input is case-insensitive and is stored using the configured spelling.
+
+`task list --where <expr>` filters custom fields; repeat it to combine conditions with AND. Supported operators are `=` and `!=` for all types and `<`, `<=`, `>`, `>=` for dates. `key=` means unset, `key!=` means set, and `key=a|b` accepts either value. Date expressions accept `today`, `+Nd`, and `-Nd`, resolved using the machine's local time zone. Built-in fields use their existing flags. Sort date and enum fields with `--sort key[:asc|:desc]`; unset values sort last. `task list --plain --show-fields k1,k2` appends selected values.
+
 | Action      | Example                                              |
 |-------------|------------------------------------------------------|
 | Initialize project | `backlog init [project-name]` (creates backlog structure with a minimal interactive flow) |
@@ -157,6 +163,7 @@ Each successful response is one pretty-printed JSON document followed by a newli
 | `draft list --json` | `{ "schemaVersion": 1, "kind": "draft-list", "drafts": [...] }` |
 | `decision list --json` | `{ "schemaVersion": 1, "kind": "decision-list", "decisions": [...] }` |
 | `search [query] --json` | `{ "schemaVersion": 1, "kind": "search", "results": [...] }` |
+| `fields --json` | `{ "schemaVersion": 1, "kind": "fields", "fields": [...] }` |
 
 Task list and task search results use these compact fields: `id`, `title`, `status`, `archived`, `type`, `priority`, `project`, `assignees`, `reporter`, `labels`, `milestone`, `parentTaskId`, `acceptanceCriteriaCompleted`, `acceptanceCriteriaCount`, `references`, `modifiedFiles`, `ordinal`, `createdAt`, `updatedAt`, `dueDate`, and `isReady`. `archived` is `true` for a task in the archive, which is read-only, and `false` for a task on the board. `acceptanceCriteriaCompleted` is the number of checked acceptance criteria and `acceptanceCriteriaCount` is the total; both are `0` when the task has no acceptance criteria. `project` reports the task's `project:` frontmatter and is `null` when the task has none. Setting or filtering by it requires a `projects:` list in the project config. `isReady` is derived from the whole visible corpus at read time and never stored: it is `true` when the task is unfinished and every dependency it names resolved to a completed task, and `false` for a finished task or one whose dependencies are unfinished, unknown, or ambiguous. It is the same verdict `task list --ready` filters on. Draft list entries carry the same fields without `isReady`, because readiness is computed against tasks only.
 
@@ -173,6 +180,8 @@ When `--max-count` or `--skip` cuts a `task list`, `draft list`, `search`, or `d
 Absent scalar fields are `null`, and absent collections are `[]`. Date-only values remain `YYYY-MM-DD`; UTC date-times use RFC 3339. Internal fields, absolute paths, raw Markdown source objects, branch metadata, and search implementation details are not exposed.
 
 `--json` and `--plain` are mutually exclusive. Explicit JSON mode is always noninteractive, including in a terminal. Without `--json`, existing interactive, explicit plain, and automatic non-TTY plain behavior is unchanged. One-shot errors leave stdout empty, write a concise message to stderr, and exit nonzero. Version 1 may gain backward-compatible fields, but removing, renaming, retyping, or changing documented field semantics requires a new `schemaVersion`.
+
+Task list, task view, draft list, and task search JSON entries include `customFields` as an object. It contains declared fields with stored values and is `{}` when none are set. This is an additive version 1 field.
 
 ### Replacing legacy sections without markers
 

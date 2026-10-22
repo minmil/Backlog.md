@@ -1,3 +1,4 @@
+import type { CustomFieldSchema, CustomFieldValue } from "./custom-fields.ts";
 import { getPriorityRank } from "./priority-config.ts";
 
 /**
@@ -182,7 +183,12 @@ function sortByOrdinalAndPriority<T extends { id: string; ordinal?: number; prio
 	});
 }
 
-type SortableTask = { id: string; priority?: string; ordinal?: number };
+type SortableTask = {
+	id: string;
+	priority?: string;
+	ordinal?: number;
+	customFields?: Record<string, CustomFieldValue>;
+};
 type TaskSorter = <T extends SortableTask>(items: T[], priorityOrder?: readonly string[]) => T[];
 
 /**
@@ -210,7 +216,27 @@ export function sortTasks<T extends SortableTask>(
 	items: T[],
 	sortField?: string,
 	priorityOrder?: readonly string[],
+	customFieldSchema?: CustomFieldSchema,
 ): T[] {
+	const [customKey, direction = "asc"] = sortField?.split(":") ?? [];
+	const definition = customKey ? customFieldSchema?.fields[customKey] : undefined;
+	if (definition && (definition.type === "date" || definition.type === "enum")) {
+		return [...items].sort((a, b) => {
+			const rank = (task: T): string | number | undefined => {
+				const value = task.customFields?.[customKey as string];
+				if (typeof value !== "string") return undefined;
+				if (definition.type === "date") return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+				const index = definition.values?.indexOf(value) ?? -1;
+				return index >= 0 ? index : undefined;
+			};
+			const left = rank(a);
+			const right = rank(b);
+			if (left === undefined) return right === undefined ? compareTaskIds(a.id, b.id) : 1;
+			if (right === undefined) return -1;
+			const order = left < right ? -1 : left > right ? 1 : 0;
+			return order ? (direction === "desc" ? -order : order) : compareTaskIds(a.id, b.id);
+		});
+	}
 	const sorter = TASK_SORTERS.get(sortField?.toLowerCase() ?? "") ?? sortByOrdinalAndPriority;
 	return sorter(items, priorityOrder);
 }
@@ -227,7 +253,7 @@ export function sectionTasks<T extends { status: string }>(
 	sortField: string | undefined,
 	statuses: string[],
 ): Array<{ status: string | null; tasks: T[] }> {
-	if (sortField?.toLowerCase() === "priority") {
+	if (sortField && (sortField.toLowerCase() === "priority" || !TASK_SORT_FIELDS.includes(sortField.toLowerCase()))) {
 		return [{ status: null, tasks }];
 	}
 

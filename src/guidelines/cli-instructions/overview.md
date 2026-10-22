@@ -18,6 +18,8 @@ For long lists, use `--max-count` and `--skip`, follow the printed `Next` comman
 
 For scripts, `task list`, `task view`, `task <id>`, `draft list`, `decision list`, and `search` accept versioned `--json` output instead of `--plain`. `task list --json --watch` emits complete replacement responses; read successive JSON values, not individual lines. Filters and local scope are unchanged; intermediate edits may be coalesced. Restart for a fresh snapshot.
 
+When custom fields are configured, run `backlog fields` before creating or editing tasks. Use `--field` to write, `task list --where` to filter, and `--sort` for date or enum fields. Copy enum values as listed; never hand-edit frontmatter.
+
 ### Required Guides
 
 Read the matching guide before taking these actions; this overview does not replace it:

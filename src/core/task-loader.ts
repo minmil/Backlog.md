@@ -13,6 +13,7 @@ import { ARCHIVED_TASK_DIRECTORIES, DEFAULT_DIRECTORIES } from "../constants/ind
 import type { GitBranchTip, GitOperations } from "../git/operations.ts";
 import { parseTask } from "../markdown/parser.ts";
 import type { BacklogConfig, Task } from "../types/index.ts";
+import type { CustomFieldSchema } from "../utils/custom-fields.ts";
 import { extractAnyPrefix } from "../utils/prefix-config.ts";
 import {
 	canonicalTaskId,
@@ -331,7 +332,10 @@ export class BranchTaskLoader {
 	private readonly commitIndexCache = new Map<string, Promise<readonly CachedTaskTreeEntry[]>>();
 	private readonly taskCache = new Map<string, { commit: string; promise: Promise<Task | null> }>();
 
-	constructor(private readonly git: GitOperations) {}
+	constructor(
+		private readonly git: GitOperations,
+		private readonly getCustomFieldSchema?: () => CustomFieldSchema,
+	) {}
 
 	clear(): void {
 		this.commitIndexCache.clear();
@@ -553,7 +557,7 @@ export class BranchTaskLoader {
 		if (!cached) {
 			const promise = this.git.showFile(commit, path).then((content) => {
 				try {
-					return normalizeTaskIdentity(parseTask(content));
+					return normalizeTaskIdentity(parseTask(content, this.getCustomFieldSchema?.()));
 				} catch (error) {
 					console.error(`Failed to parse task ${commit}:${path}`, error);
 					return null;

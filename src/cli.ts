@@ -40,7 +40,7 @@ import {
 	taskListJson,
 	taskViewJson,
 } from "./formatters/json-output.ts";
-import { formatTaskPlainText } from "./formatters/task-plain-text.ts";
+import { formatPlainTaskListFields, formatTaskPlainText } from "./formatters/task-plain-text.ts";
 import {
 	type AgentInstructionFile,
 	addAgentInstructions,
@@ -81,6 +81,7 @@ import { scrollableViewer } from "./ui/tui.ts";
 import { type AgentSelectionValue, processAgentSelection } from "./utils/agent-selection.ts";
 import { normalizeProjectBacklogDirectory } from "./utils/backlog-directory.ts";
 import { launchBrowser } from "./utils/browser-launch.ts";
+import { normalizeCustomFieldAssignments, parseCustomFieldCondition } from "./utils/custom-fields.ts";
 import { formatDependencyCleanupMessage } from "./utils/dependency-graph.ts";
 import { documentNotFoundMessage } from "./utils/document-id.ts";
 import {
@@ -321,13 +322,14 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	return message;
 }
 
-function formatPlainTaskListRow(task: Task, options: { includeStatus?: boolean } = {}): string {
+function formatPlainTaskListRow(task: Task, options: { includeStatus?: boolean; showFields?: string[] } = {}): string {
 	const priorityIndicator = task.priority ? `[${task.priority.toUpperCase()}] ` : "";
 	const typeIndicator = task.type ? `[${task.type}] ` : "";
 	const statusIndicator = options.includeStatus && task.status ? ` (${task.status})` : "";
 	const acceptanceCriteria = formatAcceptanceCriteriaSummarySuffix(task);
 	const dueDate = task.dueDate ? ` (due ${formatUtcDateForDisplay(task.dueDate)})` : "";
-	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}`;
+	const fields = options.showFields?.length ? ` ${formatPlainTaskListFields(task, options.showFields)}` : "";
+	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
 }
 
 async function normalizeCliStatusList(core: Core, values: string[], optionName: string): Promise<string[] | null> {
@@ -593,6 +595,7 @@ function hasCreateFieldFlags(options: Record<string, unknown>): boolean {
 			options.priority !== undefined ||
 			options.type !== undefined ||
 			options.project !== undefined ||
+			options.field !== undefined ||
 			options.ordinal !== undefined ||
 			options.milestone !== undefined ||
 			options.dueDate !== undefined ||
@@ -625,6 +628,8 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 			options.priority !== undefined ||
 			options.type !== undefined ||
 			options.project !== undefined ||
+			options.field !== undefined ||
+			options.clearField !== undefined ||
 			options.ordinal !== undefined ||
 			options.milestone !== undefined ||
 			options.clearMilestone ||
@@ -666,6 +671,18 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 			options.clearDocs ||
 			options.modifiedFile !== undefined,
 	);
+}
+
+function parseCustomFieldFlags(raw: unknown): Record<string, string> {
+	const fields: Record<string, string> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.indexOf("=");
+		if (separator <= 0) throw new Error(`Invalid --field "${entry}". Use --field key=value.`);
+		const name = entry.slice(0, separator).trim();
+		if (!name) throw new Error(`Invalid --field "${entry}". Use --field key=value.`);
+		fields[name] = entry.slice(separator + 1);
+	}
+	return fields;
 }
 
 /**
@@ -1066,6 +1083,44 @@ program
 	.version(version, "-v, --version", "display version number")
 	.showSuggestionAfterError()
 	.showHelpAfterError("Run with --help to see accepted fields and examples.");
+
+addHelpSchema(program.command("fields"), {
+	reads: "Custom field definitions from the project's fields.yml",
+	required: [],
+	optional: [{ name: "json", type: "Boolean", description: "Print machine-readable field definitions" }],
+	output: "Field names, types, values, defaults, and descriptions",
+	examples: ["backlog fields", "backlog fields --json"],
+})
+	.description("show the configured custom task fields")
+	.option("--json", "print machine-readable field definitions")
+	.action(async (options: { json?: boolean }) => {
+		const cwd = await requireProjectRoot();
+		const schema = new Core(cwd).filesystem.customFieldSchema;
+		const fields = Object.entries(schema.fields).map(([name, definition]) => ({
+			name,
+			type: definition.type,
+			...(definition.values ? { values: definition.values } : {}),
+			...(definition.default !== undefined ? { default: definition.default } : {}),
+			...(definition.description ? { description: definition.description } : {}),
+			trackChanges: definition.trackChanges,
+		}));
+		if (options.json) {
+			printJson({ schemaVersion: 1, kind: "fields", fields });
+			return;
+		}
+		if (fields.length === 0) {
+			console.log("No custom fields configured.");
+			return;
+		}
+		for (const field of fields) {
+			const details: string[] = [field.type];
+			if ("values" in field) details.push(`values: ${field.values?.join(", ")}`);
+			if ("default" in field) details.push(`default: ${field.default}`);
+			if (field.trackChanges) details.push("track changes");
+			console.log(`${field.name} (${details.join("; ")})`);
+			if (field.description) console.log(`  ${field.description}`);
+		}
+	});
 
 addHelpSchema(program.command("init [projectName]"), {
 	required: [],
@@ -1982,6 +2037,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		{ name: "priority", type: priorityType, description: "Task priority" },
 		{ name: "type", type: taskType, description: "Task type; case-insensitive" },
 		{ name: "project", type: projectType, description: "Task project; case-insensitive" },
+		{ name: "field", type: "key=value", description: "Set a declared custom field; repeatable" },
 		{ name: "due-date", type: "date", description: "Optional due date (YYYY-MM-DD)" },
 		{ name: "acceptanceCriteria", type: "Markdown list item text", description: "Repeat --ac for multiple criteria" },
 		{ name: "ordinal", type: "Integer", description: "Non-negative manual ordering value" },
@@ -2019,6 +2075,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--priority <priority>", "set task priority (configured priorities)")
 	.option("--type <type>", "set task type (configured task types)")
 	.option("--project <project>", "set task project (configured projects)")
+	.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
 	.option("--due-date <date>", "set due date (YYYY-MM-DD)")
 	.option("--plain", "use plain text output after creating")
 	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
@@ -2150,6 +2207,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				priority: options.priority ? String(options.priority) : undefined,
 				type: options.type !== undefined ? String(options.type) : undefined,
 				project: options.project !== undefined ? String(options.project) : undefined,
+				customFields: parseCustomFieldFlags(options.field),
 				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
 				milestone,
 				implementationPlan: options.plan ? String(options.plan) : undefined,
@@ -2607,19 +2665,24 @@ function isDocumentSearchResult(result: SearchResult): result is DocumentSearchR
  * Prints the sections of a plain task list: each status under its heading, or the one section of
  * a flat priority list under its own heading with the status on every row.
  */
-function printTaskSections(tasks: Task[], sortField: string | undefined, statuses: string[]): void {
+function printTaskSections(
+	tasks: Task[],
+	sortField: string | undefined,
+	statuses: string[],
+	showFields: string[] = [],
+): void {
 	// Use the stdout stream, as JSON output does, so pending pipe writes keep the CLI alive.
 	for (const section of sectionTasks(tasks, sortField, statuses)) {
 		if (section.status === null) {
-			process.stdout.write("Tasks (sorted by priority):\n");
+			process.stdout.write(`Tasks (sorted by ${sortField ?? "priority"}):\n`);
 			for (const task of section.tasks) {
-				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true })}\n`);
+				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields })}\n`);
 			}
 			continue;
 		}
 		process.stdout.write(`${section.status || "No Status"}:\n`);
 		for (const task of section.tasks) {
-			process.stdout.write(`${formatPlainTaskListRow(task)}\n`);
+			process.stdout.write(`${formatPlainTaskListRow(task, { showFields })}\n`);
 		}
 		process.stdout.write("\n");
 	}
@@ -2635,6 +2698,7 @@ async function runTaskList(
 	const { outputMode, listWindow } = listOutput;
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
+	const customFieldSchema = core.filesystem.customFieldSchema;
 	const hasDuplicateIds = await printDuplicateIntegrityWarning(core);
 	const cleanup = () => {
 		core.disposeSearchService();
@@ -2651,6 +2715,28 @@ async function runTaskList(
 		return;
 	}
 	const baseFilters: TaskListFilter = {};
+	try {
+		const where = toStringArray(options.where).map((expression) =>
+			parseCustomFieldCondition(expression, customFieldSchema),
+		);
+		if (where.length > 0) baseFilters.where = where;
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		cleanup();
+		return;
+	}
+	const showFields = parseDelimitedStringList(options.showFields) ?? [];
+	for (const name of showFields) {
+		if (!Object.hasOwn(customFieldSchema.fields, name)) {
+			console.error(
+				`Unknown custom field "${name}" in --show-fields. Declared fields: ${Object.keys(customFieldSchema.fields).join(", ") || "(none)"}`,
+			);
+			process.exitCode = 1;
+			cleanup();
+			return;
+		}
+	}
 	if (options.status) {
 		baseFilters.status = parseDelimitedStringList(options.status) ?? options.status;
 	}
@@ -2735,9 +2821,15 @@ async function runTaskList(
 	}
 
 	if (options.sort) {
-		const sortField = options.sort.toLowerCase();
-		if (!TASK_SORT_FIELDS.includes(sortField)) {
-			console.error(`Invalid sort field: ${options.sort}. Valid values are: ${TASK_SORT_FIELD_LIST}`);
+		const [sortField, direction = "asc"] = String(options.sort).split(":");
+		const definition = customFieldSchema.fields[sortField as string];
+		if (
+			!(TASK_SORT_FIELDS.includes(sortField?.toLowerCase() ?? "") && !String(options.sort).includes(":")) &&
+			!(definition && (definition.type === "date" || definition.type === "enum") && ["asc", "desc"].includes(direction))
+		) {
+			console.error(
+				`Invalid sort field: ${options.sort}. Valid values are: ${TASK_SORT_FIELD_LIST}, or a custom date/enum field[:asc|:desc]`,
+			);
 			process.exitCode = 1;
 			cleanup();
 			return;
@@ -2772,7 +2864,7 @@ async function runTaskList(
 		// The sort was validated above, before any task was read. Without one, sortTasks uses the
 		// default order of every task list.
 		const narrowForDisplay = <T extends Task>(rows: T[]): T[] => {
-			const sorted = sortTasks(rows, options.sort, config?.priorities);
+			const sorted = sortTasks(rows, options.sort, config?.priorities, customFieldSchema);
 			const narrowed = parentFilter
 				? sorted.filter((task) => task.parentTaskId && taskIdsEqual(parentFilter, task.parentTaskId))
 				: sorted;
@@ -2806,7 +2898,7 @@ async function runTaskList(
 				}
 				return;
 			}
-			printTaskSections(windowTasks, options.sort, statuses);
+			printTaskSections(windowTasks, options.sort, statuses, showFields);
 		});
 		cleanup();
 		return;
@@ -2969,6 +3061,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 			type: () => projectType({ multiple: true }),
 			description: "Filter by one or more configured projects; repeat or comma-separate values",
 		},
+		{ name: "where", type: "key<op>value", description: "Filter a declared custom field; repeat for AND" },
+		{ name: "show-fields", type: "k1,k2", description: "Append selected custom fields to --plain task rows" },
 		{
 			name: "labels",
 			type: "Comma-separated strings",
@@ -3031,6 +3125,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 		"filter tasks by configured project (repeatable or comma-separated)",
 		createMultiValueAccumulator(),
 	)
+	.option("--where <expr>", "filter a declared custom field (repeatable; AND)", createMultiValueAccumulator())
+	.option("--show-fields <names>", "append comma-separated custom fields to plain task rows")
 	.option(
 		"-l, --labels <labels>",
 		"filter tasks by labels; require every comma-separated label (repeatable)",
@@ -3065,6 +3161,7 @@ addListWindowOptions(taskListCommand)
 			filesystem.milestonesDir,
 			filesystem.archiveMilestonesDir,
 			filesystem.configFilePath,
+			join(filesystem.backlogDir, "fields.yml"),
 		];
 		await watchJson([filesystem.backlogDir, dirname(filesystem.configFilePath)], inputs, async () => {
 			let result: string | undefined;
@@ -3224,6 +3321,18 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
+	let customFieldChanges: ReturnType<typeof normalizeCustomFieldAssignments>;
+	try {
+		customFieldChanges = normalizeCustomFieldAssignments(
+			core.filesystem.customFieldSchema,
+			parseCustomFieldFlags(options.field),
+			toStringArray(options.clearField).map((value) => String(value).trim()),
+		);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		return;
+	}
 
 	if (shouldUseWizard) {
 		let selectedTaskId = taskId?.trim() || undefined;
@@ -3507,6 +3616,8 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (options.project !== undefined) {
 		editArgs.project = String(options.project);
 	}
+	if (Object.keys(customFieldChanges.values).length > 0) editArgs.customFields = customFieldChanges.values;
+	if (customFieldChanges.clear.length > 0) editArgs.clearCustomFields = customFieldChanges.clear;
 	if (ordinalValue !== undefined) {
 		editArgs.ordinal = ordinalValue;
 	}
@@ -3680,6 +3791,8 @@ function configureEditCommand(cmd: Command) {
 		.option("--priority <priority>", "set task priority (configured priorities)")
 		.option("--type <type>", "set task type (configured task types; pass an empty value to clear)")
 		.option("--project <project>", "set task project (configured projects; pass an empty value to clear)")
+		.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
+		.option("--clear-field <key>", "clear a declared custom field (repeatable)", createMultiValueAccumulator())
 		.option("--due-date <date>", "set due date (YYYY-MM-DD)")
 		.option("--clear-due-date", "clear task due date")
 		.option("--ordinal <number>", "set task ordinal for custom ordering")
@@ -3834,6 +3947,8 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: projectType,
 			description: "Replacement task project; case-insensitive; pass an empty value to clear",
 		},
+		{ name: "field", type: "key=value", description: "Set a declared custom field; repeatable" },
+		{ name: "clear-field", type: "key", description: "Clear a declared custom field; repeatable" },
 		{ name: "due-date", type: "date", description: "Set the task due date (YYYY-MM-DD)" },
 		{ name: "clear-due-date", type: "Boolean", description: "Clear the task due date" },
 		{
@@ -4244,6 +4359,7 @@ draftCmd
 	)
 	.option("-s, --status <status>")
 	.option("-l, --labels <labels>", "add draft labels (comma-separated or repeatable)", createMultiValueAccumulator())
+	.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
 	.action(async (title: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
@@ -4255,6 +4371,7 @@ draftCmd
 				status: "Draft",
 				assignee: parseClearableStringList(options.assignee),
 				labels: parseDelimitedStringList(options.labels),
+				customFields: parseCustomFieldFlags(options.field),
 			});
 			console.log(`Created draft ${task.id}`);
 			console.log(`File: ${filePath}`);

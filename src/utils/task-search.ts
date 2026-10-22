@@ -9,6 +9,7 @@
 
 import Fuse, { type IFuseOptions } from "fuse.js";
 import type { LabelMatchMode, Task } from "../types/index.ts";
+import { type CustomFieldCondition, matchesCustomFieldConditions } from "./custom-fields.ts";
 import { labelsToLower } from "./label-filter.ts";
 import {
 	createMilestoneFilterMatcher,
@@ -40,6 +41,7 @@ export interface TaskFilterOptions {
 	excludeStatus?: string | string[];
 	type?: string | string[];
 	project?: string | string[];
+	where?: CustomFieldCondition[];
 	priority?: string | string[];
 	assignee?: string | string[];
 	unassigned?: boolean;
@@ -145,6 +147,10 @@ export function createTaskFilterMatcher(options: TaskFilterOptions, corpus: Task
 	if (options.project) {
 		const projects = options.project;
 		checks.push((task) => matchesProjectFilter(task.project, projects));
+	}
+	if (options.where?.length) {
+		const conditions = options.where;
+		checks.push((task) => matchesCustomFieldConditions(task, conditions));
 	}
 
 	const priorities = new Set(

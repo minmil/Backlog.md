@@ -41,6 +41,7 @@ import {
 	type TaskUpdateInput,
 } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
+import { normalizeCustomFieldAssignments } from "../utils/custom-fields.ts";
 import { decisionIdKey, decisionNotFoundMessage, findDecisionById } from "../utils/decision-id.ts";
 import { documentIdKey, documentNotFoundMessage, findDocumentById, normalizeDocumentId } from "../utils/document-id.ts";
 import { getDocumentSubPathFromRelativePath, normalizeDocumentSubPath } from "../utils/document-path.ts";
@@ -676,7 +677,7 @@ export class Core {
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.customFieldSchema);
 		// Disable watchers by default for CLI commands (non-interactive)
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
@@ -1655,7 +1656,7 @@ export class Core {
 		this.disposeContentStore();
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.customFieldSchema);
 	}
 
 	disposeSearchService(): void {
@@ -2198,6 +2199,15 @@ export class Core {
 		const priority = await this.normalizePriority(input.priority);
 		const type = await this.normalizeTaskType(input.type);
 		const project = await this.normalizeProject(input.project);
+		const customFieldSchema = this.fs.customFieldSchema;
+		const customFields = Object.fromEntries(
+			Object.entries(customFieldSchema.fields).flatMap(([name, definition]) =>
+				definition.default !== undefined ? [[name, definition.default]] : [],
+			),
+		);
+		const customFieldInput = normalizeCustomFieldAssignments(customFieldSchema, input.customFields);
+		Object.assign(customFields, customFieldInput.values);
+		for (const name of customFieldInput.clear) delete customFields[name];
 		const createdDate = formatUtcTimestamp();
 		if (
 			input.ordinal !== undefined &&
@@ -2270,6 +2280,7 @@ export class Core {
 				...(priority && { priority }),
 				...(type && { type }),
 				...(project && { project }),
+				...(Object.keys(customFieldSchema.fields).length > 0 && { customFields }),
 				...(typeof ordinal === "number" && { ordinal }),
 				...(typeof input.milestone === "string" &&
 					input.milestone.trim().length > 0 && {
@@ -2413,6 +2424,11 @@ export class Core {
 		statusResolver: (status: string) => Promise<string>,
 	): Promise<{ task: Task; mutated: boolean }> {
 		assertSectionInputsSafe(input);
+		const customFieldUpdates = normalizeCustomFieldAssignments(
+			this.fs.customFieldSchema,
+			input.customFields,
+			input.clearCustomFields,
+		);
 		if (
 			input.acceptanceCriteria !== undefined ||
 			input.removeAcceptanceCriteria?.length ||
@@ -2429,6 +2445,19 @@ export class Core {
 			assertValidChecklistMarks(task.rawContent ?? "", "DOD");
 		}
 		let mutated = false;
+		for (const name of customFieldUpdates.clear) {
+			if (task.customFields && Object.hasOwn(task.customFields, name)) {
+				delete task.customFields[name];
+				mutated = true;
+			}
+		}
+		for (const [name, value] of Object.entries(customFieldUpdates.values)) {
+			if (task.customFields?.[name] !== value) {
+				if (!task.customFields) task.customFields = {};
+				task.customFields[name] = value;
+				mutated = true;
+			}
+		}
 
 		const applyStringField = (
 			value: string | undefined,
@@ -4871,7 +4900,7 @@ export class Core {
 		const reloadTaskAfterEdit = async (path: string): Promise<{ task: Task } | { failure: "unreadable" }> => {
 			try {
 				const content = await Bun.file(path).text();
-				const reparsed = normalizeTaskIdentity(parseTask(content));
+				const reparsed = normalizeTaskIdentity(parseTask(content, this.fs.customFieldSchema));
 				return { task: { ...reparsed, filePath: path } };
 			} catch {
 				return { failure: "unreadable" };

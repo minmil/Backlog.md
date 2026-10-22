@@ -1,5 +1,9 @@
 ## Task Creation Guide
 
+### Custom fields
+
+Run `backlog fields` before creating tasks when a schema exists. Pass `--field key=value` once for each custom value, and copy enum values exactly as listed. Use the CLI rather than editing frontmatter.
+
 Use this guide when `backlog instructions` or the user indicates that new Backlog tasks are needed.
 
 ### Step 1: Search First

@@ -5,6 +5,7 @@ import type { FileSystem } from "../file-system/operations.ts";
 import { parseDecision, parseDocument, parseTask } from "../markdown/parser.ts";
 import type { BacklogConfig, Decision, Document, Task, TaskListFilter } from "../types/index.ts";
 import { watchConfigFile } from "../utils/config-watcher.ts";
+import { matchesCustomFieldConditions } from "../utils/custom-fields.ts";
 import { documentIdKey, documentIdsEqual } from "../utils/document-id.ts";
 import { normalizeDocumentRelativePath } from "../utils/document-path.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
@@ -318,6 +319,10 @@ export class ContentStore {
 		}
 		if (filter?.project) {
 			tasks = tasks.filter((task) => matchesProjectFilter(task.project, filter.project));
+		}
+		if (filter?.where?.length) {
+			const conditions = filter.where;
+			tasks = tasks.filter((task) => matchesCustomFieldConditions(task, conditions));
 		}
 		if (filter?.assignee) {
 			const assignee = filter.assignee;
@@ -1105,7 +1110,10 @@ export class ContentStore {
 						epoch,
 						readEventPath: async () => {
 							if (!(await Bun.file(fullPath).exists())) return null;
-							const task = { ...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text())), filePath: fullPath };
+							const task = {
+								...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text(), this.filesystem.customFieldSchema)),
+								filePath: fullPath,
+							};
 							return task;
 						},
 						findIdentity: async () => {
@@ -1118,7 +1126,9 @@ export class ContentStore {
 								},
 								async (candidatePath) => {
 									const task = {
-										...normalizeTaskIdentity(parseTask(await Bun.file(candidatePath).text())),
+										...normalizeTaskIdentity(
+											parseTask(await Bun.file(candidatePath).text(), this.filesystem.customFieldSchema),
+										),
 										filePath: candidatePath,
 									};
 									if (!taskIdsEqual(task.id, normalizedTaskId)) throw new Error("Task identity mismatch");
@@ -1153,7 +1163,10 @@ export class ContentStore {
 						return false;
 					}
 					try {
-						const task = { ...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text())), filePath: fullPath };
+						const task = {
+							...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text(), this.filesystem.customFieldSchema)),
+							filePath: fullPath,
+						};
 						if (!taskIdsEqual(task.id, normalizedTaskId)) {
 							this.publishWatchedTask(task);
 							return false;
@@ -1431,7 +1444,10 @@ export class ContentStore {
 		this.filesystem.saveTask = (async (task: Task, originalContent?: string): Promise<string> => {
 			const owner: PublicationOwner = { root: this.currentRoot() };
 			const result = await originalSaveTask.call(this.filesystem, task, originalContent);
-			const savedTask = { ...normalizeTaskIdentity(parseTask(await Bun.file(result).text())), filePath: result };
+			const savedTask = {
+				...normalizeTaskIdentity(parseTask(await Bun.file(result).text(), this.filesystem.customFieldSchema)),
+				filePath: result,
+			};
 			await this.updateTaskFromDisk(task.id, owner, savedTask);
 			return result;
 		}) as FileSystem["saveTask"];

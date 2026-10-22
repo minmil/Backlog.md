@@ -107,6 +107,11 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	if (task.project) {
 		lines.push(`Project: ${task.project}`);
 	}
+	const customFields = Object.entries(task.customFields ?? {});
+	if (customFields.length > 0) {
+		lines.push("Fields:");
+		for (const [name, value] of customFields) lines.push(`  ${name}: ${value}`);
+	}
 	if (task.ordinal !== undefined) {
 		lines.push(`Ordinal: ${task.ordinal}`);
 	}
@@ -236,4 +241,8 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	}
 
 	return lines.join("\n");
+}
+
+export function formatPlainTaskListFields(task: Task, names: string[]): string {
+	return names.map((name) => `${name}=${task.customFields?.[name] ?? ""}`).join(" ");
 }
