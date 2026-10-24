@@ -1,0 +1,55 @@
+# Example Operations Tracker. Replace the placeholder users and enum values for your team.
+users:
+  - {handle: "@owner", name: Owner, default: true}
+  - {handle: "@colleague", name: Colleague}
+
+fields:
+  id: {type: id, core: true, managed: true, hidden: true, required: true}
+  title: {type: text, core: true, required: true, label: Title}
+  title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}
+  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
+  assignee: {type: user-list, core: true, label: Assignee}
+  reporter: {type: user, core: true, label: Reporter}
+  created_date: {type: datetime, core: true, managed: true, required: true, label: Created}
+  updated_date: {type: datetime, core: true, managed: true, label: Updated}
+  due_date: {type: date, core: true, label: Due}
+  labels: {type: string-list, core: true, label: Labels, values: []}
+  milestone: {type: milestone-ref, core: true, label: Milestone}
+  dependencies: {type: task-ref-list, core: true, label: Dependencies}
+  references: {type: string-list, core: true, label: References}
+  documentation: {type: string-list, core: true, label: Documentation}
+  modified_files: {type: string-list, core: true, hidden: true, label: Modified files}
+  parent_task_id: {type: task-ref, core: true, label: Parent task}
+  subtasks: {type: task-ref-list, core: true, managed: true, hidden: true, label: Subtasks}
+  priority: {type: enum, core: true, values: [high, medium, low], label: Priority}
+  type: {type: enum, core: true, values: [Change, Inquiry, Incident], label: Category}
+  project: {type: enum, core: true, values: [Client A, Client B], label: Client}
+  ordinal: {type: number, core: true, managed: true, label: Ordinal}
+  onStatusChange: {type: text, core: true, hidden: true, label: On status change}
+  # Computed from Git; read-only and never written as task frontmatter.
+  branch: {type: text, core: true, managed: true, hidden: true, label: Branch}
+  client_facing: {type: bool, default: false, label: Client facing}
+  side: {type: enum, values: [us, them], label: Side}
+  tech_action: {type: enum, values: [Investigating, Configuring, Testing, Awaiting Client, Awaiting Internal, Released], track_changes: true, label: Tech action}
+  release_item: {type: bool, default: false, label: Release item}
+  raised_date: {type: date, label: Raised date}
+  uat_date: {type: date, label: UAT date}
+  prod_date: {type: date, label: Production date}
+
+sections:
+  description: {kind: markdown, title: Description}
+  description_ja: {kind: markdown, title: Description (JA), lang: ja, translation_of: description}
+  acceptance: {kind: checklist, title: Acceptance Criteria}
+  log: {kind: log, title: Log}
+
+ui:
+  board:
+    card: [type, project, priority, client_facing, side, tech_action, release_item, uat_date, prod_date, labels, created_date, updated_date, due_date, assignee]
+    filters: [assignee, labels, type, project, priority, client_facing, side, tech_action, release_item, uat_date, prod_date]
+  task_list:
+    columns: [status, type, project, priority, tech_action, release_item, raised_date, uat_date, prod_date, ordinal, labels, assignee, milestone, created_date]
+    filters: [status, priority, milestone, labels, project, type, side, tech_action, release_item, uat_date]
+  milestones:
+    row: [status, priority]
+  detail:
+    order: []

@@ -55,6 +55,8 @@ import {
 } from "./index.ts";
 import { MilestoneHandlers, type MilestoneRemoveArgs } from "./mcp/tools/milestones/handlers.ts";
 import type { CallToolResult } from "./mcp/types.ts";
+import { loadTaskSchema } from "./schema/index.ts";
+import { validateTaskFiles } from "./schema/validate-tasks.ts";
 import {
 	type BacklogConfig,
 	type ContentRecordKind,
@@ -1083,6 +1085,51 @@ program
 	.version(version, "-v, --version", "display version number")
 	.showSuggestionAfterError()
 	.showHelpAfterError("Run with --help to see accepted fields and examples.");
+
+const schemaCommand = addHelpSchema(program.command("schema"), {
+	reads: "Task field, user, section, and UI definitions from task-schema.yml",
+	required: [],
+	optional: [{ name: "json", type: "Boolean", description: "Print the complete schema as JSON" }],
+	output: "The complete task schema",
+	examples: ["backlog schema", "backlog schema --json", "backlog schema validate"],
+})
+	.description("show the configured task schema")
+	.option("--json", "print the complete schema as JSON")
+	.action(async (options: { json?: boolean }) => {
+		const root = await requireProjectRoot();
+		const filesystem = new Core(root).filesystem;
+		const schema = loadTaskSchema(filesystem.backlogDir, filesystem.configFilePath);
+		if (options.json) {
+			printJson({ schemaVersion: 2, kind: "schema", ...schema });
+			return;
+		}
+		console.log("Users:");
+		for (const user of schema.users) console.log(`  ${user.handle}: ${user.name}${user.default ? " (default)" : ""}`);
+		if (schema.users.length === 0) console.log("  Any handle is allowed");
+		console.log("Fields:");
+		for (const [key, definition] of Object.entries(schema.fields))
+			console.log(`  ${key}: ${JSON.stringify(definition)}`);
+		console.log("Sections:");
+		for (const [key, definition] of Object.entries(schema.sections))
+			console.log(`  ${key}: ${JSON.stringify(definition)}`);
+		console.log(`UI: ${JSON.stringify(schema.ui)}`);
+	});
+
+schemaCommand
+	.command("validate")
+	.description("validate the schema and every stored task")
+	.action(async () => {
+		const root = await requireProjectRoot();
+		const filesystem = new Core(root).filesystem;
+		const schema = loadTaskSchema(filesystem.backlogDir, filesystem.configFilePath);
+		const issues = validateTaskFiles(filesystem.backlogDir, schema);
+		if (issues.length) {
+			for (const issue of issues) console.error(`${issue.key}: ${issue.message}`);
+			process.exitCode = 1;
+			return;
+		}
+		console.log("Task schema and stored task fields are valid.");
+	});
 
 addHelpSchema(program.command("fields"), {
 	reads: "Custom field definitions from the project's fields.yml",

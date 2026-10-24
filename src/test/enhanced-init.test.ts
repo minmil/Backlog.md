@@ -147,7 +147,7 @@ describe("Enhanced init command", () => {
 		expect(existingConfig?.maxColumnWidth).toBe(30);
 	});
 
-	test("should preserve non-init-managed config fields during re-initialization", async () => {
+	test("re-initialization rejects config keys that moved into task-schema.yml", async () => {
 		const core = new Core(tmpDir);
 
 		const initialConfig: BacklogConfig = {
@@ -176,14 +176,16 @@ describe("Enhanced init command", () => {
 		const existingConfig = await core.filesystem.loadConfig();
 		if (!existingConfig) throw new Error("Expected existing config");
 
-		await initializeProject(core, {
-			projectName: "Preserve Fields Project Updated",
-			integrationMode: "none",
-			existingConfig,
-		});
+		await expect(
+			initializeProject(core, {
+				projectName: "Preserve Fields Project Updated",
+				integrationMode: "none",
+				existingConfig,
+			}),
+		).rejects.toThrow(/Move this config.yml key to task-schema.yml/);
 
 		const reloaded = await core.filesystem.loadConfig();
-		expect(reloaded?.projectName).toBe("Preserve Fields Project Updated");
+		expect(reloaded?.projectName).toBe("Preserve Fields Project");
 		expect(reloaded?.definitionOfDone).toEqual(["Run tests", "Update docs"]);
 		expect(reloaded?.defaultAssignee).toEqual(["@alex"]);
 		expect(reloaded?.defaultReporter).toBe("@bot");

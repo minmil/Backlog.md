@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
 	type AgentInstructionFile,
 	type AgentInstructionWriteResult,
@@ -6,6 +8,7 @@ import {
 	installClaudeAgent,
 } from "../agent-instructions.ts";
 import { DEFAULT_INIT_CONFIG } from "../constants/index.ts";
+import { getDefaultTaskSchemaText, loadTaskSchema } from "../schema/index.ts";
 import type { BacklogConfig } from "../types/index.ts";
 import { normalizeProjectBacklogDirectory } from "../utils/backlog-directory.ts";
 import {
@@ -209,6 +212,7 @@ export async function initializeProject(
 
 	// Create structure and save config
 	if (isReInitialization) {
+		loadTaskSchema(core.filesystem.backlogDir, core.filesystem.configFilePath);
 		await core.filesystem.saveConfig(config);
 	} else {
 		const normalizedBacklogDirectory = normalizeProjectBacklogDirectory(options.backlogDirectory);
@@ -245,6 +249,13 @@ export async function initializeProject(
 		core.filesystem.setBacklogDirectory(selectedBacklogDirectory);
 		core.filesystem.setConfigLocation(effectiveConfigLocation);
 		await core.filesystem.ensureBacklogStructure();
+		const schemaPath = join(core.filesystem.backlogDir, "task-schema.yml");
+		try {
+			await writeFile(schemaPath, getDefaultTaskSchemaText(), { flag: "wx" });
+		} catch (error) {
+			if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+		}
+		loadTaskSchema(core.filesystem.backlogDir, core.filesystem.configFilePath);
 		await core.filesystem.saveConfig(config);
 		await core.ensureConfigLoaded();
 	}

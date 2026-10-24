@@ -1,4 +1,4 @@
-import type { Dirent } from "node:fs";
+import { type Dirent, existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -20,6 +20,7 @@ import {
 	TaskDependenciesParseError,
 } from "../markdown/parser.ts";
 import { serializeDecision, serializeDocument, serializeTask } from "../markdown/serializer.ts";
+import { loadTaskSchema } from "../schema/index.ts";
 import type {
 	BacklogConfig,
 	ContentRecord,
@@ -2341,6 +2342,21 @@ ${description || `Milestone: ${title}`}`,
 		// A value Backlog cannot read is reported, not swallowed: callers must not silently
 		// fall back to defaults while the config file says something else.
 		const config = this.parseConfig(content);
+		if (
+			existsSync(join(this.resolvedBacklogDir, "task-schema.yml")) ||
+			existsSync(join(this.resolvedBacklogDir, "fields.yml"))
+		) {
+			const schema = loadTaskSchema(this.resolvedBacklogDir, configPath);
+			config.statuses = schema.fields.status?.values ?? [];
+			config.defaultStatus = schema.fields.status?.default as string | undefined;
+			config.labels = schema.fields.labels?.values ?? [];
+			config.types = schema.fields.type?.values;
+			config.priorities = schema.fields.priority?.values;
+			config.projects = schema.fields.project?.values;
+			config.defaultAssignee = schema.fields.assignee?.default as string[] | undefined;
+			config.defaultReporter = schema.users.find((user) => user.default)?.handle;
+			config.definitionOfDone = undefined;
+		}
 		this.cachedConfig = config;
 		this.cachedConfigSnapshot = { path: configPath, content };
 		return config;
@@ -2356,7 +2372,10 @@ ${description || `Milestone: ${title}`}`,
 			delete normalizedConfig.backlogDirectory;
 		}
 		const configPath = this.resolvedConfigPath;
-		const content = this.serializeConfig(normalizedConfig);
+		const content = this.serializeConfig(
+			normalizedConfig,
+			existsSync(join(this.resolvedBacklogDir, "task-schema.yml")),
+		);
 		await Bun.write(configPath, content);
 		this.cachedConfig = normalizedConfig;
 		this.cachedConfigSnapshot = { path: configPath, content };
@@ -2507,25 +2526,27 @@ ${description || `Milestone: ${title}`}`,
 		};
 	}
 
-	private serializeConfig(config: BacklogConfig): string {
+	private serializeConfig(config: BacklogConfig, schemaMode = false): string {
 		const normalizedDefinitionOfDone = this.normalizeDefinitionOfDone(config.definitionOfDone);
 		const lines = [
 			`project_name: "${config.projectName}"`,
-			...(config.defaultAssignee?.length
+			...(!schemaMode && config.defaultAssignee?.length
 				? [`default_assignee: [${config.defaultAssignee.map((assignee) => JSON.stringify(assignee)).join(", ")}]`]
 				: []),
-			...(config.defaultReporter ? [`default_reporter: "${config.defaultReporter}"`] : []),
-			...(config.defaultStatus ? [`default_status: "${config.defaultStatus}"`] : []),
-			`statuses: [${config.statuses.map((s) => `"${s}"`).join(", ")}]`,
-			`labels: [${config.labels.map((l) => `"${l}"`).join(", ")}]`,
-			...(config.types && config.types.length > 0 ? [`types: [${config.types.map((t) => `"${t}"`).join(", ")}]`] : []),
-			...(config.priorities && config.priorities.length > 0
+			...(!schemaMode && config.defaultReporter ? [`default_reporter: "${config.defaultReporter}"`] : []),
+			...(!schemaMode && config.defaultStatus ? [`default_status: "${config.defaultStatus}"`] : []),
+			...(!schemaMode ? [`statuses: [${config.statuses.map((s) => `"${s}"`).join(", ")}]`] : []),
+			...(!schemaMode ? [`labels: [${config.labels.map((l) => `"${l}"`).join(", ")}]`] : []),
+			...(!schemaMode && config.types && config.types.length > 0
+				? [`types: [${config.types.map((t) => `"${t}"`).join(", ")}]`]
+				: []),
+			...(!schemaMode && config.priorities && config.priorities.length > 0
 				? [`priorities: [${config.priorities.map((p) => `"${p}"`).join(", ")}]`]
 				: []),
-			...(config.projects && config.projects.length > 0
+			...(!schemaMode && config.projects && config.projects.length > 0
 				? [`projects: [${config.projects.map((p) => `"${p}"`).join(", ")}]`]
 				: []),
-			...(Array.isArray(normalizedDefinitionOfDone)
+			...(!schemaMode && Array.isArray(normalizedDefinitionOfDone)
 				? [`definition_of_done: [${normalizedDefinitionOfDone.map((item) => JSON.stringify(item)).join(", ")}]`]
 				: []),
 			`date_format: ${config.dateFormat}`,
