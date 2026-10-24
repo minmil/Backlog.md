@@ -90,7 +90,8 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 		if (definition.hidden || key === "id" || key === "title") continue;
 		const value = registry.getField(task, key);
 		if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) continue;
-		lines.push(`${definition.label}: ${registry.format(key, value, "plain")}`);
+		const label = definition.label ?? key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+		lines.push(`${label}: ${registry.format(key, value, "plain")}`);
 	}
 	if (task.source === "archived") lines.push("Archived: yes");
 

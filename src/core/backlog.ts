@@ -64,18 +64,7 @@ import {
 	getPrefixForType,
 	normalizeId,
 } from "../utils/prefix-config.ts";
-import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
-import {
-	formatValidProjectValues,
-	getProjectValues,
-	noProjectsConfiguredMessage,
-	resolveProjectValue,
-} from "../utils/project-config.ts";
 import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
-import {
-	getCanonicalStatus as resolveCanonicalStatus,
-	getValidStatuses as resolveValidStatuses,
-} from "../utils/status.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
 import {
 	buildDefinitionOfDoneItems,
@@ -103,7 +92,6 @@ import {
 import { applyTaskFilters, createTaskSearchIndex } from "../utils/task-search.ts";
 import { sortByOrdinal } from "../utils/task-sorting.ts";
 import { attachSubtaskSummaries, findDirectSubtasks } from "../utils/task-subtasks.ts";
-import { formatValidTaskTypeValues, resolveTaskTypeValue } from "../utils/task-type-config.ts";
 import { upsertTaskUpdatedDate } from "../utils/task-updated-date.ts";
 import { isTerminalStatus } from "../utils/terminal-status.ts";
 import { formatUtcTimestamp, parseStoredUtcDate } from "../utils/utc-timestamp.ts";
@@ -951,7 +939,7 @@ export class Core {
 			filesystemOnly,
 			taskPrefix: config?.prefixes?.task ?? "task",
 			taskResolutionStrategy: config?.taskResolutionStrategy ?? "most_progressed",
-			statuses: config?.statuses ?? DEFAULT_STATUSES,
+			statuses: this.fs.taskSchema.fields.status?.values ?? DEFAULT_STATUSES,
 			backlogDir: filesystem.backlogDirName,
 		};
 	}
@@ -1133,52 +1121,28 @@ export class Core {
 	}
 
 	private async requireCanonicalStatus(status: string): Promise<string> {
-		const canonical = await resolveCanonicalStatus(status, this);
-		if (canonical) {
-			return canonical;
-		}
-		const validStatuses = await resolveValidStatuses(this);
-		throw new Error(`Invalid status: ${status}. Valid statuses are: ${validStatuses.join(", ")}`);
+		return new FieldRegistry(this.fs.taskSchema).parseInput("status", status) as string;
 	}
 
 	private async normalizePriority(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value.trim() === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const normalized = resolvePriorityValue(value, config);
-		if (!normalized) {
-			throw new Error(`Invalid priority: ${value}. Valid values are: ${formatValidPriorityValues(config)}`);
-		}
-		return normalized;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("priority", value) as string;
 	}
 
 	private async normalizeTaskType(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const canonical = resolveTaskTypeValue(value, config);
-		if (!canonical) {
-			throw new Error(`Invalid type: ${value}. Valid types are: ${formatValidTaskTypeValues(config)}`);
-		}
-		return canonical;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("type", value) as string;
 	}
 
 	private async normalizeProject(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const configuredProjects = getProjectValues(config);
-		if (configuredProjects.length === 0) {
-			throw new Error(noProjectsConfiguredMessage(this.fs.configFilePath));
-		}
-		const canonical = resolveProjectValue(value, config);
-		if (!canonical) {
-			throw new Error(`Invalid project: ${value}. Valid projects are: ${formatValidProjectValues(config)}`);
-		}
-		return canonical;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("project", value) as string;
 	}
 
 	/**
@@ -1511,7 +1475,7 @@ export class Core {
 				localTasks,
 				archivedTasks,
 				[],
-				config?.statuses ?? [...DEFAULT_STATUSES],
+				this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES],
 				config?.taskResolutionStrategy ?? "most_progressed",
 				null,
 				filesystem,
@@ -2240,11 +2204,15 @@ export class Core {
 			add: input.definitionOfDoneAdd,
 			disableDefaults: input.disableDefinitionOfDoneDefaults,
 		});
-		const resolvedStatus = isDraft ? "Draft" : status || config?.defaultStatus || FALLBACK_STATUS;
+		const resolvedStatus = isDraft
+			? "Draft"
+			: status || (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS;
 		// An absent assignee means "no opinion" and takes the configured default; an explicit
 		// assignee replaces it entirely, and an explicit empty list means "unassigned".
 		const resolvedAssignees =
-			input.assignee === undefined ? (normalizeStringList(config?.defaultAssignee) ?? []) : normalizedAssignees;
+			input.assignee === undefined
+				? (normalizeStringList(this.fs.taskSchema.fields.assignee?.default as string[] | undefined) ?? [])
+				: normalizedAssignees;
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
 
 		const { task, write } = await this.withCreateLock(async () => {
@@ -2277,7 +2245,9 @@ export class Core {
 				title: input.title.trim(),
 				status: resolvedStatus,
 				assignee: resolvedAssignees,
-				...(input.reporter || config?.defaultReporter ? { reporter: input.reporter ?? config?.defaultReporter } : {}),
+				...(input.reporter || this.fs.taskSchema.users.find((user) => user.default)?.handle
+					? { reporter: input.reporter ?? this.fs.taskSchema.users.find((user) => user.default)?.handle }
+					: {}),
 				labels: normalizedLabels,
 				dependencies: validDependencies,
 				references: normalizedReferences,
@@ -2365,8 +2335,7 @@ export class Core {
 
 	async createTask(task: Task, autoCommit?: boolean): Promise<string> {
 		if (!task.status) {
-			const config = await this.fs.loadConfig();
-			task.status = config?.defaultStatus || FALLBACK_STATUS;
+			task.status = (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS;
 		}
 
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
@@ -4069,8 +4038,7 @@ export class Core {
 	 */
 	async getTerminalStatusTasksByAge(olderThanDays: number): Promise<Task[]> {
 		const tasks = await this.fs.listTasks();
-		const config = await this.fs.loadConfig();
-		const statuses = config?.statuses ?? [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES];
 		const cutoffDate = new Date();
 		cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
@@ -4096,8 +4064,7 @@ export class Core {
 	 * Neither stops the others. {@link formatCleanupResult} words the result for both callers.
 	 */
 	async archiveTerminalStatusTasks(taskIds: string[]): Promise<CleanupResult> {
-		const config = await this.fs.loadConfig();
-		const statuses = config?.statuses ?? [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES];
 		const archivedTaskIds: string[] = [];
 		const skipped: Array<{ taskId: string; reason: string }> = [];
 		const failures: Array<{ taskId: string; reason: string }> = [];
@@ -4157,11 +4124,10 @@ export class Core {
 				const draft = await this.fs.loadDraftFromFile(sourcePath);
 				if (!draft) return null;
 
-				const config = await this.fs.loadConfig();
 				const newTaskId = await this.generateNextId(EntityType.Task, draft.parentTaskId);
 				const promotedStatus =
 					!draft.status || draft.status.trim().toLowerCase() === "draft"
-						? config?.defaultStatus || FALLBACK_STATUS
+						? (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS
 						: draft.status;
 
 				const promotedTask: Task = {
@@ -5085,9 +5051,8 @@ export class Core {
 		progressCallback?: (msg: string) => void,
 	): Promise<{ tasks: Task[]; drafts: Task[]; statuses: string[]; priorities: string[] }> {
 		const snapshot = await this.loadTaskCorpusSnapshot(progressCallback);
-		const config = snapshot.config;
-		const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
-		const priorities = config?.priorities ?? [];
+		const statuses = (this.fs.taskSchema.fields.status?.values || DEFAULT_STATUSES) as string[];
+		const priorities = this.fs.taskSchema.fields.priority?.values ?? [];
 		if (!snapshot.identityIndex) throw new Error("Task corpus identity index was not initialized");
 		const tasks = snapshot.identityIndex.getTasks(true);
 
@@ -5147,7 +5112,7 @@ export class Core {
 				activeTasks,
 				archivedTasks,
 				[],
-				config?.statuses ?? [...DEFAULT_STATUSES],
+				this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES],
 				config?.taskResolutionStrategy ?? "most_progressed",
 			);
 			return {
@@ -5203,7 +5168,7 @@ export class Core {
 				? retrySnapshot
 				: await this.getActiveBranchSnapshot(config, generation, filesystem, git);
 		if (projectChanged()) return await retryForCurrentProject();
-		const statuses = config?.statuses || [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values || [...DEFAULT_STATUSES];
 		const resolutionStrategy = config?.taskResolutionStrategy || "most_progressed";
 		const includeArchived = options.includeArchived ?? false;
 		const shouldLoadBranches = config?.checkActiveBranches !== false && config?.filesystemOnly !== true;

@@ -1,16 +1,10 @@
-import { type Dirent, existsSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import { lstat, mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
-import {
-	ARCHIVED_TASK_DIRECTORIES,
-	DEFAULT_DIRECTORIES,
-	DEFAULT_FILES,
-	DEFAULT_STATUSES,
-	FALLBACK_STATUS,
-} from "../constants/index.ts";
-import { parseFrontmatter, stringifyFrontmatter } from "../markdown/frontmatter.ts";
+import { ARCHIVED_TASK_DIRECTORIES, DEFAULT_DIRECTORIES, DEFAULT_FILES, FALLBACK_STATUS } from "../constants/index.ts";
+import { stringifyFrontmatter } from "../markdown/frontmatter.ts";
 import {
 	parseDecision,
 	parseDocument,
@@ -99,162 +93,10 @@ interface LockAttemptSettings {
 	retryDelayMs: number;
 }
 
-/** Config keys stored as YAML lists. `default_assignee` also accepts a single scalar. */
-type ConfigListKey = "statuses" | "labels" | "types" | "priorities" | "projects" | "default_assignee";
-
-/**
- * A mapping key line, whatever characters the name uses. Keys Backlog does not read still end the
- * previous key's block, so an unrelated `custom-setting:` cannot fold its value into the block being
- * extracted. A sequence item is not a key even when its text contains a colon.
- */
-const CONFIG_KEY_LINE_PATTERN = /^\s*(?!-\s)[^\s#][^:]*:/;
-
-/**
- * Extract the YAML block that carries one config key's value: its `key:` line plus the lines that
- * continue it, stopping at the next key written at the same or lower indentation. Returns nothing
- * when the key is absent. The last occurrence wins, which is what YAML does with a repeated key.
- *
- * A config key belongs at column 0, so an unindented line always outranks an indented look-alike:
- * without that rule a `statuses:` line nested inside another key's mapping or block scalar would
- * hijack the real key. Indented matches are used only when the key appears nowhere at column 0.
- */
-function extractConfigKeyYaml(content: string, key: string): string | undefined {
-	const lines = content.split(/\r?\n/);
-	const keyPattern = new RegExp(`^(\\s*)${key}\\s*:`);
-	const keyIndent = (line: string) => line.match(keyPattern)?.[1]?.length;
-	const startIndex = lines.some((line) => keyIndent(line) === 0)
-		? lines.findLastIndex((line) => keyIndent(line) === 0)
-		: lines.findLastIndex((line) => keyIndent(line) !== undefined);
-	if (startIndex === -1) {
-		return undefined;
-	}
-
-	const startIndent = keyIndent(lines[startIndex] ?? "") ?? 0;
-	const collected: string[] = [];
-
-	for (let index = startIndex; index < lines.length; index++) {
-		const line = lines[index] ?? "";
-		const trimmed = line.trim();
-		const indent = line.length - line.trimStart().length;
-		const isNextKey =
-			index > startIndex && trimmed.length > 0 && indent <= startIndent && CONFIG_KEY_LINE_PATTERN.test(line);
-
-		if (isNextKey) {
-			break;
-		}
-
-		// Keep legacy indented keys readable with Bun's stricter YAML parser.
-		collected.push(line.slice(Math.min(startIndent, indent)));
-	}
-
-	return collected.join("\n");
-}
-
 const CONFIG_VALUE_ERROR_NAME = "ConfigValueError";
 
-/** Reports a config value Backlog refuses to guess at, naming the file and the offending key. */
-function configValueError(configPath: string, key: string, problem: string, remedy: string): Error {
-	const error = new Error(
-		`Backlog could not start because ${configPath} has an invalid value for "${key}"${problem ? `: ${problem}` : ""}. ${remedy}`,
-	);
-	error.name = CONFIG_VALUE_ERROR_NAME;
-	return error;
-}
-
-/** Reports a value YAML could not read at all. */
-function configSyntaxError(configPath: string, key: string, reason: unknown): Error {
-	const detail = (reason instanceof Error ? reason.message : String(reason)).split("\n")[0]?.trim();
-	return configValueError(
-		configPath,
-		key,
-		detail ?? "",
-		"Edit that key so its value is valid YAML, then run the command again.",
-	);
-}
-
-/** Names the shape a rejected value turned out to have, for an error a person has to act on. */
-function describeConfigValue(value: unknown): string {
-	if (value === undefined) return "no value Backlog could read";
-	switch (typeof value) {
-		case "string":
-			return "a scalar";
-		case "number":
-			return "a number";
-		case "boolean":
-			return "a boolean";
-		default:
-			return "a mapping";
-	}
-}
-
-/** Reports a value YAML read fine but the key cannot hold, such as a scalar where a list belongs. */
-function configTypeError(configPath: string, key: ConfigListKey, value: unknown): Error {
-	const expected = key === "default_assignee" ? "a list or a single name" : "a list";
-	return configValueError(
-		configPath,
-		key,
-		`expected ${expected}, got ${describeConfigValue(value)}`,
-		`Edit that key so its value is ${expected}, then run the command again.`,
-	);
-}
-
-/** True when an error already explains an unreadable config value, so it needs no extra framing. */
 export function isConfigValueError(error: unknown): error is Error {
 	return error instanceof Error && error.name === CONFIG_VALUE_ERROR_NAME;
-}
-
-/** Read one key from a YAML document, reporting the parse error instead of a value when invalid. */
-function readYamlKey(document: string, key: string): { value: unknown } | { error: unknown } {
-	try {
-		return { value: (Bun.YAML.parse(document) as Record<string, unknown> | null)?.[key] };
-	} catch (error) {
-		return { error };
-	}
-}
-
-/**
- * Parse one list-valued config key as YAML, so quoting, escapes, block sequences, and trailing
- * comments are handled by the parser instead of by hand. The key's own block is what gets parsed, so a
- * malformed value for one key cannot change how another key reads; only a block YAML rejects outright
- * is reread in document context, where aliases resolve. Throws when neither read succeeds, and when the
- * value YAML read is not a shape the key can hold, so callers fail fast rather than proceed with a
- * guessed value. Returns nothing when the key is absent or carries no value; `default_assignee` also
- * accepts a single scalar name.
- */
-function parseConfigListValue(content: string, key: ConfigListKey, configPath: string): string[] | undefined {
-	const block = extractConfigKeyYaml(content, key);
-	if (block === undefined) {
-		return undefined;
-	}
-
-	const fromBlock = readYamlKey(block, key);
-	let parsed: unknown;
-	if ("value" in fromBlock) {
-		parsed = fromBlock.value;
-	} else {
-		// An alias resolves only against the anchors defined elsewhere in the file, so a block YAML
-		// rejects on its own gets one more read in document context before it counts as broken. The
-		// document is never read first: doing that is what let one broken key change how another reads.
-		const fromDocument = readYamlKey(content, key);
-		if (!("value" in fromDocument)) {
-			throw configSyntaxError(configPath, key, fromBlock.error);
-		}
-		parsed = fromDocument.value;
-	}
-
-	// `key:` with no value, including the first line of a block sequence.
-	if (parsed === null) {
-		return key === "default_assignee" ? [] : undefined;
-	}
-	if (Array.isArray(parsed)) {
-		return parsed.map((item) => String(item).trim()).filter((item) => item.length > 0);
-	}
-	// A single name is the legacy spelling of a one-entry default_assignee.
-	if (typeof parsed === "string" && key === "default_assignee") {
-		const assignee = parsed.trim();
-		return assignee ? [assignee] : [];
-	}
-	throw configTypeError(configPath, key, parsed);
 }
 
 const DEFAULT_CREATE_LOCK_TIMEOUT_MS = 30_000;
@@ -2342,21 +2184,7 @@ ${description || `Milestone: ${title}`}`,
 		// A value Backlog cannot read is reported, not swallowed: callers must not silently
 		// fall back to defaults while the config file says something else.
 		const config = this.parseConfig(content);
-		if (
-			existsSync(join(this.resolvedBacklogDir, "task-schema.yml")) ||
-			existsSync(join(this.resolvedBacklogDir, "fields.yml"))
-		) {
-			const schema = loadTaskSchema(this.resolvedBacklogDir, configPath);
-			config.statuses = schema.fields.status?.values ?? [];
-			config.defaultStatus = schema.fields.status?.default as string | undefined;
-			config.labels = schema.fields.labels?.values ?? [];
-			config.types = schema.fields.type?.values;
-			config.priorities = schema.fields.priority?.values;
-			config.projects = schema.fields.project?.values;
-			config.defaultAssignee = schema.fields.assignee?.default as string[] | undefined;
-			config.defaultReporter = schema.users.find((user) => user.default)?.handle;
-			config.definitionOfDone = undefined;
-		}
+		loadTaskSchema(this.resolvedBacklogDir, configPath);
 		this.cachedConfig = config;
 		this.cachedConfigSnapshot = { path: configPath, content };
 		return config;
@@ -2366,16 +2194,12 @@ ${description || `Milestone: ${title}`}`,
 		const normalizedConfig: BacklogConfig = {
 			...config,
 			...(this.configSource === "root" ? { backlogDirectory: this.resolvedBacklogDirName } : {}),
-			definitionOfDone: this.normalizeDefinitionOfDone(config.definitionOfDone),
 		};
 		if (this.configSource === "folder") {
 			delete normalizedConfig.backlogDirectory;
 		}
 		const configPath = this.resolvedConfigPath;
-		const content = this.serializeConfig(
-			normalizedConfig,
-			existsSync(join(this.resolvedBacklogDir, "task-schema.yml")),
-		);
+		const content = this.serializeConfig(normalizedConfig);
 		await Bun.write(configPath, content);
 		this.cachedConfig = normalizedConfig;
 		this.cachedConfigSnapshot = { path: configPath, content };
@@ -2405,15 +2229,6 @@ ${description || `Milestone: ${title}`}`,
 
 	parseConfig(content: string): BacklogConfig {
 		const config: Partial<BacklogConfig> = {};
-		const parsedDefinitionOfDone = this.parseDefinitionOfDone(content);
-		// Every list key goes through the same strict parse, which throws rather than guess.
-		const parseListValue = (key: ConfigListKey) => parseConfigListValue(content, key, this.resolvedConfigPath);
-		config.statuses = parseListValue("statuses");
-		config.labels = parseListValue("labels");
-		config.types = parseListValue("types");
-		config.priorities = parseListValue("priorities");
-		config.projects = parseListValue("projects");
-		config.defaultAssignee = parseListValue("default_assignee");
 		const lines = content.split("\n");
 
 		for (const line of lines) {
@@ -2429,17 +2244,6 @@ ${description || `Milestone: ${title}`}`,
 			switch (key) {
 				case "project_name":
 					config.projectName = value.replace(/['"]/g, "");
-					break;
-				case "default_reporter":
-					config.defaultReporter = value.replace(/['"]/g, "");
-					break;
-				case "default_status":
-					config.defaultStatus = value.replace(/['"]/g, "");
-					break;
-				case "definition_of_done":
-					if (parsedDefinitionOfDone !== undefined) {
-						config.definitionOfDone = parsedDefinitionOfDone;
-					}
 					break;
 				case "date_format":
 					config.dateFormat = value.replace(/['"]/g, "");
@@ -2498,15 +2302,8 @@ ${description || `Milestone: ${title}`}`,
 
 		return {
 			projectName: config.projectName || "",
-			defaultAssignee: config.defaultAssignee,
-			defaultReporter: config.defaultReporter,
-			statuses: config.statuses || [...DEFAULT_STATUSES],
-			labels: config.labels || [],
-			types: config.types,
-			priorities: config.priorities,
-			projects: config.projects,
-			definitionOfDone: config.definitionOfDone,
-			defaultStatus: config.defaultStatus,
+			statuses: [],
+			labels: [],
 			dateFormat: config.dateFormat || "yyyy-mm-dd",
 			maxColumnWidth: config.maxColumnWidth,
 			defaultEditor: config.defaultEditor,
@@ -2526,29 +2323,9 @@ ${description || `Milestone: ${title}`}`,
 		};
 	}
 
-	private serializeConfig(config: BacklogConfig, schemaMode = false): string {
-		const normalizedDefinitionOfDone = this.normalizeDefinitionOfDone(config.definitionOfDone);
+	private serializeConfig(config: BacklogConfig): string {
 		const lines = [
 			`project_name: "${config.projectName}"`,
-			...(!schemaMode && config.defaultAssignee?.length
-				? [`default_assignee: [${config.defaultAssignee.map((assignee) => JSON.stringify(assignee)).join(", ")}]`]
-				: []),
-			...(!schemaMode && config.defaultReporter ? [`default_reporter: "${config.defaultReporter}"`] : []),
-			...(!schemaMode && config.defaultStatus ? [`default_status: "${config.defaultStatus}"`] : []),
-			...(!schemaMode ? [`statuses: [${config.statuses.map((s) => `"${s}"`).join(", ")}]`] : []),
-			...(!schemaMode ? [`labels: [${config.labels.map((l) => `"${l}"`).join(", ")}]`] : []),
-			...(!schemaMode && config.types && config.types.length > 0
-				? [`types: [${config.types.map((t) => `"${t}"`).join(", ")}]`]
-				: []),
-			...(!schemaMode && config.priorities && config.priorities.length > 0
-				? [`priorities: [${config.priorities.map((p) => `"${p}"`).join(", ")}]`]
-				: []),
-			...(!schemaMode && config.projects && config.projects.length > 0
-				? [`projects: [${config.projects.map((p) => `"${p}"`).join(", ")}]`]
-				: []),
-			...(!schemaMode && Array.isArray(normalizedDefinitionOfDone)
-				? [`definition_of_done: [${normalizedDefinitionOfDone.map((item) => JSON.stringify(item)).join(", ")}]`]
-				: []),
 			`date_format: ${config.dateFormat}`,
 			...(config.maxColumnWidth ? [`max_column_width: ${config.maxColumnWidth}`] : []),
 			...(config.defaultEditor ? [`default_editor: "${config.defaultEditor}"`] : []),
@@ -2570,107 +2347,5 @@ ${description || `Milestone: ${title}`}`,
 		];
 
 		return `${lines.join("\n")}\n`;
-	}
-
-	private parseDefinitionOfDone(content: string): string[] | undefined {
-		const definitionOfDoneYaml = extractConfigKeyYaml(content, "definition_of_done");
-		const legacyEscapedDefinitionOfDoneYaml = definitionOfDoneYaml
-			? this.escapeLegacyDefinitionOfDoneBackslashes(definitionOfDoneYaml)
-			: undefined;
-		if (legacyEscapedDefinitionOfDoneYaml) {
-			const parsedLegacyDefinitionOfDone = this.parseDefinitionOfDoneFromYaml(legacyEscapedDefinitionOfDoneYaml);
-			if (parsedLegacyDefinitionOfDone !== undefined) {
-				return parsedLegacyDefinitionOfDone;
-			}
-		}
-
-		const parsedFromDocument = this.parseDefinitionOfDoneFromYaml(content);
-		if (parsedFromDocument !== undefined) {
-			return parsedFromDocument;
-		}
-
-		// Some legacy config values are accepted by the line parser but are not valid YAML.
-		return definitionOfDoneYaml ? this.parseDefinitionOfDoneFromYaml(definitionOfDoneYaml) : undefined;
-	}
-
-	private parseDefinitionOfDoneFromYaml(content: string): string[] | undefined {
-		try {
-			const { data } = parseFrontmatter(`---\n${content.trimEnd()}\n---\n`);
-			if (!Object.hasOwn(data, "definition_of_done")) {
-				return undefined;
-			}
-
-			const definitionOfDone = data.definition_of_done;
-			if (definitionOfDone === null) {
-				return [];
-			}
-
-			return this.normalizeDefinitionOfDone(definitionOfDone);
-		} catch {
-			return undefined;
-		}
-	}
-
-	private escapeLegacyDefinitionOfDoneBackslashes(content: string): string | undefined {
-		let escaped = "";
-		let quote: "'" | '"' | undefined;
-		let changed = false;
-
-		for (let index = 0; index < content.length; index++) {
-			const char = content[index];
-
-			if (quote) {
-				if (quote === '"' && char === "\\") {
-					let slashCount = 1;
-					while (content[index + slashCount] === "\\") {
-						slashCount++;
-					}
-
-					const nextChar = content[index + slashCount];
-					if (nextChar === '"' && slashCount % 2 === 1) {
-						escaped += "\\".repeat(slashCount);
-						escaped += nextChar;
-						index += slashCount;
-						continue;
-					}
-
-					const escapedSlashCount = slashCount % 2 === 1 ? slashCount + 1 : slashCount;
-					escaped += "\\".repeat(escapedSlashCount);
-					changed ||= escapedSlashCount !== slashCount;
-					index += slashCount - 1;
-					continue;
-				}
-
-				if (char === quote) {
-					escaped += char;
-					quote = undefined;
-					continue;
-				}
-
-				escaped += char;
-				continue;
-			}
-
-			if (char === "'" || char === '"') {
-				escaped += char;
-				quote = char;
-				continue;
-			}
-
-			escaped += char;
-		}
-
-		return changed ? escaped : undefined;
-	}
-
-	private normalizeDefinitionOfDone(definitionOfDone: unknown): string[] | undefined {
-		if (!Array.isArray(definitionOfDone)) {
-			return undefined;
-		}
-
-		return definitionOfDone
-			.filter((item): item is string => typeof item === "string")
-			.map((item) => item.trim())
-			.filter((item) => item.length > 0);
 	}
 }
