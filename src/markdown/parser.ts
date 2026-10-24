@@ -1,3 +1,5 @@
+import { FieldRegistry } from "../schema/field-registry.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type { AcceptanceCriterion, Decision, Document, Milestone, ParsedMarkdown, Task } from "../types/index.ts";
 import { type CustomFieldSchema, type CustomFieldValue, normalizeCustomFieldValue } from "../utils/custom-fields.ts";
 import { normalizeDueDate } from "../utils/due-date.ts";
@@ -79,7 +81,7 @@ function isStructuredDependency(value: unknown): boolean {
 	return Array.isArray(value) || Object.prototype.toString.call(value) === "[object Object]";
 }
 
-export function parseTask(content: string, schema?: CustomFieldSchema): Task {
+export function parseTask(content: string, schema?: CustomFieldSchema, taskSchema?: TaskSchema): Task {
 	const { frontmatter, content: rawContent } = parseMarkdown(content, ["created_date", "updated_date"]);
 	const id = String(frontmatter.id || "");
 	const customFields: Record<string, CustomFieldValue> = {};
@@ -96,6 +98,27 @@ export function parseTask(content: string, schema?: CustomFieldSchema): Task {
 	}
 	if (invalidFields.length) {
 		console.error(`Warning: task ${id || "(missing id)"} has invalid custom fields: ${invalidFields.join("; ")}`);
+	}
+	const fieldValues: Record<string, unknown> = {};
+	const unknownFields: Record<string, unknown> = {};
+	if (taskSchema) {
+		const registry = new FieldRegistry(taskSchema);
+		for (const [key, value] of Object.entries(frontmatter)) {
+			const definition = taskSchema.fields[key];
+			if (!definition) {
+				unknownFields[key] = value;
+				continue;
+			}
+			if (definition.core) continue;
+			fieldValues[key] = value;
+			try {
+				registry.validateValue(key, value);
+			} catch (error) {
+				console.error(
+					`Warning: task ${id || "(missing id)"} has invalid field ${key}: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
 	}
 	const dependencies = frontmatter.dependencies;
 	if (Array.isArray(dependencies)) {
@@ -151,6 +174,7 @@ export function parseTask(content: string, schema?: CustomFieldSchema): Task {
 		type: frontmatter.type ? String(frontmatter.type) : undefined,
 		project: frontmatter.project ? String(frontmatter.project) : undefined,
 		...(schema && Object.keys(schema.fields).length > 0 ? { customFields } : {}),
+		...(taskSchema ? { fieldValues, unknownFields } : {}),
 		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
 		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
 	};

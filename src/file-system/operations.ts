@@ -21,6 +21,7 @@ import {
 } from "../markdown/parser.ts";
 import { serializeDecision, serializeDocument, serializeTask } from "../markdown/serializer.ts";
 import { loadTaskSchema } from "../schema/index.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type {
 	BacklogConfig,
 	ContentRecord,
@@ -479,6 +480,11 @@ export class FileSystem {
 	}
 	get customFieldSchema(): CustomFieldSchema {
 		return loadCustomFieldSchema(this.resolvedBacklogDir);
+	}
+	get taskSchema(): TaskSchema | undefined {
+		return existsSync(join(this.resolvedBacklogDir, "task-schema.yml"))
+			? loadTaskSchema(this.resolvedBacklogDir, this.resolvedConfigPath)
+			: undefined;
 	}
 	get backlogDirName(): string {
 		return this.resolvedBacklogDirName;
@@ -964,7 +970,7 @@ export class FileSystem {
 		if (loadedFromPath) {
 			try {
 				originalContent ??= await Bun.file(loadedFromPath).text();
-				existingTask = parseTask(originalContent, this.customFieldSchema);
+				existingTask = parseTask(originalContent, this.customFieldSchema, this.taskSchema);
 			} catch (error) {
 				if (error instanceof TaskDependenciesParseError) throw error;
 				existingTask = null;
@@ -986,7 +992,7 @@ export class FileSystem {
 			id: persistedTaskId,
 			parentTaskId: persistedParentTaskId,
 		};
-		const content = serializeTask(normalizedTask, originalContent, this.customFieldSchema);
+		const content = serializeTask(normalizedTask, originalContent, this.customFieldSchema, this.taskSchema);
 
 		await this.writeRecordFile(filepath, content, loadedFromPath);
 		return filepath;
@@ -1060,7 +1066,7 @@ export class FileSystem {
 			if (!filepath) return null;
 
 			const content = await Bun.file(filepath).text();
-			const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema));
+			const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema, this.taskSchema));
 			return { ...task, filePath: filepath };
 		} catch (error) {
 			if (isAmbiguousTaskIdError(error) || error instanceof TaskDependenciesParseError) throw error;
@@ -1102,7 +1108,7 @@ export class FileSystem {
 			return structuredClone(cached.task);
 		}
 
-		const parsed = parseTask(content, schema);
+		const parsed = parseTask(content, schema, this.taskSchema);
 		if (cacheEpoch === this.taskParseCacheEpoch && this.taskFileReadGenerations.get(cacheKey) === generation) {
 			this.parsedTaskFiles.set(cacheKey, { content, schema, task: parsed });
 		}
@@ -1281,7 +1287,9 @@ export class FileSystem {
 	 */
 	async loadDraftFromFile(filePath: string): Promise<Task | null> {
 		try {
-			const task = normalizeTaskIdentity(parseTask(await Bun.file(filePath).text(), this.customFieldSchema));
+			const task = normalizeTaskIdentity(
+				parseTask(await Bun.file(filePath).text(), this.customFieldSchema, this.taskSchema),
+			);
 			return { ...task, filePath };
 		} catch {
 			return null;
@@ -1393,7 +1401,7 @@ export class FileSystem {
 		const originalFile = loadedFromPath ? Bun.file(loadedFromPath) : undefined;
 		const originalContent = sourceContent ?? ((await originalFile?.exists()) ? await originalFile?.text() : undefined);
 		// Normalize the draft ID to uppercase before serialization
-		const content = serializeTask({ ...task, id: draftId }, originalContent, this.customFieldSchema);
+		const content = serializeTask({ ...task, id: draftId }, originalContent, this.customFieldSchema, this.taskSchema);
 
 		await this.writeRecordFile(filepath, content, loadedFromPath);
 		return filepath;
@@ -1421,7 +1429,7 @@ export class FileSystem {
 			for (const file of taskFiles) {
 				const filepath = join(draftsDir, file);
 				const content = await Bun.file(filepath).text();
-				const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema));
+				const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema, this.taskSchema));
 				tasks.push({ ...task, filePath: filepath });
 			}
 
@@ -1447,7 +1455,7 @@ export class FileSystem {
 				try {
 					const filepath = join(draftsDir, file);
 					const content = await Bun.file(filepath).text();
-					const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema));
+					const task = normalizeTaskIdentity(parseTask(content, this.customFieldSchema, this.taskSchema));
 					tasks.push({ ...task, filePath: filepath });
 				} catch {}
 			}
@@ -1467,7 +1475,7 @@ export class FileSystem {
 		const filename = basename(filePath);
 		let task: Task;
 		try {
-			task = normalizeTaskIdentity(parseTask(await Bun.file(filePath).text(), this.customFieldSchema));
+			task = normalizeTaskIdentity(parseTask(await Bun.file(filePath).text(), this.customFieldSchema, this.taskSchema));
 		} catch {
 			throw new DraftParseError(filename);
 		}
@@ -1566,7 +1574,7 @@ export class FileSystem {
 			let parsed: Task | null;
 			try {
 				parsed = normalizeTaskIdentity(
-					parseTask(await Bun.file(join(draftsDir, filename)).text(), this.customFieldSchema),
+					parseTask(await Bun.file(join(draftsDir, filename)).text(), this.customFieldSchema, this.taskSchema),
 				);
 			} catch {
 				unreadable.push(filename);

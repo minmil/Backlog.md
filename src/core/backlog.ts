@@ -18,6 +18,7 @@ import { type GitBranchTip, type GitIndexEntry, GitOperations } from "../git/ope
 import { FrontmatterReferenceError, parseFrontmatter } from "../markdown/frontmatter.ts";
 import { extractSection, parseTask } from "../markdown/parser.ts";
 import { assertSectionInputHasNoMarkerLines, assertValidChecklistMarks } from "../markdown/structured-sections.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
 import {
 	type AcceptanceCriterion,
 	type BacklogConfig,
@@ -2199,6 +2200,26 @@ export class Core {
 		const priority = await this.normalizePriority(input.priority);
 		const type = await this.normalizeTaskType(input.type);
 		const project = await this.normalizeProject(input.project);
+		const taskSchema = this.fs.taskSchema;
+		const registry = taskSchema ? new FieldRegistry(taskSchema) : undefined;
+		const fieldValues: Record<string, unknown> = {};
+		if (registry && taskSchema) {
+			for (const key of Object.keys(input.fieldValues ?? {})) {
+				if (!taskSchema.fields[key] || taskSchema.fields[key].core)
+					throw new Error(`Unknown custom task field "${key}"`);
+			}
+			for (const [key, definition] of Object.entries(taskSchema.fields)) {
+				if (definition.core) continue;
+				const raw = input.fieldValues?.[key] ?? definition.default;
+				if (raw === undefined || raw === null || raw === "") {
+					if (definition.required) throw new Error(`Task field "${key}" is required`);
+					continue;
+				}
+				fieldValues[key] = registry.validateValue(key, raw);
+			}
+			if (input.reporter) registry.validateValue("reporter", input.reporter);
+			registry.validateValue("assignee", normalizedAssignees);
+		}
 		const customFieldSchema = this.fs.customFieldSchema;
 		const customFields = Object.fromEntries(
 			Object.entries(customFieldSchema.fields).flatMap(([name, definition]) =>
@@ -2268,6 +2289,7 @@ export class Core {
 				title: input.title.trim(),
 				status: resolvedStatus,
 				assignee: resolvedAssignees,
+				...(input.reporter || config?.defaultReporter ? { reporter: input.reporter ?? config?.defaultReporter } : {}),
 				labels: normalizedLabels,
 				dependencies: validDependencies,
 				references: normalizedReferences,
@@ -2281,6 +2303,8 @@ export class Core {
 				...(type && { type }),
 				...(project && { project }),
 				...(Object.keys(customFieldSchema.fields).length > 0 && { customFields }),
+				...(taskSchema && { fieldValues }),
+				...(input.onStatusChange && { onStatusChange: input.onStatusChange }),
 				...(typeof ordinal === "number" && { ordinal }),
 				...(typeof input.milestone === "string" &&
 					input.milestone.trim().length > 0 && {

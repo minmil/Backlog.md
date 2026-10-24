@@ -130,4 +130,17 @@ describe("task schema", () => {
 			true,
 		);
 	});
+
+	test("draft status is valid only for tasks stored as drafts", () => {
+		const directory = projectFiles();
+		mkdirSync(join(directory, "drafts"));
+		mkdirSync(join(directory, "tasks"));
+		const content = "---\nid: draft-1\ntitle: Draft\nstatus: Draft\ncreated_date: '2026-10-24T12:00:00Z'\n---\n";
+		writeFileSync(join(directory, "drafts", "draft-1.md"), content);
+		expect(validateTaskFiles(directory, getDefaultTaskSchema())).toEqual([]);
+		writeFileSync(join(directory, "tasks", "task-1.md"), content.replace("draft-1", "task-1"));
+		expect(validateTaskFiles(directory, getDefaultTaskSchema()).map((issue) => issue.message)).toContain(
+			"Expected one of: To Do, In Progress, Done",
+		);
+	});
 });

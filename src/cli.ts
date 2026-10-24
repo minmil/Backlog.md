@@ -55,6 +55,8 @@ import {
 } from "./index.ts";
 import { MilestoneHandlers, type MilestoneRemoveArgs } from "./mcp/tools/milestones/handlers.ts";
 import type { CallToolResult } from "./mcp/types.ts";
+import { applyCreateFieldAssignments } from "./schema/create-input.ts";
+import { FieldRegistry } from "./schema/field-registry.ts";
 import { loadTaskSchema } from "./schema/index.ts";
 import { validateTaskFiles } from "./schema/validate-tasks.ts";
 import {
@@ -70,6 +72,7 @@ import {
 	type SearchResult,
 	type SearchResultType,
 	type Task,
+	type TaskCreateInput,
 	type TaskListFilter,
 	type TaskSearchResult,
 	type TaskUpdateInput,
@@ -2171,7 +2174,10 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	)
 	.action(async (title: string | undefined, options) => {
 		const shouldUseWizard = hasInteractiveTTY && title === undefined && !hasCreateFieldFlags(options);
-		if (!shouldUseWizard && (title === undefined || title.trim().length === 0)) {
+		const hasFieldTitle = toStringArray(options.field).some(
+			(entry) => entry.startsWith("title=") && entry.slice(6).trim(),
+		);
+		if (!shouldUseWizard && (title === undefined || title.trim().length === 0) && !hasFieldTitle) {
 			printMissingRequiredArgument("title");
 			return;
 		}
@@ -2233,7 +2239,9 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			const criteria = processAcceptanceCriteriaOptions(options);
 			const milestone =
 				typeof options.milestone === "string" ? await resolveCliMilestoneInput(core, options.milestone) : undefined;
-			const { task, filePath } = await core.createTaskFromInput({
+			const fieldAssignments = parseCustomFieldFlags(options.field);
+			const schema = core.filesystem.taskSchema;
+			const createInput: TaskCreateInput = {
 				title: title ?? "",
 				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
 				status: createAsDraft ? "Draft" : options.status ? String(options.status) : undefined,
@@ -2248,7 +2256,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				priority: options.priority ? String(options.priority) : undefined,
 				type: options.type !== undefined ? String(options.type) : undefined,
 				project: options.project !== undefined ? String(options.project) : undefined,
-				customFields: parseCustomFieldFlags(options.field),
+				customFields: schema ? undefined : fieldAssignments,
 				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
 				milestone,
 				implementationPlan: options.plan ? String(options.plan) : undefined,
@@ -2257,7 +2265,11 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				acceptanceCriteria: criteria.map((text) => ({ text, checked: false })),
 				definitionOfDoneAdd: toStringArray(options.dod),
 				disableDefinitionOfDoneDefaults: options.dodDefaults === false,
-			});
+			};
+			const preparedInput = schema
+				? applyCreateFieldAssignments(new FieldRegistry(schema), createInput, fieldAssignments)
+				: createInput;
+			const { task, filePath } = await core.createTaskFromInput(preparedInput);
 
 			if (usePlainOutput) {
 				console.log(formatTaskPlainText(await loadTaskDetail(core, task), { filePathOverride: filePath }));

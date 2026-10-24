@@ -79,7 +79,7 @@ function valueIssue(type: string, value: unknown, values: string[] | undefined, 
 export function validateTaskFiles(backlogDir: string, schema: TaskSchema): SchemaIssue[] {
 	const issues: SchemaIssue[] = [];
 	const taskPaths = ["tasks", "drafts", "archive/tasks", "archive/drafts", "completed"].flatMap((name) =>
-		markdownFiles(join(backlogDir, name)),
+		markdownFiles(join(backlogDir, name)).map((path) => ({ path, isDraft: name.endsWith("drafts") })),
 	);
 	const milestonePaths = ["milestones", "archive/milestones"].flatMap((name) => markdownFiles(join(backlogDir, name)));
 	const milestones = new Set<string>();
@@ -94,10 +94,10 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 			});
 		}
 	}
-	const tasks: Array<{ path: string; data: Record<string, unknown> }> = [];
-	for (const path of taskPaths) {
+	const tasks: Array<{ path: string; data: Record<string, unknown>; isDraft: boolean }> = [];
+	for (const { path, isDraft } of taskPaths) {
 		try {
-			tasks.push({ path, data: parseMarkdown(readFileSync(path, "utf8")).frontmatter });
+			tasks.push({ path, data: parseMarkdown(readFileSync(path, "utf8")).frontmatter, isDraft });
 		} catch (error) {
 			issues.push({
 				key: path,
@@ -108,7 +108,7 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 	const ids = new Set(tasks.map(({ data }) => data.id).filter((id): id is string => typeof id === "string"));
 	const users = new Set(schema.users.map((user) => user.handle));
 	const references = new Map<string, string[]>();
-	for (const { path, data } of tasks) {
+	for (const { path, data, isDraft } of tasks) {
 		const taskRefs: string[] = [];
 		for (const [key, field] of Object.entries(schema.fields)) {
 			if (key === "branch") continue;
@@ -117,7 +117,8 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 				if (field.required) issues.push({ key: `${path}:${key}`, message: "Required value is missing" });
 				continue;
 			}
-			const problem = valueIssue(field.type, value, field.values, users);
+			const problem =
+				key === "status" && isDraft && value === "Draft" ? null : valueIssue(field.type, value, field.values, users);
 			if (problem) issues.push({ key: `${path}:${key}`, message: problem });
 			const refs =
 				field.type === "task-ref" ? [value] : field.type === "task-ref-list" && Array.isArray(value) ? value : [];

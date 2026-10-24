@@ -1,3 +1,4 @@
+import type { TaskSchema } from "../schema/types.ts";
 import type { AcceptanceCriterion, Decision, Document, Task } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
 import type { CustomFieldSchema } from "../utils/custom-fields.ts";
@@ -48,12 +49,20 @@ function commentItemsEqual(left: Task["comments"], right: Task["comments"]): boo
 	});
 }
 
-export function serializeTask(task: Task, originalContent = "", schema?: CustomFieldSchema): string {
+export function serializeTask(
+	task: Task,
+	originalContent = "",
+	schema?: CustomFieldSchema,
+	taskSchema?: TaskSchema,
+): string {
 	normalizeAssignee(task);
 	// Omitted optional fields are still owned: clearing one must not recover its original entry.
 	const frontmatter: Record<string, unknown> = taskFrontmatter(task);
 	for (const name of Object.keys(schema?.fields ?? {})) {
 		frontmatter[name] = task.customFields?.[name];
+	}
+	for (const [name, definition] of Object.entries(taskSchema?.fields ?? {})) {
+		if (!definition.core) frontmatter[name] = task.fieldValues?.[name];
 	}
 
 	let contentBody = task.rawContent ?? "";

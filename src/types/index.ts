@@ -81,6 +81,10 @@ export interface Task {
 	project?: string;
 	/** Values for keys declared in backlog/fields.yml. */
 	customFields?: Record<string, CustomFieldValue>;
+	/** Values for non-core keys declared in task-schema.yml. */
+	fieldValues?: Record<string, unknown>;
+	/** Undeclared frontmatter retained for read-only JSON output and lossless rewrites. */
+	unknownFields?: Record<string, unknown>;
 	branch?: string;
 	ordinal?: number;
 	filePath?: string;
@@ -128,6 +132,9 @@ export function isReadOnlyTask(task: Task): boolean {
 
 export interface TaskCreateInput {
 	title: string;
+	reporter?: string;
+	onStatusChange?: string;
+	fieldValues?: Record<string, unknown>;
 	dueDate?: string;
 	description?: string;
 	status?: TaskStatus;
