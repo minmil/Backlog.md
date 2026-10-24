@@ -58,7 +58,7 @@ describe("CLI parent shorthand option", () => {
 		expect(stdout).toContain("-p, --parent <taskId>");
 		expect(stdout).toContain("specify existing parent task ID, not a");
 		expect(stdout).toContain("milestone ID");
-		expect(stdout).toContain("--dod <item>");
-		expect(stdout).toContain("--no-dod-defaults");
+		expect(stdout).toContain("--add-item <id=text>");
+		expect(stdout).not.toContain("--no-dod-defaults");
 	});
 });

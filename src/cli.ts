@@ -715,6 +715,7 @@ function parseSectionIndices(raw: unknown, flag: string): Record<string, number[
 const REMOVED_SECTION_FLAGS: ReadonlyArray<[string, string]> = [
 	["ac", "--add-item acceptance=text"],
 	["acceptanceCriteria", "--add-item acceptance=text"],
+	["clearAc", "--remove-item acceptance:n for each item"],
 	["checkAc", "--check acceptance:n"],
 	["uncheckAc", "--uncheck acceptance:n"],
 	["removeAc", "--remove-item acceptance:n"],
@@ -4074,10 +4075,10 @@ function configureEditCommand(cmd: Command) {
 		.option("--notes <text>", "set implementation notes (replaces existing)")
 		.option(
 			"--comment <text>",
-			"append a task comment; standalone '---' lines are reserved (can be used multiple times)",
+			"append to the first configured log section; standalone '---' lines are reserved (repeatable)",
 			createMultiValueAccumulator(),
 		)
-		.option("--comment-author <author>", "author to record for appended comments")
+		.option("--comment-author <author>", "alias for --author when appending a log entry")
 		.option("--final-summary <text>", "set final summary (replaces existing)")
 		.option(
 			"--append-plan <text>",
@@ -4233,18 +4234,13 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: "Boolean",
 			description: "Remove all documentation; cannot combine with --doc, --add-doc, or --remove-doc",
 		},
-		{ name: "plan", type: "Markdown", description: "Replacement implementation plan" },
-		{
-			name: "append-plan",
-			type: "Markdown",
-			description: "Append after --plan replacement; repeatable",
-		},
-		{ name: "notes", type: "Markdown", description: "Replacement implementation notes" },
-		{ name: "append-notes", type: "Markdown", description: "Append to implementation notes; repeatable" },
-		{ name: "comment", type: "Markdown", description: "Append a discussion comment" },
-		{ name: "final-summary", type: "Markdown", description: "Completion summary" },
-		{ name: "append-final-summary", type: "Markdown", description: "Append to final summary; repeatable" },
-		{ name: "check-ac", type: "Integer", description: "1-based acceptance criterion index" },
+		{ name: "section", type: "id=text", description: "Replace a configured Markdown section; repeatable" },
+		{ name: "append-section", type: "id=text", description: "Append to a configured Markdown section; repeatable" },
+		{ name: "add-item", type: "id=text", description: "Add a configured checklist item; repeatable" },
+		{ name: "check", type: "id:n", description: "Check a configured checklist item" },
+		{ name: "uncheck", type: "id:n", description: "Uncheck a configured checklist item" },
+		{ name: "remove-item", type: "id:n", description: "Remove a configured checklist item" },
+		{ name: "comment", type: "Markdown", description: "Append to the first configured log section" },
 	],
 	writes: "Updates task metadata and structured task sections through Backlog.md",
 	output: "Updated task details; use --plain for text output",

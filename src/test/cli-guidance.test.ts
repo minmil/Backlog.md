@@ -126,7 +126,7 @@ describe("CLI Integration", () => {
 			expect(taskCreation).toContain(
 				"Repeat `--exclude-status` or pass comma-separated configured statuses to exclude multiple states.",
 			);
-			expect(taskCreation).toContain("omitting it applies the project's configured `defaultAssignee` when one is set");
+			expect(taskCreation).toContain("omitting it applies the default user from `task-schema.yml` when one is set");
 			expect(taskCreation).not.toContain('backlog task list --status "In Progress" --plain');
 			expect(taskCreation).toContain(
 				"Do not pass milestone IDs such as `m-0` to `--parent`; assign a task to a milestone with `--milestone`/`-m`.",
@@ -149,9 +149,9 @@ describe("CLI Integration", () => {
 				"Research the current system, including relevant code, tests, conventions, and recent changes",
 			);
 			expect(taskExecution).toContain("Record the current plan in the task before implementation");
-			expect(taskExecution).toContain("or more repeatable `--append-plan` values");
+			expect(taskExecution).toContain("repeat `--append-section id=text` to extend it");
 			expect(taskExecution).toContain(
-				'backlog task edit BACK-123 --plan "1. Revised approach" --append-plan "2. Verify it"',
+				'backlog task edit BACK-123 --section description="Revised approach" --append-section description="Verify it"',
 			);
 			expect(taskExecution).toContain(
 				"If the plan contains a material product, architecture, or workflow decision, or the project or user requires plan",
@@ -173,7 +173,7 @@ describe("CLI Integration", () => {
 			expect(conditionalReviewIndex).toBeGreaterThan(planIndex);
 			expect(implementIndex).toBeGreaterThan(conditionalReviewIndex);
 			expect(taskExecution).toContain(
-				"Do not check acceptance criteria, write the final summary, or move the task to the terminal status from this guide alone.",
+				"Do not check acceptance criteria or move the task to the terminal status from this guide alone.",
 			);
 			expect(taskExecution).toContain("verify each acceptance criterion with objective evidence before checking it");
 			expect(taskFinalization).toContain("configured final status");
@@ -329,12 +329,9 @@ describe("CLI Integration", () => {
 			expect(editHelpCompact).toContain(
 				'replace all task assignees with one or more @names (comma-separated or repeatable); pass "" to clear them',
 			);
-			expect(createHelpCompact).toContain(
-				"--plan <text> add a plan only for already-started work created directly in an active status (for example, In Progress)",
-			);
-			expect(createHelp).toContain(
-				"plan: Markdown - Only for already-started work created directly in a configured active status (for example, In Progress)",
-			);
+			expect(createHelp).toContain("section: id=text");
+			expect(createHelp).toContain("add-item: id=text");
+			expect(createHelp).not.toContain("--plan <text>");
 			expect(listHelp).toContain("status: one or more of configured statuses: To Do, In Progress, Done");
 			expect(listHelp).not.toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
 			expect(listHelp).toContain("priority: one of configured priorities: high, medium, low");
@@ -366,7 +363,10 @@ describe("CLI Integration", () => {
 			expect(editHelpCompact).toContain("add task labels without replacing existing labels");
 			expect(editHelpCompact).toContain("remove task labels without replacing others");
 			expect(editHelpCompact).toContain("remove all task labels");
-			expect(editHelp).toContain("plan: Markdown");
+			expect(editHelp).toContain("section: id=text");
+			expect(editHelp).toContain("append-section: id=text");
+			expect(editHelp).toContain("check: id:n");
+			expect(editHelp).not.toContain("--plan <text>");
 			expect(editHelp).toContain("Writes:");
 			expect(archiveHelp).toContain("move a task off the board into the archive, keeping its ID and links");
 			expect(archiveHelp).toContain("taskId: Task ID - Task to archive, in any status");
@@ -410,25 +410,12 @@ describe("CLI Integration", () => {
 				expect(help).toContain("Multi-line values need real newlines; a literal \\n is stored as text");
 				expect(help).toContain("Example (bash/zsh): --description $'First line\\nSecond line'");
 			}
-			for (const field of ["description", "plan", "notes", "final-summary"]) {
-				expect(createHelp).toContain(`${field}: Markdown`);
-			}
-			// final-summary states its own lifecycle rule; it does not borrow plan's "already-started" restriction.
-			expect(createHelp).toContain(
-				"final-summary: Markdown - Only for finished, verified work created directly in a configured terminal status",
-			);
-			for (const field of [
-				"description",
-				"plan",
-				"append-plan",
-				"notes",
-				"append-notes",
-				"comment",
-				"final-summary",
-				"append-final-summary",
-			]) {
-				expect(editHelp).toContain(`${field}: Markdown`);
-			}
+			expect(createHelp).toContain("description: Markdown");
+			expect(createHelp).toContain("section: id=text");
+			expect(editHelp).toContain("description: Markdown");
+			expect(editHelp).toContain("comment: Markdown");
+			expect(editHelp).toContain("section: id=text");
+			expect(editHelp).toContain("append-section: id=text");
 
 			// The shared note replaces the per-option copy instead of repeating it.
 			expect(createHelp).not.toContain("multi-line: include real newlines");
