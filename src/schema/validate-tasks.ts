@@ -107,7 +107,9 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 	}
 	const ids = new Set(tasks.map(({ data }) => data.id).filter((id): id is string => typeof id === "string"));
 	const users = new Set(schema.users.map((user) => user.handle));
+	const references = new Map<string, string[]>();
 	for (const { path, data } of tasks) {
+		const taskRefs: string[] = [];
 		for (const [key, field] of Object.entries(schema.fields)) {
 			if (key === "branch") continue;
 			const value = data[key];
@@ -122,11 +124,26 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 			for (const ref of refs) {
 				if (typeof ref === "string" && !ids.has(ref))
 					issues.push({ key: `${path}:${key}`, message: `Task ${ref} does not exist` });
+				else if (typeof ref === "string" && key !== "subtasks") taskRefs.push(ref);
 			}
 			if (field.type === "milestone-ref" && typeof value === "string" && !milestones.has(value)) {
 				issues.push({ key: `${path}:${key}`, message: `Milestone ${value} does not exist` });
 			}
 		}
+		if (typeof data.id === "string") references.set(data.id, taskRefs);
 	}
+	const visiting = new Set<string>();
+	const visited = new Set<string>();
+	const visit = (id: string): void => {
+		if (visited.has(id)) return;
+		visiting.add(id);
+		for (const ref of references.get(id) ?? []) {
+			if (visiting.has(ref)) issues.push({ key: id, message: `Task reference cycle includes ${ref}` });
+			else visit(ref);
+		}
+		visiting.delete(id);
+		visited.add(id);
+	};
+	for (const id of references.keys()) visit(id);
 	return issues;
 }

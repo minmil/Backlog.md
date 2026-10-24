@@ -68,7 +68,6 @@ export interface InitializeProjectOptions {
 		autoCommit?: boolean;
 		zeroPaddedIds?: number;
 		defaultEditor?: string;
-		definitionOfDone?: string[];
 		defaultPort?: number;
 		autoOpenBrowser?: boolean;
 		/** Custom task prefix (e.g., "JIRA"). Only set during first init, read-only after. */
@@ -137,7 +136,6 @@ export async function initializeProject(
 		: advancedConfig;
 	const hasDefaultEditorOverride = Object.hasOwn(normalizedAdvancedConfig, "defaultEditor");
 	const hasZeroPaddedIdsOverride = Object.hasOwn(normalizedAdvancedConfig, "zeroPaddedIds");
-	const hasDefinitionOfDoneOverride = Object.hasOwn(normalizedAdvancedConfig, "definitionOfDone");
 
 	// Build config, preserving existing values for re-initialization.
 	// Re-init should be idempotent for fields that init does not explicitly manage.
@@ -192,9 +190,6 @@ export async function initializeProject(
 		normalizedAdvancedConfig.zeroPaddedIds > 0
 			? { zeroPaddedIds: normalizedAdvancedConfig.zeroPaddedIds }
 			: {}),
-		...(hasDefinitionOfDoneOverride && Array.isArray(normalizedAdvancedConfig.definitionOfDone)
-			? { definitionOfDone: [...normalizedAdvancedConfig.definitionOfDone] }
-			: {}),
 	};
 	// Preserve all non-init-managed fields, but allow init-managed optional fields to be explicitly cleared.
 	if (hasDefaultEditorOverride && !normalizedAdvancedConfig.defaultEditor) {
@@ -206,9 +201,7 @@ export async function initializeProject(
 	) {
 		delete config.zeroPaddedIds;
 	}
-	if (hasDefinitionOfDoneOverride && !Array.isArray(normalizedAdvancedConfig.definitionOfDone)) {
-		delete config.definitionOfDone;
-	}
+	delete config.definitionOfDone;
 
 	// Create structure and save config
 	if (isReInitialization) {

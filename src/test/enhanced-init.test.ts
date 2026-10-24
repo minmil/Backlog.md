@@ -195,31 +195,20 @@ describe("Enhanced init command", () => {
 		expect(reloaded?.mcp?.http?.port).toBe(7777);
 	});
 
-	test("initializeProject should persist advanced Definition of Done defaults and allow clearing them", async () => {
+	test("initializeProject keeps body-section configuration in task-schema.yml", async () => {
 		const core = new Core(tmpDir);
 
 		await initializeProject(core, {
-			projectName: "Definition Defaults Init",
+			projectName: "Schema Sections Init",
 			integrationMode: "none",
-			advancedConfig: {
-				definitionOfDone: ["  Run tests  ", "", "Update docs", 1, null] as unknown as string[],
-			},
 		});
 
-		let loaded = await core.filesystem.loadConfig();
-		expect(loaded?.definitionOfDone).toEqual(["Run tests", "Update docs"]);
-
-		await initializeProject(core, {
-			projectName: "Definition Defaults Init",
-			integrationMode: "none",
-			existingConfig: loaded,
-			advancedConfig: {
-				definitionOfDone: [],
-			},
-		});
-
-		loaded = await core.filesystem.loadConfig();
-		expect(loaded?.definitionOfDone).toEqual([]);
+		const loaded = await core.filesystem.loadConfig();
+		expect(loaded?.definitionOfDone).toBeUndefined();
+		expect(await Bun.file(core.filesystem.configFilePath).text()).not.toContain("definition_of_done:");
+		expect(await Bun.file(`${core.filesystem.backlogDir}/task-schema.yml`).text()).toContain(
+			"acceptance: {kind: checklist",
+		);
 	});
 
 	test("should handle zero-padding configuration in init flow", async () => {

@@ -47,7 +47,6 @@ describe("Config commands", () => {
 			{ autoCommit: false },
 			{ enableZeroPadding: false },
 			{ editor: "" },
-			{ definitionOfDoneAction: "done" },
 			{ configureWebUI: false },
 			{ installClaudeAgent: false },
 		]);
@@ -65,12 +64,12 @@ describe("Config commands", () => {
 		expect(mergedConfig.autoCommit).toBe(false);
 		expect(mergedConfig.zeroPaddedIds).toBeUndefined();
 		expect(mergedConfig.defaultEditor).toBeUndefined();
-		expect(mergedConfig.definitionOfDone).toEqual([]);
+		expect(mergedConfig.definitionOfDone).toBeUndefined();
 		expect(mergedConfig.defaultPort).toBe(6420);
 		expect(mergedConfig.autoOpenBrowser).toBe(true);
 
 		const reloadedConfig = await core.filesystem.loadConfig();
-		expect(reloadedConfig?.definitionOfDone).toEqual([]);
+		expect(reloadedConfig?.definitionOfDone).toBeUndefined();
 		expect(reloadedConfig?.defaultPort).toBe(6420);
 		expect(reloadedConfig?.autoOpenBrowser).toBe(true);
 	});
@@ -86,9 +85,6 @@ describe("Config commands", () => {
 			{ enableZeroPadding: true },
 			{ paddingWidth: 4 },
 			{ editor: "backlog-test-editor" },
-			{ definitionOfDoneAction: "add" },
-			{ definitionOfDoneItem: "Ship release notes" },
-			{ definitionOfDoneAction: "done" },
 			{ configureWebUI: true },
 			{ defaultPort: 7007, autoOpenBrowser: false },
 			{ installClaudeAgent: true },
@@ -108,66 +104,27 @@ describe("Config commands", () => {
 		expect(mergedConfig.autoCommit).toBe(true);
 		expect(mergedConfig.zeroPaddedIds).toBe(4);
 		expect(mergedConfig.defaultEditor).toBe("backlog-test-editor");
-		expect(mergedConfig.definitionOfDone).toEqual(["Ship release notes"]);
+		expect(mergedConfig.definitionOfDone).toBeUndefined();
 		expect(mergedConfig.defaultPort).toBe(7007);
 		expect(mergedConfig.autoOpenBrowser).toBe(false);
 
 		const reloadedConfig = await core.filesystem.loadConfig();
 		expect(reloadedConfig?.zeroPaddedIds).toBe(4);
 		expect(reloadedConfig?.defaultEditor).toBe("backlog-test-editor");
-		expect(reloadedConfig?.definitionOfDone).toEqual(["Ship release notes"]);
+		expect(reloadedConfig?.definitionOfDone).toBeUndefined();
 		expect(reloadedConfig?.defaultPort).toBe(7007);
 		expect(reloadedConfig?.autoOpenBrowser).toBe(false);
 		expect(reloadedConfig?.bypassGitHooks).toBe(true);
 		expect(reloadedConfig?.autoCommit).toBe(true);
 	});
 
-	it("configureAdvancedSettings supports add/remove/reorder/clear actions for Definition of Done defaults", async () => {
-		const promptStub = createPromptStub([
-			{ installCompletions: false },
-			{ checkActiveBranches: true },
-			{ remoteOperations: true },
-			{ activeBranchDays: 30 },
-			{ bypassGitHooks: false },
-			{ autoCommit: false },
-			{ enableZeroPadding: false },
-			{ editor: "" },
-			{ definitionOfDoneAction: "add" },
-			{ definitionOfDoneItem: "  First item  " },
-			{ definitionOfDoneAction: "add" },
-			{ definitionOfDoneItem: "Second item" },
-			{ definitionOfDoneAction: "reorder" },
-			{ moveFromIndex: 2, moveToIndex: 1 },
-			{ definitionOfDoneAction: "remove" },
-			{ removeDefinitionOfDoneIndex: 2 },
-			{ definitionOfDoneAction: "clear" },
-			{ confirmClearDefinitionOfDone: true },
-			{ definitionOfDoneAction: "add" },
-			{ definitionOfDoneItem: "  Final item  " },
-			{ definitionOfDoneAction: "done" },
-			{ configureWebUI: false },
-			{ installClaudeAgent: false },
-		]);
-
-		const { mergedConfig } = await configureAdvancedSettings(core, {
-			promptImpl: promptStub,
-		});
-
-		expect(mergedConfig.definitionOfDone).toEqual(["Final item"]);
-		const reloadedConfig = await core.filesystem.loadConfig();
-		expect(reloadedConfig?.definitionOfDone).toEqual(["Final item"]);
-	});
-
 	describe("advanced wizard editor prompt", () => {
 		let originalEditor: string | undefined;
 
-		// Answers every prompt with the value it starts from, as pressing Enter would, and leaves
-		// the Definition of Done editor without adding an item.
+		// Answers every prompt with the value it starts from, as pressing Enter would.
 		const acceptStartingValues: PromptRunner = async (question) => {
 			const questions = Array.isArray(question) ? question : [question];
-			return Object.fromEntries(
-				questions.map(({ name, initial }) => [name, name === "definitionOfDoneAction" ? "done" : initial]),
-			);
+			return Object.fromEntries(questions.map(({ name, initial }) => [name, initial]));
 		};
 
 		beforeEach(() => {

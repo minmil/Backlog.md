@@ -118,5 +118,16 @@ describe("task schema", () => {
 		expect(validateTaskFiles(directory, getDefaultTaskSchema()).map((issue) => issue.message)).toContain(
 			"Task task-404 does not exist",
 		);
+		writeFileSync(
+			join(directory, "tasks", "task-1.md"),
+			"---\nid: task-1\ntitle: First\nstatus: To Do\ncreated_date: '2026-10-24T12:00:00Z'\ndependencies: [task-2]\n---\n",
+		);
+		writeFileSync(
+			join(directory, "tasks", "task-2.md"),
+			"---\nid: task-2\ntitle: Second\nstatus: To Do\ncreated_date: '2026-10-24T12:00:00Z'\ndependencies: [task-1]\n---\n",
+		);
+		expect(validateTaskFiles(directory, getDefaultTaskSchema()).some((issue) => issue.message.includes("cycle"))).toBe(
+			true,
+		);
 	});
 });

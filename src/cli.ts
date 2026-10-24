@@ -883,7 +883,6 @@ function getDefaultAdvancedConfig(existingConfig?: BacklogConfig | null): Partia
 		autoCommit: existingConfig?.autoCommit ?? false,
 		zeroPaddedIds: existingConfig?.zeroPaddedIds,
 		defaultEditor: existingConfig?.defaultEditor,
-		definitionOfDone: existingConfig?.definitionOfDone ? [...existingConfig.definitionOfDone] : undefined,
 		defaultPort: existingConfig?.defaultPort ?? 6420,
 		autoOpenBrowser: existingConfig?.autoOpenBrowser ?? true,
 	};
@@ -1868,7 +1867,6 @@ addHelpSchema(program.command("init [projectName]"), {
 						autoCommit: advancedConfig.autoCommit,
 						zeroPaddedIds: advancedConfig.zeroPaddedIds,
 						defaultEditor: advancedConfig.defaultEditor,
-						definitionOfDone: advancedConfig.definitionOfDone,
 						defaultPort: advancedConfig.defaultPort,
 						autoOpenBrowser: advancedConfig.autoOpenBrowser,
 						taskPrefix: taskPrefix || undefined,
@@ -1965,11 +1963,7 @@ addHelpSchema(program.command("init [projectName]"), {
 					if (config.defaultEditor) {
 						summaryLines.push(`  ${label("Default editor:")} ${config.defaultEditor}`);
 					}
-					summaryLines.push(
-						`  ${label("Definition of Done defaults:")} ${
-							(config.definitionOfDone ?? []).length > 0 ? config.definitionOfDone?.join(" | ") : muted("none")
-						}`,
-					);
+					summaryLines.push();
 				} else {
 					summaryLines.push(`${label("Advanced settings:")} ${muted("unchanged (run `backlog config` to customize)")}`);
 				}
