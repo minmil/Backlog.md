@@ -165,4 +165,27 @@ describe("schema section engine", () => {
 			{ author: "@alice", body: "Approved by client", date: "2026-10-23" },
 		]);
 	});
+
+	it("records tracked field changes once and skips them when no log section exists", async () => {
+		const path = createUniqueTestDir("schema-sections-tracked");
+		createdDirectories.push(path);
+		const core = new Core(path);
+		await initializeFilesystemTestProject(core, "Tracked fields");
+		await updateTestTaskSchema(core.filesystem, (value) => {
+			value.users = [{ handle: "@alice", name: "Alice", default: true }];
+			value.fields.side = { type: "enum", values: ["Client", "Us"], label: "Side", track_changes: true };
+		});
+		const created = await core.createTaskFromInput({ title: "Tracked task" }, false);
+		await core.updateTaskFromInput(created.task.id, { schemaFields: { side: "Client" } }, false);
+		await core.updateTaskFromInput(created.task.id, { schemaFields: { side: "Client" } }, false);
+		let reloaded = await core.filesystem.loadTask(created.task.id);
+		expect(reloaded?.sections?.log).toMatchObject([{ author: "@alice", auto: true, body: "Side: ∅ → Client" }]);
+		await updateTestTaskSchema(core.filesystem, (value) => {
+			delete value.sections.log;
+		});
+		await core.updateTaskFromInput(created.task.id, { schemaFields: { side: "Us" } }, false);
+		reloaded = await core.filesystem.loadTask(created.task.id);
+		expect(reloaded?.fieldValues?.side).toBe("Us");
+		expect(reloaded?.other).toContain("Side: ∅ → Client");
+	});
 });

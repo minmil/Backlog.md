@@ -297,8 +297,16 @@ describe("CLI JSON output", () => {
 		}
 	});
 
-	it("returns complete, partial, and empty acceptance-criteria progress across task JSON surfaces", async () => {
+	it("returns checklist sections in views and compact field objects in lists and search", async () => {
 		const core = new Core(TEST_DIR);
+		await core.updateTaskFromInput(
+			"task-1",
+			{
+				addSectionItems: { acceptance: ["Produces JSON"] },
+				checkSectionItems: { acceptance: [1] },
+			},
+			false,
+		);
 		await core.createTask(
 			{
 				id: "task-2",
@@ -308,10 +316,12 @@ describe("CLI JSON output", () => {
 				createdDate: "2026-07-15 09:00",
 				labels: [],
 				dependencies: [],
-				acceptanceCriteriaItems: [
-					{ index: 1, text: "Finished", checked: true },
-					{ index: 2, text: "Pending", checked: false },
-				],
+				sections: {
+					acceptance: [
+						{ index: 1, text: "Finished", checked: true },
+						{ index: 2, text: "Pending", checked: false },
+					],
+				},
 			},
 			false,
 		);
@@ -328,31 +338,31 @@ describe("CLI JSON output", () => {
 			false,
 		);
 
-		const expectedProgress = {
-			"TASK-1": { acceptanceCriteriaCompleted: 1, acceptanceCriteriaCount: 1 },
-			"TASK-2": { acceptanceCriteriaCompleted: 1, acceptanceCriteriaCount: 2 },
-			"TASK-3": { acceptanceCriteriaCompleted: 0, acceptanceCriteriaCount: 0 },
+		const expectedSections = {
+			"TASK-1": [{ index: 1, text: "Produces JSON", checked: true }],
+			"TASK-2": [
+				{ index: 1, text: "Finished", checked: true },
+				{ index: 2, text: "Pending", checked: false },
+			],
+			"TASK-3": [],
 		};
-		const progressById = (tasks: Array<Record<string, unknown>>) =>
-			Object.fromEntries(
-				tasks.map((task) => [
-					task.id,
-					{
-						acceptanceCriteriaCompleted: task.acceptanceCriteriaCompleted,
-						acceptanceCriteriaCount: task.acceptanceCriteriaCount,
-					},
-				]),
-			);
 
 		const list = await runCli(["task", "list", "--json"]);
 		expect(list.exitCode).toBe(0);
-		expect(progressById(JSON.parse(list.stdout.toString()).tasks)).toEqual(expectedProgress);
+		const listed = JSON.parse(list.stdout.toString()).tasks;
+		expect(listed).toHaveLength(3);
+		for (const task of listed) {
+			expect(task.fields).toBeDefined();
+			expect(task.sections).toBeUndefined();
+			expect(task.acceptanceCriteriaCount).toBeUndefined();
+		}
 
 		for (const id of ["1", "2", "3"]) {
 			const view = await runCli(["task", "view", id, "--json"]);
 			expect(view.exitCode).toBe(0);
 			const task = JSON.parse(view.stdout.toString()).task;
-			expect(progressById([task])).toEqual({ [task.id]: expectedProgress[task.id as keyof typeof expectedProgress] });
+			expect(task.sections.acceptance).toEqual(expectedSections[task.id as keyof typeof expectedSections]);
+			expect(typeof task.other).toBe("string");
 		}
 
 		const search = await runCli(["search", "JSON task", "--json"]);
@@ -360,9 +370,10 @@ describe("CLI JSON output", () => {
 		const taskResults = JSON.parse(search.stdout.toString()).results.filter(
 			(result: { type: string }) => result.type === "task",
 		);
-		expect(progressById(taskResults.map((result: { data: Record<string, unknown> }) => result.data))).toEqual(
-			expectedProgress,
-		);
+		for (const result of taskResults) {
+			expect(result.data.fields).toBeDefined();
+			expect(result.data.sections).toBeUndefined();
+		}
 	});
 
 	it("reads no task corpus for a search that matched no task", async () => {

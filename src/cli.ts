@@ -3465,6 +3465,7 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 				...(options.date ? { date: String(options.date) } : {}),
 			}));
 		}
+		if (options.author !== undefined) sectionChanges.actingUser = String(options.author);
 		const schema = core.filesystem.taskSchema;
 		{
 			const registry = new FieldRegistry(schema);

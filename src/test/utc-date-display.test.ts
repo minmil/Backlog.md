@@ -63,7 +63,7 @@ describe("UTC date display", () => {
 		);
 	});
 
-	it("adds UTC labels to plain task and comment date fields", () => {
+	it("adds UTC labels to plain task and log creation dates", () => {
 		const task: Task = {
 			id: "TASK-1",
 			title: "UTC plain output",
@@ -74,20 +74,14 @@ describe("UTC date display", () => {
 			labels: [],
 			dependencies: [],
 			description: "Task description",
-			comments: [
-				{
-					index: 1,
-					author: "@reviewer",
-					createdDate: "2026-06-07T23:54+02:00",
-					body: "Review note",
-				},
-			],
+			rawContent:
+				"## Log\n\n<!-- SECTION:LOG:BEGIN -->\nauthor: @reviewer\ndate: 2026-06-07\ncreated: 2026-06-07T23:54+02:00\n---\nReview note\n---\n<!-- SECTION:LOG:END -->",
 		};
 
 		const output = formatTaskPlainText(toTaskDetail(task, { tasks: [task], archivedTasks: [], statuses: undefined }));
 
 		expect(output).toContain("Created: 2026-06-07 (UTC)");
 		expect(output).toContain("Updated: 2026-06-07 21:54 (UTC)");
-		expect(output).toContain("#1 - @reviewer - 2026-06-07 21:54 (UTC)");
+		expect(output).toContain("@reviewer — 2026-06-07 (created 2026-06-07 21:54 (UTC))");
 	});
 });

@@ -2442,6 +2442,12 @@ export class Core {
 		}
 		let mutated = false;
 		const taskSchema = this.fs.taskSchema;
+		const trackedRegistry = new FieldRegistry(taskSchema);
+		const trackedBefore = Object.fromEntries(
+			Object.entries(taskSchema.fields)
+				.filter(([, definition]) => definition.track_changes)
+				.map(([key]) => [key, trackedRegistry.getField(task, key)]),
+		);
 		if (taskSchema) {
 			const registry = new FieldRegistry(taskSchema);
 			const apply = (key: string, next: Task): void => {
@@ -3064,6 +3070,16 @@ export class Core {
 		}
 
 		task.definitionOfDoneItems = definitionOfDone;
+		const trackedChanges = Object.entries(trackedBefore).flatMap(([key, previous]) => {
+			const next = trackedRegistry.getField(task, key);
+			if (JSON.stringify(previous) === JSON.stringify(next)) return [];
+			const label = taskSchema.fields[key]?.label ?? key;
+			const display = (value: typeof next) =>
+				value === undefined || value === "" || (Array.isArray(value) && value.length === 0)
+					? "∅"
+					: String(trackedRegistry.format(key, value, "plain"));
+			return [`${label}: ${display(previous)} → ${display(next)}`];
+		});
 
 		const sectionEditRequested = Boolean(
 			input.setSections ||
@@ -3073,7 +3089,8 @@ export class Core {
 				input.uncheckSectionItems ||
 				input.removeSectionItems ||
 				input.appendLog ||
-				input.appendLogs?.length,
+				input.appendLogs?.length ||
+				trackedChanges.length,
 		);
 		if (sectionEditRequested) {
 			const parsed = parseSections(task.rawContent ?? "", taskSchema);
@@ -3099,6 +3116,12 @@ export class Core {
 					entry.section ?? Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
 				if (!logId) throw new Error("No log section is configured in task-schema.yml.");
 				logAppend(parsed, logId, entry, taskSchema);
+			}
+			const trackedLogId = Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+			if (trackedLogId) {
+				for (const body of trackedChanges) {
+					logAppend(parsed, trackedLogId, { body, author: input.actingUser, auto: true }, taskSchema);
+				}
 			}
 			if (JSON.stringify(parsed.sections) !== before) {
 				task.sections = parsed.sections;

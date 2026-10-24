@@ -1,4 +1,5 @@
 import type { TaskDetail } from "../core/task-detail.ts";
+import { type LogEntry, parseSections, type ChecklistItem as SchemaChecklistItem } from "../markdown/sections.ts";
 import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
 import type { Task } from "../types/index.ts";
@@ -13,8 +14,6 @@ export type TaskPlainTextOptions = {
 	filePathOverride?: string;
 	registry?: FieldRegistry;
 };
-
-const plainDateDisplayOptions: UtcDateDisplayOptions = { appendUtcLabel: true };
 
 export function formatDateForDisplay(dateStr: string, options: UtcDateDisplayOptions = {}): string {
 	return formatUtcDateForDisplay(dateStr, options);
@@ -53,20 +52,6 @@ function formatSubtaskLines(subtasks: Array<{ id: string; title: string }>): str
 	return sorted.map((subtask) => `- ${subtask.id} - ${subtask.title}`);
 }
 
-function formatCommentHeader(
-	comment: NonNullable<Task["comments"]>[number],
-	dateOptions: UtcDateDisplayOptions = {},
-): string {
-	const parts = [`#${comment.index}`];
-	if (comment.author) {
-		parts.push(comment.author);
-	}
-	if (comment.createdDate) {
-		parts.push(formatDateForDisplay(comment.createdDate, dateOptions));
-	}
-	return parts.join(" - ");
-}
-
 /** The graph block task detail renders, with its heading, or no lines at all for an isolated task. */
 function formatDependencyGraphBlock(task: TaskDetail): string[] {
 	const graphLines = formatDependencyGraphLines(task.dependencyGraph);
@@ -95,7 +80,9 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 		const formatted =
 			key === "status" && typeof value === "string"
 				? `${formatStatusWithIcon(value)}${task.source === "archived" ? " (archived)" : ""}`
-				: registry.format(key, value, "plain");
+				: (key === "created_date" || key === "updated_date") && typeof value === "string"
+					? formatDateForDisplay(value, { appendUtcLabel: true })
+					: registry.format(key, value, "plain");
 		lines.push(`${label}: ${formatted}`);
 	}
 
@@ -114,74 +101,27 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	// Every plain task output is a detail read, so this replaces the raw dependency ID list entirely.
 	lines.push(...formatDependencyGraphBlock(task));
 
-	lines.push("");
-	lines.push("Description:");
-	lines.push("-".repeat(50));
-	const description = task.description?.trim();
-	lines.push(transformCodePathsPlain(description && description.length > 0 ? description : "No description provided"));
-	lines.push("");
-
-	lines.push("Acceptance Criteria:");
-	lines.push("-".repeat(50));
-	const criteriaItems = buildAcceptanceCriteriaItems(task);
-	if (criteriaItems.length > 0) {
-		lines.push(...formatAcceptanceCriteriaLines(criteriaItems));
-	} else {
-		lines.push("No acceptance criteria defined");
-	}
-	lines.push("");
-
-	lines.push("Definition of Done:");
-	lines.push("-".repeat(50));
-	const definitionItems = buildDefinitionOfDoneItems(task);
-	if (definitionItems.length > 0) {
-		lines.push(...formatAcceptanceCriteriaLines(definitionItems));
-	} else {
-		lines.push("No Definition of Done items defined");
-	}
-	lines.push("");
-
-	const implementationPlan = task.implementationPlan?.trim();
-	if (implementationPlan) {
-		lines.push("Implementation Plan:");
-		lines.push("-".repeat(50));
-		lines.push(transformCodePathsPlain(implementationPlan));
-		lines.push("");
-	}
-
-	const implementationNotes = task.implementationNotes?.trim();
-	if (implementationNotes) {
-		lines.push("Implementation Notes:");
-		lines.push("-".repeat(50));
-		lines.push(transformCodePathsPlain(implementationNotes));
-		lines.push("");
-	}
-
-	// Records what the work touched, so it belongs with the plan and the notes rather than with the
-	// metadata you read before starting.
-	if (task.modifiedFiles?.length) {
-		lines.push(`Modified files: ${task.modifiedFiles.join(", ")}`);
-		lines.push("");
-	}
-
-	const comments = (task.comments ?? []).filter((comment) => comment.body.trim().length > 0);
-	if (comments.length > 0) {
-		lines.push("Comments:");
-		lines.push("-".repeat(50));
-		for (const comment of comments) {
-			lines.push(formatCommentHeader(comment, plainDateDisplayOptions));
-			lines.push(transformCodePathsPlain(comment.body.trim()));
-			lines.push("");
+	const body = parseSections(task.rawContent ?? "", registry.schema);
+	for (const [id, definition] of Object.entries(registry.schema.sections)) {
+		const value = task.sections?.[id] ?? body.sections[id];
+		lines.push("", `${definition.title}:`, "-".repeat(50));
+		if (definition.kind === "markdown") {
+			lines.push(transformCodePathsPlain(String(value ?? "")));
+		} else if (definition.kind === "checklist") {
+			for (const [index, item] of ((value ?? []) as SchemaChecklistItem[]).entries()) {
+				lines.push(`- [${item.checked ? "x" : " "}] #${index + 1} ${transformCodePathsPlain(item.text)}`);
+			}
+		} else {
+			for (const entry of (value ?? []) as LogEntry[]) {
+				lines.push(
+					`${entry.author} — ${entry.date} (created ${formatDateForDisplay(entry.createdAt, { appendUtcLabel: true })})`,
+				);
+				if (entry.auto) lines.push("Automatic change");
+				lines.push(transformCodePathsPlain(entry.body), "");
+			}
 		}
 	}
-
-	const finalSummary = task.finalSummary?.trim();
-	if (finalSummary) {
-		lines.push("Final Summary:");
-		lines.push("-".repeat(50));
-		lines.push(transformCodePathsPlain(finalSummary));
-		lines.push("");
-	}
+	if (body.other.trim()) lines.push("", "Other:", "-".repeat(50), body.other);
 
 	return lines.join("\n");
 }

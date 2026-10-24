@@ -164,6 +164,7 @@ export interface TaskCreateInput {
 }
 
 export interface TaskUpdateInput {
+	actingUser?: string;
 	setSections?: Record<string, string>;
 	appendSections?: Record<string, string[]>;
 	addSectionItems?: Record<string, string[]>;
