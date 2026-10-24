@@ -33,11 +33,43 @@ function marker(id: string, kind: "BEGIN" | "END"): string {
 	return `<!-- SECTION:${id.toUpperCase()}:${kind} -->`;
 }
 
+function fencedRanges(body: string): Array<{ start: number; end: number }> {
+	const ranges: Array<{ start: number; end: number }> = [];
+	let offset = 0;
+	let open: { start: number; character: string; length: number } | undefined;
+	for (const lineWithEnding of body.match(/[^\n]*(?:\n|$)/g) ?? []) {
+		if (!lineWithEnding) break;
+		const line = lineWithEnding.replace(/\r?\n$/, "");
+		const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+		if (!open && fence) {
+			const run = fence[1] ?? "";
+			if (run[0] !== "`" || !(fence[2] ?? "").includes("`")) {
+				open = { start: offset, character: run[0] ?? "`", length: run.length };
+			}
+		} else if (open && fence) {
+			const run = fence[1] ?? "";
+			if (run[0] === open.character && run.length >= open.length && !(fence[2] ?? "").trim()) {
+				ranges.push({ start: open.start, end: offset + lineWithEnding.length });
+				open = undefined;
+			}
+		}
+		offset += lineWithEnding.length;
+	}
+	if (open) ranges.push({ start: open.start, end: body.length });
+	return ranges;
+}
+
 function sectionRanges(body: string, schema: TaskSchema): SectionRange[] {
 	const ranges: SectionRange[] = [];
+	const fences = fencedRanges(body);
+	const inFence = (position: number) => fences.some((range) => position >= range.start && position < range.end);
 	const opener = /^<!-- SECTION:([A-Z][A-Z0-9_]*):BEGIN -->\r?$/gm;
 	let match = opener.exec(body);
 	while (match) {
+		if (inFence(match.index)) {
+			match = opener.exec(body);
+			continue;
+		}
 		const id = match[1]?.toLowerCase() ?? "";
 		if (!schema.sections[id]) {
 			match = opener.exec(body);
@@ -45,7 +77,15 @@ function sectionRanges(body: string, schema: TaskSchema): SectionRange[] {
 		}
 		const startMarker = match.index;
 		const endMarker = marker(id, "END");
-		const close = body.indexOf(endMarker, opener.lastIndex);
+		let close = body.indexOf(endMarker, opener.lastIndex);
+		while (
+			close >= 0 &&
+			(inFence(close) ||
+				(close > 0 && body[close - 1] !== "\n") ||
+				!/^\r?(?:\n|$)/.test(body.slice(close + endMarker.length)))
+		) {
+			close = body.indexOf(endMarker, close + endMarker.length);
+		}
 		if (close < 0) {
 			match = opener.exec(body);
 			continue;
@@ -270,26 +310,30 @@ function sectionBlock(id: string, value: SectionValue, schema: TaskSchema): stri
 	return `## ${definition.title}\n\n${marker(id, "BEGIN")}\n${text}\n${marker(id, "END")}`;
 }
 
-/** Rewrites configured blocks in place; all text outside them stays byte-for-byte. */
+/** Writes configured blocks in schema order while retaining every outside-content gap byte-for-byte. */
 export function serializeSections(parsed: ParsedSections, schema: TaskSchema): string {
 	const ranges = sectionRanges(parsed.source, schema);
-	const used = new Set<string>();
+	const orderedIds = Object.keys(schema.sections).filter((id) =>
+		sectionBlock(id, parsed.sections[id] ?? emptyValue(schema.sections[id]?.kind ?? "markdown"), schema),
+	);
 	let output = "";
 	let cursor = 0;
-	for (const range of ranges) {
+	for (const [index, range] of ranges.entries()) {
 		output += parsed.source.slice(cursor, range.start);
-		const value = parsed.sections[range.id] ?? emptyValue(schema.sections[range.id]?.kind ?? "markdown");
-		const original = parseSections(parsed.source.slice(range.start, range.end), schema).sections[range.id];
-		output +=
-			JSON.stringify(original) === JSON.stringify(value)
-				? parsed.source.slice(range.start, range.end)
-				: sectionBlock(range.id, value, schema);
-		used.add(range.id);
+		const id = orderedIds[index];
+		if (id) {
+			const value = parsed.sections[id] ?? emptyValue(schema.sections[id]?.kind ?? "markdown");
+			const original =
+				id === range.id ? parseSections(parsed.source.slice(range.start, range.end), schema).sections[id] : undefined;
+			output +=
+				id === range.id && JSON.stringify(original) === JSON.stringify(value)
+					? parsed.source.slice(range.start, range.end)
+					: sectionBlock(id, value, schema);
+		}
 		cursor = range.end;
 	}
 	output += parsed.source.slice(cursor);
-	for (const id of Object.keys(schema.sections)) {
-		if (used.has(id)) continue;
+	for (const id of orderedIds.slice(ranges.length)) {
 		const block = sectionBlock(id, parsed.sections[id] ?? emptyValue(schema.sections[id]?.kind ?? "markdown"), schema);
 		if (block) output += `${output && !output.endsWith("\n\n") ? "\n\n" : ""}${block}`;
 	}

@@ -73,6 +73,7 @@ describe("Core", () => {
 			labels: ["test"],
 			dependencies: [],
 			description: "This is a test task",
+			sections: { description: "This is a test task" },
 		};
 
 		beforeEach(async () => {
@@ -961,7 +962,7 @@ describe("Core", () => {
 			const taskNoHeader: Task = {
 				...sampleTask,
 				id: "task-2",
-				description: "Just text",
+				sections: { description: "Just text" },
 			};
 
 			await core.createTask(taskNoHeader, false);
@@ -976,7 +977,7 @@ describe("Core", () => {
 			const taskWithHeader: Task = {
 				...sampleTask,
 				id: "task-3",
-				description: "Existing",
+				sections: { description: "Existing" },
 			};
 
 			await core.createTask(taskWithHeader, false);

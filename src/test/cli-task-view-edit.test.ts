@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { Core } from "../index.ts";
 import { serializeTask } from "../markdown/serializer.ts";
-import { extractStructuredSection } from "../markdown/structured-sections.ts";
 import { getTestCliPath } from "./test-cli.ts";
 import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
 
@@ -256,7 +255,7 @@ describe("CLI Integration", () => {
 			// Verify changes were persisted
 			const updatedTask = await core.filesystem.loadTask("task-1");
 			expect(updatedTask?.title).toBe("Updated Title");
-			expect(extractStructuredSection(updatedTask?.rawContent || "", "description")).toBe("Updated description");
+			expect(updatedTask?.sections?.description).toBe("Updated description");
 			expect(updatedTask?.status).toBe("In Progress");
 			const today = `${new Date().toISOString().slice(0, 16)}:00Z`;
 			expect(updatedTask?.updatedDate).toBe(today);

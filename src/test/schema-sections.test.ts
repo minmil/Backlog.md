@@ -86,6 +86,39 @@ describe("schema section engine", () => {
 		expect(parseSections(output, taskSchema).sections).toEqual(parsed.sections);
 	});
 
+	it("writes configured sections in schema order without changing outside text", () => {
+		const taskSchema = schema();
+		const body = [
+			"Preamble  \n\n",
+			"## Acceptance Criteria\n\n<!-- SECTION:ACCEPTANCE:BEGIN -->\n- [ ] #1 First\n<!-- SECTION:ACCEPTANCE:END -->",
+			"\n\nUnconfigured note  \n\n",
+			"## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nDetails\n<!-- SECTION:DESCRIPTION:END -->",
+			"\nTail\n",
+		].join("");
+		const parsed = parseSections(body, taskSchema);
+		const output = serializeSections(parsed, taskSchema);
+		expect(output.indexOf("<!-- SECTION:DESCRIPTION:BEGIN -->")).toBeLessThan(
+			output.indexOf("<!-- SECTION:ACCEPTANCE:BEGIN -->"),
+		);
+		expect(parseSections(output, taskSchema).other).toBe(parsed.other);
+		expect(parseSections(output, taskSchema).sections).toEqual(parsed.sections);
+	});
+
+	it("leaves section-looking markers inside fenced code in Other", () => {
+		const taskSchema = schema();
+		const body = [
+			"~~~markdown\n",
+			"<!-- SECTION:DESCRIPTION:BEGIN -->\n",
+			"Example only\n",
+			"<!-- SECTION:DESCRIPTION:END -->\n",
+			"~~~\n",
+		].join("");
+		const parsed = parseSections(body, taskSchema);
+		expect(parsed.sections.description).toBe("");
+		expect(parsed.other).toBe(body);
+		expect(serializeSections(parsed, taskSchema)).toBe(body);
+	});
+
 	it("rejects unknown authors and delimiter lines, and preserves removed sections as other", () => {
 		const taskSchema = schema();
 		const parsed = parseSections("", taskSchema);

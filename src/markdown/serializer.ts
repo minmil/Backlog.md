@@ -1,54 +1,10 @@
 import { getDefaultTaskSchema } from "../schema/index.ts";
 import type { TaskSchema } from "../schema/types.ts";
-import type { AcceptanceCriterion, Decision, Document, Task } from "../types/index.ts";
+import type { Decision, Document, Task } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
 import { stringifyFrontmatter } from "./frontmatter.ts";
 import { parseSections, serializeSections } from "./sections.ts";
-import {
-	AcceptanceCriteriaManager,
-	CommentsManager,
-	DefinitionOfDoneManager,
-	getStructuredSections,
-	updateStructuredSections,
-} from "./structured-sections.ts";
 import { taskFrontmatter } from "./task-frontmatter.ts";
-
-function normalizeOptionalText(value: string | undefined): string | undefined {
-	const trimmed = value?.trim();
-	return trimmed ? trimmed : undefined;
-}
-
-function sectionChanged(
-	rawContent: string,
-	key: keyof ReturnType<typeof getStructuredSections>,
-	nextValue: string,
-): boolean {
-	const existing = normalizeOptionalText(getStructuredSections(rawContent)[key]);
-	return existing !== normalizeOptionalText(nextValue);
-}
-
-function checklistItemsEqual(left: AcceptanceCriterion[], right: AcceptanceCriterion[]): boolean {
-	if (left.length !== right.length) return false;
-	return left.every((item, index) => {
-		const other = right[index];
-		return other?.index === item.index && other.checked === item.checked && other.text === item.text;
-	});
-}
-
-function commentItemsEqual(left: Task["comments"], right: Task["comments"]): boolean {
-	const leftComments = left ?? [];
-	const rightComments = right ?? [];
-	if (leftComments.length !== rightComments.length) return false;
-	return leftComments.every((item, index) => {
-		const other = rightComments[index];
-		return (
-			other?.index === item.index &&
-			other.body === item.body &&
-			other.createdDate === item.createdDate &&
-			other.author === item.author
-		);
-	});
-}
 
 export function serializeTask(
 	task: Task,
@@ -57,74 +13,20 @@ export function serializeTask(
 	suppliedSchema?: TaskSchema,
 ): string {
 	normalizeAssignee(task);
-	const taskSchema = suppliedSchema ?? getDefaultTaskSchema();
-	// Omitted optional fields are still owned: clearing one must not recover its original entry.
+	const schema = suppliedSchema ?? getDefaultTaskSchema();
 	const frontmatter: Record<string, unknown> = taskFrontmatter(task);
-	for (const [name, definition] of Object.entries(taskSchema.fields)) {
+	for (const [name, definition] of Object.entries(schema.fields)) {
 		if (!definition.core) frontmatter[name] = task.fieldValues?.[name];
 	}
 
-	let contentBody = task.rawContent ?? "";
-	const rawContent = task.rawContent ?? "";
-	if (typeof task.description === "string" && sectionChanged(rawContent, "description", task.description)) {
-		contentBody = updateTaskDescription(contentBody, task.description);
-	}
-	if (Array.isArray(task.acceptanceCriteriaItems)) {
-		const existingCriteria = AcceptanceCriteriaManager.parseAllCriteria(task.rawContent ?? "");
-		if (
-			task.acceptanceCriteriaItems.length === 0 ||
-			!checklistItemsEqual(existingCriteria, task.acceptanceCriteriaItems)
-		) {
-			contentBody = AcceptanceCriteriaManager.updateContent(contentBody, task.acceptanceCriteriaItems);
-		}
-	}
-	if (Array.isArray(task.definitionOfDoneItems)) {
-		const existingDefinitionOfDone = DefinitionOfDoneManager.parseAllCriteria(task.rawContent ?? "");
-		if (
-			task.definitionOfDoneItems.length === 0 ||
-			!checklistItemsEqual(existingDefinitionOfDone, task.definitionOfDoneItems)
-		) {
-			contentBody = DefinitionOfDoneManager.updateContent(contentBody, task.definitionOfDoneItems);
-		}
-	}
-	if (
-		typeof task.implementationPlan === "string" &&
-		sectionChanged(rawContent, "implementationPlan", task.implementationPlan)
-	) {
-		contentBody = updateTaskImplementationPlan(contentBody, task.implementationPlan);
-	}
-	if (
-		typeof task.implementationNotes === "string" &&
-		sectionChanged(rawContent, "implementationNotes", task.implementationNotes)
-	) {
-		contentBody = updateTaskImplementationNotes(contentBody, task.implementationNotes);
-	}
-	if (Array.isArray(task.comments)) {
-		const existingComments = CommentsManager.parseAllComments(task.rawContent ?? "");
-		const hasExistingComments = existingComments.length > 0;
-		if ((task.comments.length > 0 || hasExistingComments) && !commentItemsEqual(existingComments, task.comments)) {
-			contentBody = updateTaskComments(contentBody, task.comments);
-		}
-	}
-	if (typeof task.finalSummary === "string" && sectionChanged(rawContent, "finalSummary", task.finalSummary)) {
-		contentBody = updateTaskFinalSummary(contentBody, task.finalSummary);
-	}
+	const parsed = parseSections(task.rawContent ?? "", schema);
 	if (task.sections) {
-		const originalSections = parseSections(rawContent, taskSchema).sections;
-		const changedIds = Object.keys(taskSchema.sections).filter(
-			(id) => JSON.stringify(task.sections?.[id]) !== JSON.stringify(originalSections[id]),
-		);
-		if (changedIds.length > 0) {
-			const parsed = parseSections(contentBody, taskSchema);
-			for (const id of changedIds) {
-				parsed.sections[id] = task.sections[id] ?? (taskSchema.sections[id]?.kind === "markdown" ? "" : []);
-			}
-			contentBody = serializeSections(parsed, taskSchema);
+		for (const id of Object.keys(schema.sections)) {
+			if (task.sections[id] !== undefined) parsed.sections[id] = task.sections[id];
 		}
 	}
-
+	const contentBody = serializeSections(parsed, schema);
 	const serialized = stringifyFrontmatter(contentBody, frontmatter, originalContent);
-	// Ensure there's a blank line between frontmatter and content
 	return serialized.replace(/^(---\n(?:.*\n)*?---)\n(?!$)/, "$1\n\n");
 }
 
@@ -158,89 +60,4 @@ export function serializeDocument(document: Document, originalContent = ""): str
 	};
 
 	return stringifyFrontmatter(document.rawContent, frontmatter, originalContent);
-}
-
-export function updateTaskAcceptanceCriteria(content: string, criteria: string[]): string {
-	// Normalize to LF while computing, preserve original EOL at return
-	const useCRLF = /\r\n/.test(content);
-	const src = content.replace(/\r\n/g, "\n");
-	// Find if there's already an Acceptance Criteria section
-	const criteriaRegex = /## Acceptance Criteria\s*\n([\s\S]*?)(?=\n## |$)/i;
-	const match = src.match(criteriaRegex);
-
-	const newCriteria = criteria.map((criterion) => `- [ ] ${criterion}`).join("\n");
-	const newSection = `## Acceptance Criteria\n\n${newCriteria}`;
-
-	let out: string | undefined;
-	if (match) {
-		// Replace existing section
-		out = src.replace(criteriaRegex, newSection);
-	} else {
-		// Add new section at the end
-		out = `${src}\n\n${newSection}`;
-	}
-	return useCRLF ? out.replace(/\n/g, "\r\n") : out;
-}
-
-export function updateTaskImplementationPlan(content: string, plan: string): string {
-	const sections = getStructuredSections(content);
-	return updateStructuredSections(content, {
-		description: sections.description ?? "",
-		implementationPlan: plan,
-		implementationNotes: sections.implementationNotes ?? "",
-		finalSummary: sections.finalSummary ?? "",
-	});
-}
-
-export function updateTaskImplementationNotes(content: string, notes: string): string {
-	const sections = getStructuredSections(content);
-	return updateStructuredSections(content, {
-		description: sections.description ?? "",
-		implementationPlan: sections.implementationPlan ?? "",
-		implementationNotes: notes,
-		finalSummary: sections.finalSummary ?? "",
-	});
-}
-
-export function updateTaskFinalSummary(content: string, summary: string): string {
-	const sections = getStructuredSections(content);
-	return updateStructuredSections(content, {
-		description: sections.description ?? "",
-		implementationPlan: sections.implementationPlan ?? "",
-		implementationNotes: sections.implementationNotes ?? "",
-		finalSummary: summary,
-	});
-}
-
-export function updateTaskComments(content: string, comments: NonNullable<Task["comments"]>): string {
-	return CommentsManager.updateContent(content, comments);
-}
-
-export function appendTaskImplementationNotes(content: string, notesChunks: string | string[]): string {
-	const chunks = (Array.isArray(notesChunks) ? notesChunks : [notesChunks])
-		.map((c) => String(c))
-		.map((c) => c.replace(/\r\n/g, "\n"))
-		.map((c) => c.trim())
-		.filter(Boolean);
-
-	const sections = getStructuredSections(content);
-	const appendedBlock = chunks.join("\n\n");
-	const existingNotes = sections.implementationNotes?.trim();
-	const combined = existingNotes ? `${existingNotes}\n\n${appendedBlock}` : appendedBlock;
-	return updateStructuredSections(content, {
-		description: sections.description ?? "",
-		implementationPlan: sections.implementationPlan ?? "",
-		implementationNotes: combined,
-		finalSummary: sections.finalSummary ?? "",
-	});
-}
-
-export function updateTaskDescription(content: string, description: string): string {
-	const sections = getStructuredSections(content);
-	return updateStructuredSections(content, {
-		description,
-		implementationPlan: sections.implementationPlan ?? "",
-		implementationNotes: sections.implementationNotes ?? "",
-		finalSummary: sections.finalSummary ?? "",
-	});
 }

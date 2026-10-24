@@ -6,13 +6,6 @@ import { normalizeDueDate } from "../utils/due-date.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
 import { parseFrontmatter, preprocessFrontmatter } from "./frontmatter.ts";
 import { parseSections } from "./sections.ts";
-import {
-	AcceptanceCriteriaManager,
-	CommentsManager,
-	DefinitionOfDoneManager,
-	extractStructuredSection,
-	STRUCTURED_SECTION_KEYS,
-} from "./structured-sections.ts";
 
 function normalizeDate(value: unknown): string {
 	if (!value) return "";
@@ -115,17 +108,12 @@ export function parseTask(content: string, _legacySchema?: unknown, suppliedSche
 
 	const priority = normalizePriorityValue(frontmatter.priority ? String(frontmatter.priority) : undefined);
 
-	// Parse structured acceptance criteria (checked/text/index) from all sections
-	const structuredCriteria: AcceptanceCriterion[] = AcceptanceCriteriaManager.parseAllCriteria(rawContent);
-	const structuredDefinitionOfDone: AcceptanceCriterion[] = DefinitionOfDoneManager.parseAllCriteria(rawContent);
-	const comments = CommentsManager.parseAllComments(rawContent);
 	const parsedSections = parseSections(rawContent, taskSchema);
-
-	// Parse other sections
-	const descriptionSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.description) || "";
-	const planSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.implementationPlan) || undefined;
-	const notesSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.implementationNotes) || undefined;
-	const finalSummarySection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.finalSummary) || undefined;
+	// Legacy read-only projections keep existing browser/TUI callers rendering while those
+	// surfaces migrate. The schema section engine is the only body parser.
+	const descriptionSection = parsedSections.sections.description;
+	const acceptanceSection = parsedSections.sections.acceptance;
+	const logSection = parsedSections.sections.log;
 
 	return {
 		id,
@@ -149,13 +137,20 @@ export function parseTask(content: string, _legacySchema?: unknown, suppliedSche
 		rawContent,
 		sections: parsedSections.sections,
 		other: parsedSections.other,
-		acceptanceCriteriaItems: structuredCriteria,
-		definitionOfDoneItems: structuredDefinitionOfDone,
-		description: descriptionSection,
-		implementationPlan: planSection,
-		implementationNotes: notesSection,
-		comments,
-		finalSummary: finalSummarySection,
+		acceptanceCriteriaItems:
+			taskSchema.sections.acceptance?.kind === "checklist" && Array.isArray(acceptanceSection)
+				? (acceptanceSection as AcceptanceCriterion[])
+				: [],
+		definitionOfDoneItems: [],
+		description: typeof descriptionSection === "string" ? descriptionSection : "",
+		comments: Array.isArray(logSection)
+			? logSection.map((entry, index) => ({
+					index: index + 1,
+					body: "body" in entry ? entry.body : "",
+					author: "author" in entry ? entry.author : undefined,
+					createdDate: "createdAt" in entry ? entry.createdAt : "",
+				}))
+			: [],
 		parentTaskId: frontmatter.parent_task_id ? String(frontmatter.parent_task_id) : undefined,
 		subtasks: Array.isArray(frontmatter.subtasks) ? frontmatter.subtasks.map(String) : undefined,
 		priority,
