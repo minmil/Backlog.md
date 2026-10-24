@@ -42,7 +42,6 @@ import {
 	type TaskUpdateInput,
 } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
-import { normalizeCustomFieldAssignments } from "../utils/custom-fields.ts";
 import { decisionIdKey, decisionNotFoundMessage, findDecisionById } from "../utils/decision-id.ts";
 import { documentIdKey, documentNotFoundMessage, findDocumentById, normalizeDocumentId } from "../utils/document-id.ts";
 import { getDocumentSubPathFromRelativePath, normalizeDocumentSubPath } from "../utils/document-path.ts";
@@ -326,7 +325,6 @@ function buildUpdatedDateComparableTask(task: Task): Record<string, unknown> {
 		type: task.type,
 		project: task.project,
 		fieldValues: task.fieldValues ?? {},
-		customFields: task.customFields ?? {},
 		onStatusChange: task.onStatusChange,
 	};
 }
@@ -680,7 +678,7 @@ export class Core {
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.customFieldSchema);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.taskSchema);
 		// Disable watchers by default for CLI commands (non-interactive)
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
@@ -1659,7 +1657,7 @@ export class Core {
 		this.disposeContentStore();
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.customFieldSchema);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.taskSchema);
 	}
 
 	disposeSearchService(): void {
@@ -2203,34 +2201,24 @@ export class Core {
 		const type = await this.normalizeTaskType(input.type);
 		const project = await this.normalizeProject(input.project);
 		const taskSchema = this.fs.taskSchema;
-		const registry = taskSchema ? new FieldRegistry(taskSchema) : undefined;
+		const registry = new FieldRegistry(taskSchema);
+		if (input.customFields && Object.keys(input.customFields).length > 0)
+			throw new Error("customFields was removed; supply fieldValues using task-schema.yml field keys");
 		const fieldValues: Record<string, unknown> = {};
-		if (registry && taskSchema) {
-			for (const key of Object.keys(input.fieldValues ?? {})) {
-				if (!taskSchema.fields[key] || taskSchema.fields[key].core)
-					throw new Error(`Unknown custom task field "${key}"`);
-			}
-			for (const [key, definition] of Object.entries(taskSchema.fields)) {
-				if (definition.core) continue;
-				const raw = input.fieldValues?.[key] ?? definition.default;
-				if (raw === undefined || raw === null || raw === "") {
-					if (definition.required) throw new Error(`Task field "${key}" is required`);
-					continue;
-				}
-				fieldValues[key] = registry.validateValue(key, raw);
-			}
-			if (input.reporter) registry.validateValue("reporter", input.reporter);
-			registry.validateValue("assignee", normalizedAssignees);
+		for (const key of Object.keys(input.fieldValues ?? {})) {
+			if (!taskSchema.fields[key] || taskSchema.fields[key].core) throw new Error(`Unknown custom task field "${key}"`);
 		}
-		const customFieldSchema = this.fs.customFieldSchema;
-		const customFields = Object.fromEntries(
-			Object.entries(customFieldSchema.fields).flatMap(([name, definition]) =>
-				definition.default !== undefined ? [[name, definition.default]] : [],
-			),
-		);
-		const customFieldInput = normalizeCustomFieldAssignments(customFieldSchema, input.customFields);
-		Object.assign(customFields, customFieldInput.values);
-		for (const name of customFieldInput.clear) delete customFields[name];
+		for (const [key, definition] of Object.entries(taskSchema.fields)) {
+			if (definition.core) continue;
+			const raw = input.fieldValues?.[key] ?? definition.default;
+			if (raw === undefined || raw === null || raw === "") {
+				if (definition.required) throw new Error(`Task field "${key}" is required`);
+				continue;
+			}
+			fieldValues[key] = registry.validateValue(key, raw);
+		}
+		if (input.reporter) registry.validateValue("reporter", input.reporter);
+		registry.validateValue("assignee", normalizedAssignees);
 		const createdDate = formatUtcTimestamp();
 		if (
 			input.ordinal !== undefined &&
@@ -2304,8 +2292,7 @@ export class Core {
 				...(priority && { priority }),
 				...(type && { type }),
 				...(project && { project }),
-				...(Object.keys(customFieldSchema.fields).length > 0 && { customFields }),
-				...(taskSchema && { fieldValues }),
+				fieldValues,
 				...(input.onStatusChange && { onStatusChange: input.onStatusChange }),
 				...(typeof ordinal === "number" && { ordinal }),
 				...(typeof input.milestone === "string" &&
@@ -2450,11 +2437,8 @@ export class Core {
 		statusResolver: (status: string) => Promise<string>,
 	): Promise<{ task: Task; mutated: boolean }> {
 		assertSectionInputsSafe(input);
-		const customFieldUpdates = normalizeCustomFieldAssignments(
-			this.fs.customFieldSchema,
-			input.customFields,
-			input.clearCustomFields,
-		);
+		if ((input.customFields && Object.keys(input.customFields).length > 0) || input.clearCustomFields?.length)
+			throw new Error("customFields was removed; use schemaFields or clearSchemaFields");
 		if (
 			input.acceptanceCriteria !== undefined ||
 			input.removeAcceptanceCriteria?.length ||
@@ -2471,19 +2455,6 @@ export class Core {
 			assertValidChecklistMarks(task.rawContent ?? "", "DOD");
 		}
 		let mutated = false;
-		for (const name of customFieldUpdates.clear) {
-			if (task.customFields && Object.hasOwn(task.customFields, name)) {
-				delete task.customFields[name];
-				mutated = true;
-			}
-		}
-		for (const [name, value] of Object.entries(customFieldUpdates.values)) {
-			if (task.customFields?.[name] !== value) {
-				if (!task.customFields) task.customFields = {};
-				task.customFields[name] = value;
-				mutated = true;
-			}
-		}
 		const taskSchema = this.fs.taskSchema;
 		if (taskSchema) {
 			const registry = new FieldRegistry(taskSchema);
@@ -4960,7 +4931,7 @@ export class Core {
 		const reloadTaskAfterEdit = async (path: string): Promise<{ task: Task } | { failure: "unreadable" }> => {
 			try {
 				const content = await Bun.file(path).text();
-				const reparsed = normalizeTaskIdentity(parseTask(content, this.fs.customFieldSchema));
+				const reparsed = normalizeTaskIdentity(parseTask(content, undefined, this.fs.taskSchema));
 				return { task: { ...reparsed, filePath: path } };
 			} catch {
 				return { failure: "unreadable" };

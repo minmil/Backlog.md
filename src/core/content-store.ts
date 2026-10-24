@@ -1111,7 +1111,9 @@ export class ContentStore {
 						readEventPath: async () => {
 							if (!(await Bun.file(fullPath).exists())) return null;
 							const task = {
-								...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text(), this.filesystem.customFieldSchema)),
+								...normalizeTaskIdentity(
+									parseTask(await Bun.file(fullPath).text(), undefined, this.filesystem.taskSchema),
+								),
 								filePath: fullPath,
 							};
 							return task;
@@ -1127,7 +1129,7 @@ export class ContentStore {
 								async (candidatePath) => {
 									const task = {
 										...normalizeTaskIdentity(
-											parseTask(await Bun.file(candidatePath).text(), this.filesystem.customFieldSchema),
+											parseTask(await Bun.file(candidatePath).text(), undefined, this.filesystem.taskSchema),
 										),
 										filePath: candidatePath,
 									};
@@ -1164,7 +1166,9 @@ export class ContentStore {
 					}
 					try {
 						const task = {
-							...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text(), this.filesystem.customFieldSchema)),
+							...normalizeTaskIdentity(
+								parseTask(await Bun.file(fullPath).text(), undefined, this.filesystem.taskSchema),
+							),
 							filePath: fullPath,
 						};
 						if (!taskIdsEqual(task.id, normalizedTaskId)) {
@@ -1445,7 +1449,7 @@ export class ContentStore {
 			const owner: PublicationOwner = { root: this.currentRoot() };
 			const result = await originalSaveTask.call(this.filesystem, task, originalContent);
 			const savedTask = {
-				...normalizeTaskIdentity(parseTask(await Bun.file(result).text(), this.filesystem.customFieldSchema)),
+				...normalizeTaskIdentity(parseTask(await Bun.file(result).text(), undefined, this.filesystem.taskSchema)),
 				filePath: result,
 			};
 			await this.updateTaskFromDisk(task.id, owner, savedTask);

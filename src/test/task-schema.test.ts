@@ -103,6 +103,14 @@ describe("task schema", () => {
 		expect(() => loadTaskSchema(directory)).toThrow(/Replace fields.yml/);
 	});
 
+	test("projects without task-schema.yml load the built-in schema", () => {
+		const directory = projectFiles();
+		rmSync(join(directory, "task-schema.yml"));
+		const schema = loadTaskSchema(directory);
+		expect(schema.fields.status?.values).toEqual(["To Do", "In Progress", "Done"]);
+		expect(schema.fields.project?.values).toEqual([]);
+	});
+
 	test("stored task validation reports broken references", () => {
 		const directory = projectFiles();
 		mkdirSync(join(directory, "tasks"));

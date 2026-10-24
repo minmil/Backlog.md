@@ -1,7 +1,7 @@
 import { FieldRegistry } from "../schema/field-registry.ts";
+import { getDefaultTaskSchema } from "../schema/index.ts";
 import type { TaskSchema } from "../schema/types.ts";
 import type { AcceptanceCriterion, Decision, Document, Milestone, ParsedMarkdown, Task } from "../types/index.ts";
-import { type CustomFieldSchema, type CustomFieldValue, normalizeCustomFieldValue } from "../utils/custom-fields.ts";
 import { normalizeDueDate } from "../utils/due-date.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
 import { parseFrontmatter, preprocessFrontmatter } from "./frontmatter.ts";
@@ -81,43 +81,27 @@ function isStructuredDependency(value: unknown): boolean {
 	return Array.isArray(value) || Object.prototype.toString.call(value) === "[object Object]";
 }
 
-export function parseTask(content: string, schema?: CustomFieldSchema, taskSchema?: TaskSchema): Task {
+export function parseTask(content: string, _legacySchema?: unknown, suppliedSchema?: TaskSchema): Task {
 	const { frontmatter, content: rawContent } = parseMarkdown(content, ["created_date", "updated_date"]);
 	const id = String(frontmatter.id || "");
-	const customFields: Record<string, CustomFieldValue> = {};
-	const invalidFields: string[] = [];
-	for (const [name, definition] of Object.entries(schema?.fields ?? {})) {
-		if (!Object.hasOwn(frontmatter, name)) continue;
-		const normalized = normalizeCustomFieldValue(definition, frontmatter[name]);
-		if (normalized.ok) {
-			if (normalized.value !== undefined) customFields[name] = normalized.value;
-		} else {
-			customFields[name] = String(frontmatter[name]);
-			invalidFields.push(`${name}: ${normalized.error}`);
-		}
-	}
-	if (invalidFields.length) {
-		console.error(`Warning: task ${id || "(missing id)"} has invalid custom fields: ${invalidFields.join("; ")}`);
-	}
+	const taskSchema = suppliedSchema ?? getDefaultTaskSchema();
 	const fieldValues: Record<string, unknown> = {};
 	const unknownFields: Record<string, unknown> = {};
-	if (taskSchema) {
-		const registry = new FieldRegistry(taskSchema);
-		for (const [key, value] of Object.entries(frontmatter)) {
-			const definition = taskSchema.fields[key];
-			if (!definition) {
-				unknownFields[key] = value;
-				continue;
-			}
-			if (definition.core) continue;
-			fieldValues[key] = value;
-			try {
-				registry.validateValue(key, value);
-			} catch (error) {
-				console.error(
-					`Warning: task ${id || "(missing id)"} has invalid field ${key}: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
+	const registry = new FieldRegistry(taskSchema);
+	for (const [key, value] of Object.entries(frontmatter)) {
+		const definition = taskSchema.fields[key];
+		if (!definition) {
+			unknownFields[key] = value;
+			continue;
+		}
+		if (definition.core) continue;
+		fieldValues[key] = value;
+		try {
+			registry.validateValue(key, value);
+		} catch (error) {
+			console.error(
+				`Warning: task ${id || "(missing id)"} has invalid field ${key}: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 	const dependencies = frontmatter.dependencies;
@@ -173,8 +157,8 @@ export function parseTask(content: string, schema?: CustomFieldSchema, taskSchem
 		priority,
 		type: frontmatter.type ? String(frontmatter.type) : undefined,
 		project: frontmatter.project ? String(frontmatter.project) : undefined,
-		...(schema && Object.keys(schema.fields).length > 0 ? { customFields } : {}),
-		...(taskSchema ? { fieldValues, unknownFields } : {}),
+		fieldValues,
+		unknownFields,
 		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
 		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
 	};

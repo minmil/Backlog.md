@@ -415,11 +415,7 @@ export function loadTaskSchema(backlogDir: string, configPath = join(backlogDir,
 				configPath,
 			);
 	}
-	if (!existsSync(schemaPath))
-		throw new TaskSchemaError(
-			[{ key: "task-schema.yml", message: "Missing required task schema; run backlog init or create this file" }],
-			schemaPath,
-		);
+	if (!existsSync(schemaPath)) return getDefaultTaskSchema();
 	return parseTaskSchema(readFileSync(schemaPath, "utf8"), schemaPath);
 }
 

@@ -12,8 +12,8 @@ import { parseStoredUtcDate } from "../utils/utc-timestamp.ts";
 import { ARCHIVED_TASK_DIRECTORIES, DEFAULT_DIRECTORIES } from "../constants/index.ts";
 import type { GitBranchTip, GitOperations } from "../git/operations.ts";
 import { parseTask } from "../markdown/parser.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type { BacklogConfig, Task } from "../types/index.ts";
-import type { CustomFieldSchema } from "../utils/custom-fields.ts";
 import { extractAnyPrefix } from "../utils/prefix-config.ts";
 import {
 	canonicalTaskId,
@@ -334,7 +334,7 @@ export class BranchTaskLoader {
 
 	constructor(
 		private readonly git: GitOperations,
-		private readonly getCustomFieldSchema?: () => CustomFieldSchema,
+		private readonly getTaskSchema?: () => TaskSchema,
 	) {}
 
 	clear(): void {
@@ -557,7 +557,7 @@ export class BranchTaskLoader {
 		if (!cached) {
 			const promise = this.git.showFile(commit, path).then((content) => {
 				try {
-					return normalizeTaskIdentity(parseTask(content, this.getCustomFieldSchema?.()));
+					return normalizeTaskIdentity(parseTask(content, undefined, this.getTaskSchema?.()));
 				} catch (error) {
 					console.error(`Failed to parse task ${commit}:${path}`, error);
 					return null;

@@ -86,7 +86,6 @@ import { scrollableViewer } from "./ui/tui.ts";
 import { type AgentSelectionValue, processAgentSelection } from "./utils/agent-selection.ts";
 import { normalizeProjectBacklogDirectory } from "./utils/backlog-directory.ts";
 import { launchBrowser } from "./utils/browser-launch.ts";
-import { normalizeCustomFieldAssignments, parseCustomFieldCondition } from "./utils/custom-fields.ts";
 import { formatDependencyCleanupMessage } from "./utils/dependency-graph.ts";
 import { documentNotFoundMessage } from "./utils/document-id.ts";
 import {
@@ -126,7 +125,7 @@ import {
 	isReservedTaskPrefix,
 	normalizeId,
 } from "./utils/prefix-config.ts";
-import { formatValidPriorityValues, getPriorityOptions, resolvePriorityValue } from "./utils/priority-config.ts";
+import { formatValidPriorityValues, resolvePriorityValue } from "./utils/priority-config.ts";
 import {
 	formatValidProjectValues,
 	getProjectValues,
@@ -155,7 +154,7 @@ import {
 	taskNotFoundMessage,
 } from "./utils/task-path.ts";
 import { sectionTasks, sortTasks, TASK_SORT_FIELDS } from "./utils/task-sorting.ts";
-import { formatValidTaskTypeValues, getTaskTypeValues, resolveTaskTypeValues } from "./utils/task-type-config.ts";
+import { formatValidTaskTypeValues, resolveTaskTypeValues } from "./utils/task-type-config.ts";
 import { getTerminalStatus } from "./utils/terminal-status.ts";
 import { formatUtcDateForDisplay } from "./utils/utc-date-display.ts";
 import { formatUtcTimestamp } from "./utils/utc-timestamp.ts";
@@ -166,15 +165,7 @@ type IntegrationMode = "mcp" | "cli" | "none";
 const CONFIG_GET_KEYS = [
 	"defaultEditor",
 	"projectName",
-	"defaultAssignee",
-	"defaultStatus",
-	"statuses",
-	"labels",
-	"priorities",
-	"types",
-	"projects",
 	"milestones",
-	"definitionOfDone",
 	"dateFormat",
 	"maxColumnWidth",
 	"defaultPort",
@@ -191,8 +182,6 @@ const CONFIG_GET_KEYS = [
 const CONFIG_SET_KEYS = [
 	"defaultEditor",
 	"projectName",
-	"defaultAssignee",
-	"defaultStatus",
 	"dateFormat",
 	"maxColumnWidth",
 	"autoOpenBrowser",
@@ -1146,42 +1135,14 @@ schemaCommand
 		console.log("Task schema and stored task fields are valid.");
 	});
 
-addHelpSchema(program.command("fields"), {
-	reads: "Custom field definitions from the project's fields.yml",
-	required: [],
-	optional: [{ name: "json", type: "Boolean", description: "Print machine-readable field definitions" }],
-	output: "Field names, types, values, defaults, and descriptions",
-	examples: ["backlog fields", "backlog fields --json"],
-})
-	.description("show the configured custom task fields")
-	.option("--json", "print machine-readable field definitions")
-	.action(async (options: { json?: boolean }) => {
-		const cwd = await requireProjectRoot();
-		const schema = new Core(cwd).filesystem.customFieldSchema;
-		const fields = Object.entries(schema.fields).map(([name, definition]) => ({
-			name,
-			type: definition.type,
-			...(definition.values ? { values: definition.values } : {}),
-			...(definition.default !== undefined ? { default: definition.default } : {}),
-			...(definition.description ? { description: definition.description } : {}),
-			trackChanges: definition.trackChanges,
-		}));
-		if (options.json) {
-			printJson({ schemaVersion: 1, kind: "fields", fields });
-			return;
-		}
-		if (fields.length === 0) {
-			console.log("No custom fields configured.");
-			return;
-		}
-		for (const field of fields) {
-			const details: string[] = [field.type];
-			if ("values" in field) details.push(`values: ${field.values?.join(", ")}`);
-			if ("default" in field) details.push(`default: ${field.default}`);
-			if (field.trackChanges) details.push("track changes");
-			console.log(`${field.name} (${details.join("; ")})`);
-			if (field.description) console.log(`  ${field.description}`);
-		}
+program
+	.command("fields", { hidden: true })
+	.allowUnknownOption()
+	.action(() => {
+		console.error(
+			"backlog fields was removed. Use backlog schema instead; edit backlog/task-schema.yml to configure fields.",
+		);
+		process.exitCode = 1;
 	});
 
 addHelpSchema(program.command("init [projectName]"), {
@@ -2132,7 +2093,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--priority <priority>", "set task priority (configured priorities)")
 	.option("--type <type>", "set task type (configured task types)")
 	.option("--project <project>", "set task project (configured projects)")
-	.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
+	.option("--field <key=value>", "set a declared task field (repeatable)", createMultiValueAccumulator())
 	.option("--due-date <date>", "set due date (YYYY-MM-DD)")
 	.option("--plain", "use plain text output after creating")
 	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
@@ -2269,7 +2230,6 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				priority: options.priority ? String(options.priority) : undefined,
 				type: options.type !== undefined ? String(options.type) : undefined,
 				project: options.project !== undefined ? String(options.project) : undefined,
-				customFields: schema ? undefined : fieldAssignments,
 				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
 				milestone,
 				implementationPlan: options.plan ? String(options.plan) : undefined,
@@ -2279,9 +2239,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 				definitionOfDoneAdd: toStringArray(options.dod),
 				disableDefinitionOfDoneDefaults: options.dodDefaults === false,
 			};
-			const preparedInput = schema
-				? applyCreateFieldAssignments(new FieldRegistry(schema), createInput, fieldAssignments)
-				: createInput;
+			const preparedInput = applyCreateFieldAssignments(new FieldRegistry(schema), createInput, fieldAssignments);
 			const { task, filePath } = await core.createTaskFromInput(preparedInput);
 
 			if (usePlainOutput) {
@@ -2765,9 +2723,8 @@ async function runTaskList(
 	const { outputMode, listWindow } = listOutput;
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
-	const customFieldSchema = core.filesystem.customFieldSchema;
 	const taskSchema = core.filesystem.taskSchema;
-	const registry = taskSchema ? new FieldRegistry(taskSchema) : undefined;
+	const registry = new FieldRegistry(taskSchema);
 	const hasDuplicateIds = await printDuplicateIntegrityWarning(core);
 	const cleanup = () => {
 		core.disposeSearchService();
@@ -2786,14 +2743,7 @@ async function runTaskList(
 	const baseFilters: TaskListFilter = {};
 	let schemaConditions: ReturnType<FieldRegistry["parseCondition"]>[] = [];
 	try {
-		if (registry) {
-			schemaConditions = toStringArray(options.where).map((expression) => registry.parseCondition(expression));
-		} else {
-			const where = toStringArray(options.where).map((expression) =>
-				parseCustomFieldCondition(expression, customFieldSchema),
-			);
-			if (where.length > 0) baseFilters.where = where;
-		}
+		schemaConditions = toStringArray(options.where).map((expression) => registry.parseCondition(expression));
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
@@ -2802,9 +2752,9 @@ async function runTaskList(
 	}
 	const showFields = parseDelimitedStringList(options.showFields) ?? [];
 	for (const name of showFields) {
-		if (!(registry ? Object.hasOwn(taskSchema?.fields ?? {}, name) : Object.hasOwn(customFieldSchema.fields, name))) {
+		if (!Object.hasOwn(taskSchema.fields, name)) {
 			console.error(
-				`Unknown task field "${name}" in --show-fields. Declared fields: ${Object.keys(taskSchema?.fields ?? customFieldSchema.fields).join(", ") || "(none)"}`,
+				`Unknown task field "${name}" in --show-fields. Declared fields: ${Object.keys(taskSchema.fields).join(", ")}`,
 			);
 			process.exitCode = 1;
 			cleanup();
@@ -2896,19 +2846,9 @@ async function runTaskList(
 
 	if (options.sort) {
 		const [sortField, direction = "asc"] = String(options.sort).split(":");
-		const definition = customFieldSchema.fields[sortField as string];
-		if (
-			registry
-				? !sortField || !taskSchema?.fields[sortField] || !["asc", "desc"].includes(direction)
-				: !(TASK_SORT_FIELDS.includes(sortField?.toLowerCase() ?? "") && !String(options.sort).includes(":")) &&
-					!(
-						definition &&
-						(definition.type === "date" || definition.type === "enum") &&
-						["asc", "desc"].includes(direction)
-					)
-		) {
+		if (!sortField || !taskSchema.fields[sortField] || !["asc", "desc"].includes(direction)) {
 			console.error(
-				`Invalid sort field: ${options.sort}. Valid values are: ${registry ? Object.keys(taskSchema?.fields ?? {}).join(", ") : `${TASK_SORT_FIELD_LIST}, or a custom date/enum field[:asc|:desc]`}`,
+				`Invalid sort field: ${options.sort}. Valid values are: ${Object.keys(taskSchema.fields).join(", ")}`,
 			);
 			process.exitCode = 1;
 			cleanup();
@@ -2936,9 +2876,9 @@ async function runTaskList(
 			filters: Object.keys(baseFilters).length > 0 ? baseFilters : undefined,
 			includeCrossBranch: false,
 		});
-		const tasks = registry
-			? queriedTasks.filter((task) => schemaConditions.every((condition) => registry.matches(task, condition)))
-			: queriedTasks;
+		const tasks = queriedTasks.filter((task) =>
+			schemaConditions.every((condition) => registry.matches(task, condition)),
+		);
 		const config = await core.filesystem.loadConfig();
 
 		// Ordering, the parent narrowing and the limit are the same whatever the rows carry, so the
@@ -2947,17 +2887,16 @@ async function runTaskList(
 		// The sort was validated above, before any task was read. Without one, sortTasks uses the
 		// default order of every task list.
 		const narrowForDisplay = <T extends Task>(rows: T[]): T[] => {
-			const sorted =
-				registry && options.sort
-					? [...rows].sort((a, b) => {
-							const [key = "", direction = "asc"] = String(options.sort).split(":");
-							const left = registry.getField(a, key);
-							const right = registry.getField(b, key);
-							if (left === undefined || right === undefined) return registry.compare(key, left, right);
-							const order = registry.compare(key, left, right);
-							return order === 0 ? a.id.localeCompare(b.id) : direction === "desc" ? -order : order;
-						})
-					: sortTasks(rows, options.sort, config?.priorities, customFieldSchema);
+			const sorted = options.sort
+				? [...rows].sort((a, b) => {
+						const [key = "", direction = "asc"] = String(options.sort).split(":");
+						const left = registry.getField(a, key);
+						const right = registry.getField(b, key);
+						if (left === undefined || right === undefined) return registry.compare(key, left, right);
+						const order = registry.compare(key, left, right);
+						return order === 0 ? a.id.localeCompare(b.id) : direction === "desc" ? -order : order;
+					})
+				: sortTasks(rows, options.sort, config?.priorities);
 			const narrowed = parentFilter
 				? sorted.filter((task) => task.parentTaskId && taskIdsEqual(parentFilter, task.parentTaskId))
 				: sorted;
@@ -3415,16 +3354,14 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
-	let customFieldChanges: ReturnType<typeof normalizeCustomFieldAssignments>;
 	const schemaFieldChanges: Pick<
 		TaskUpdateInput,
 		"schemaFields" | "clearSchemaFields" | "addSchemaFields" | "removeSchemaFields"
 	> = {};
 	try {
 		const schema = core.filesystem.taskSchema;
-		if (schema) {
+		{
 			const registry = new FieldRegistry(schema);
-			customFieldChanges = { values: {}, clear: [] };
 			for (const [key, raw] of Object.entries(parseCustomFieldFlags(options.field))) {
 				const field = schema.fields[key];
 				if (field?.managed && key !== "ordinal") throw new Error(`Task field "${key}" is managed by Backlog`);
@@ -3455,14 +3392,6 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 					assignments[key] = [...((assignments[key] as string[] | undefined) ?? []), ...values];
 				}
 			}
-		} else {
-			customFieldChanges = normalizeCustomFieldAssignments(
-				core.filesystem.customFieldSchema,
-				parseCustomFieldFlags(options.field),
-				toStringArray(options.clearField).map((value) => String(value).trim()),
-			);
-			if (options.add !== undefined || options.remove !== undefined)
-				throw new Error("--add and --remove require task-schema.yml");
 		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
@@ -3752,8 +3681,6 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (options.project !== undefined) {
 		editArgs.project = String(options.project);
 	}
-	if (Object.keys(customFieldChanges.values).length > 0) editArgs.customFields = customFieldChanges.values;
-	if (customFieldChanges.clear.length > 0) editArgs.clearCustomFields = customFieldChanges.clear;
 	if (ordinalValue !== undefined) {
 		editArgs.ordinal = ordinalValue;
 	}
@@ -4510,14 +4437,18 @@ draftCmd
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
 		try {
-			const { task, filePath } = await core.createTaskFromInput({
-				title,
-				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
-				status: "Draft",
-				assignee: parseClearableStringList(options.assignee),
-				labels: parseDelimitedStringList(options.labels),
-				customFields: parseCustomFieldFlags(options.field),
-			});
+			const input = applyCreateFieldAssignments(
+				new FieldRegistry(core.filesystem.taskSchema),
+				{
+					title,
+					description: options.description || options.desc ? String(options.description || options.desc) : undefined,
+					status: "Draft",
+					assignee: parseClearableStringList(options.assignee),
+					labels: parseDelimitedStringList(options.labels),
+				},
+				parseCustomFieldFlags(options.field),
+			);
+			const { task, filePath } = await core.createTaskFromInput(input);
 			console.log(`Created draft ${task.id}`);
 			console.log(`File: ${filePath}`);
 		} catch (error) {
@@ -5550,7 +5481,7 @@ agentsCmd
 
 // Config command group
 const CONFIG_AVAILABLE_KEYS =
-	"Available keys: defaultEditor, projectName, defaultAssignee, defaultStatus, statuses, labels, priorities, types, projects, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays";
+	"Available keys: defaultEditor, projectName, milestones, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays. Task fields are configured in task-schema.yml.";
 
 const configCmd = addHelpSchema(program.command("config"), {
 	reads: "Project Backlog.md configuration",
@@ -5600,7 +5531,6 @@ const configCmd = addHelpSchema(program.command("config"), {
 			console.log(`  Auto open browser: ${mergedConfig.autoOpenBrowser ?? true}`);
 			console.log(`  Bypass git hooks: ${mergedConfig.bypassGitHooks ?? false}`);
 			console.log(`  Auto commit: ${mergedConfig.autoCommit ?? false}`);
-			console.log(`  Definition of Done defaults: ${(mergedConfig.definitionOfDone ?? []).join(" | ") || "(none)"}`);
 			if (completionResult) {
 				console.log(`  Shell completions: installed to ${completionResult.installPath}`);
 			} else if (completionError) {
@@ -5646,7 +5576,7 @@ addHelpSchema(configCmd.command("get <key>"), {
 	required: [{ name: "key", type: choiceType(CONFIG_GET_KEYS), description: "Configuration value to print" }],
 	optional: [],
 	output: "The selected configuration value",
-	examples: ["backlog config get defaultEditor", "backlog config get types"],
+	examples: ["backlog config get defaultEditor", "backlog config get defaultPort"],
 })
 	.description("get a configuration value")
 	.action(async (key: string) => {
@@ -5673,39 +5603,11 @@ addHelpSchema(configCmd.command("get <key>"), {
 				case "projectName":
 					console.log(config.projectName);
 					break;
-				case "defaultAssignee":
-					console.log(config.defaultAssignee?.join(", ") || "");
-					break;
-				case "defaultStatus":
-					console.log(config.defaultStatus || "");
-					break;
-				case "statuses":
-					console.log(config.statuses.join(", "));
-					break;
-				case "labels":
-					console.log(config.labels.join(", "));
-					break;
-				case "priorities":
-					console.log(
-						getPriorityOptions(config)
-							.map((priority) => priority.label)
-							.join(", "),
-					);
-					break;
-				case "types":
-					console.log(getTaskTypeValues(config).join(", "));
-					break;
-				case "projects":
-					console.log(getProjectValues(config).join(", "));
-					break;
 				case "milestones": {
 					const milestones = await core.filesystem.listMilestones();
 					console.log(milestones.map((milestone) => milestone.id).join(", "));
 					break;
 				}
-				case "definitionOfDone":
-					console.log(config.definitionOfDone?.join(", ") || "");
-					break;
 				case "dateFormat":
 					console.log(config.dateFormat);
 					break;
@@ -5760,11 +5662,7 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 	optional: [],
 	writes: "Updates the project Backlog.md configuration file",
 	output: "Confirmation of the updated config value",
-	examples: [
-		'backlog config set defaultEditor "code --wait"',
-		"backlog config set autoCommit true",
-		'backlog config set defaultAssignee "@alice,@bob"',
-	],
+	examples: ['backlog config set defaultEditor "code --wait"', "backlog config set autoCommit true"],
 })
 	.description("set a configuration value")
 	.action(async (key: string, value: string) => {
@@ -5797,13 +5695,6 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 				}
 				case "projectName":
 					config.projectName = value;
-					break;
-				case "defaultAssignee":
-					// An empty value clears the default; comma-separated values set several assignees.
-					config.defaultAssignee = parseDelimitedStringList(value);
-					break;
-				case "defaultStatus":
-					config.defaultStatus = value;
 					break;
 				case "dateFormat":
 					config.dateFormat = value;
@@ -5933,29 +5824,8 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 					config.activeBranchDays = days;
 					break;
 				}
-				case "statuses":
-				case "labels":
-				case "types":
-				case "priorities":
-				case "projects":
 				case "milestones":
-				case "definitionOfDone":
-					if (key === "milestones") {
-						console.error("milestones cannot be set directly.");
-						console.error(
-							"Use milestone files via milestone commands (e.g. `backlog milestone list`, `backlog milestone add`).",
-						);
-					} else if (key === "definitionOfDone") {
-						console.error("definitionOfDone cannot be set directly.");
-						console.error(
-							"Use `backlog config` for interactive editing, update the project config file (`backlog/config.yml`, `.backlog/config.yml`, or `backlog.config.yml`), or use Web UI Settings.",
-						);
-					} else {
-						console.error(`${key} cannot be set directly. View current values with 'backlog config get ${key}'.`);
-						console.error(
-							"Edit the list in the project config file (`backlog/config.yml`, `.backlog/config.yml`, or `backlog.config.yml`) directly.",
-						);
-					}
+					console.error("milestones cannot be set directly. Use milestone commands to edit milestone files.");
 					process.exit(1);
 					break;
 				case "taskPrefix":
@@ -6001,20 +5871,8 @@ addHelpSchema(configCmd.command("list"), {
 			console.log("Configuration:");
 			console.log(`  projectName: ${config.projectName}`);
 			console.log(`  defaultEditor: ${config.defaultEditor || "(not set)"}`);
-			console.log(`  defaultAssignee: [${(config.defaultAssignee ?? []).join(", ")}]`);
-			console.log(`  defaultStatus: ${config.defaultStatus || "(not set)"}`);
-			console.log(`  statuses: [${config.statuses.join(", ")}]`);
-			console.log(`  labels: [${config.labels.join(", ")}]`);
-			console.log(
-				`  priorities: [${getPriorityOptions(config)
-					.map((priority) => priority.label)
-					.join(", ")}]`,
-			);
-			console.log(`  types: [${getTaskTypeValues(config).join(", ")}]`);
-			console.log(`  projects: [${getProjectValues(config).join(", ")}]`);
 			const milestones = await core.filesystem.listMilestones();
 			console.log(`  milestones: [${milestones.map((milestone) => milestone.id).join(", ")}]`);
-			console.log(`  definitionOfDone: [${(config.definitionOfDone ?? []).join(", ")}]`);
 			console.log(`  dateFormat: ${config.dateFormat}`);
 			console.log(`  maxColumnWidth: ${config.maxColumnWidth || "(not set)"}`);
 			console.log(`  autoOpenBrowser: ${config.autoOpenBrowser ?? "(not set)"}`);

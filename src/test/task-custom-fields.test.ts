@@ -79,7 +79,7 @@ outside: kept
 	});
 
 	it("round-trips every field type and preserves unknown metadata", () => {
-		const schema = core.filesystem.customFieldSchema;
+		const schema = core.filesystem.taskSchema;
 		const task = parseTask(
 			`---
 id: TASK-1

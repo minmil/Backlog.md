@@ -109,7 +109,7 @@ export class FieldRegistry {
 			? key === "branch"
 				? task.branch
 				: (taskFrontmatter(task) as Record<string, unknown>)[key]
-			: (task.fieldValues?.[key] ?? task.customFields?.[key]);
+			: task.fieldValues?.[key];
 		return isValue(value) ? value : undefined;
 	}
 
@@ -207,9 +207,6 @@ export class FieldRegistry {
 			(next as unknown as Record<string, unknown>)[CORE_PROPERTIES[key] as string] = normalized;
 		} else {
 			next.fieldValues = { ...task.fieldValues, [key]: normalized };
-			if (typeof normalized === "string" || typeof normalized === "boolean") {
-				next.customFields = { ...task.customFields, [key]: normalized };
-			}
 		}
 		return next;
 	}
@@ -225,8 +222,6 @@ export class FieldRegistry {
 		else {
 			next.fieldValues = { ...task.fieldValues };
 			delete next.fieldValues[key];
-			next.customFields = { ...task.customFields };
-			delete next.customFields[key];
 		}
 		return next;
 	}
