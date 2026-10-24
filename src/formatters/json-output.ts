@@ -81,7 +81,7 @@ function cutListJson(page: ListPage<unknown> | undefined): { total?: number; nex
 	return page?.cut ? { total: page.total, nextSkip: page.nextSkip } : {};
 }
 
-function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
+export function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 	const fields = Object.fromEntries(
 		Object.keys(registry.schema.fields).flatMap((key) => {
 			const value = registry.getField(task, key);

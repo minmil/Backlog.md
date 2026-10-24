@@ -21,11 +21,11 @@ const CORE_INPUT_KEYS: Record<string, keyof TaskCreateInput> = {
 	onStatusChange: "onStatusChange",
 };
 
-/** Apply --field assignments before create validation or disk writes. */
-export function applyCreateFieldAssignments(
+function applyCreateFields(
 	registry: FieldRegistry,
 	base: TaskCreateInput,
-	assignments: Record<string, string>,
+	assignments: Record<string, unknown>,
+	parse: (key: string, raw: unknown) => unknown,
 ): TaskCreateInput {
 	const result: TaskCreateInput = { ...base, fieldValues: { ...base.fieldValues } };
 	for (const [key, raw] of Object.entries(assignments)) {
@@ -35,7 +35,11 @@ export function applyCreateFieldAssignments(
 				`Unknown task field "${key}". Declared fields: ${Object.keys(registry.schema.fields).join(", ")}`,
 			);
 		if (definition.managed && key !== "ordinal") throw new Error(`Task field "${key}" is managed by Backlog`);
-		const value = registry.parseInput(key, raw);
+		if (raw === null) {
+			if (definition.required) throw new Error(`Task field "${key}" is required`);
+			continue;
+		}
+		const value = parse(key, raw);
 		if (definition.core) {
 			const property = CORE_INPUT_KEYS[key];
 			if (!property) throw new Error(`Task field "${key}" cannot be supplied on create`);
@@ -46,4 +50,22 @@ export function applyCreateFieldAssignments(
 		}
 	}
 	return result;
+}
+
+/** Apply --field assignments before create validation or disk writes. */
+export function applyCreateFieldAssignments(
+	registry: FieldRegistry,
+	base: TaskCreateInput,
+	assignments: Record<string, string>,
+): TaskCreateInput {
+	return applyCreateFields(registry, base, assignments, (key, raw) => registry.parseInput(key, raw as string));
+}
+
+/** Apply native JSON field values through the same registry used by CLI assignments. */
+export function applyCreateFieldValues(
+	registry: FieldRegistry,
+	base: TaskCreateInput,
+	values: Record<string, unknown>,
+): TaskCreateInput {
+	return applyCreateFields(registry, base, values, (key, raw) => registry.validateValue(key, raw));
 }

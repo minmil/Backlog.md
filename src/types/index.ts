@@ -137,6 +137,8 @@ export interface TaskCreateInput {
 	actingUser?: string;
 	sections?: Record<string, string>;
 	sectionItems?: Record<string, string[]>;
+	sectionChecks?: Record<string, number[]>;
+	appendLog?: { section?: string; body: string; author?: string; date?: string };
 	reporter?: string;
 	onStatusChange?: string;
 	fieldValues?: Record<string, unknown>;

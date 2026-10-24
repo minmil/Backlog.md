@@ -1,0 +1,96 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { Core } from "../core/backlog.ts";
+import { BacklogServer } from "../server/index.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
+
+describe("schema task API", () => {
+	let directory: string;
+	let core: Core;
+	let server: BacklogServer;
+	let baseUrl: string;
+
+	beforeEach(async () => {
+		directory = createUniqueTestDir("server-schema-api");
+		core = new Core(directory);
+		await initializeFilesystemTestProject(core, "Schema API");
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+			schema.fields.side = { type: "enum", values: ["Buyer", "Seller"], label: "Side" };
+		});
+		server = new BacklogServer(directory);
+		await server.start(0, false);
+		baseUrl = `http://127.0.0.1:${server.getPort()}`;
+	});
+
+	afterEach(async () => {
+		await server.stop();
+		core.disposeContentStore();
+		await safeCleanup(directory);
+	});
+
+	it("returns the configured schema and schema-shaped task responses", async () => {
+		const schemaResponse = await fetch(`${baseUrl}/api/schema`);
+		expect(schemaResponse.status).toBe(200);
+		const schema = await schemaResponse.json();
+		expect(schema).toMatchObject({
+			schemaVersion: 2,
+			kind: "schema",
+			fields: { side: { values: ["Buyer", "Seller"] } },
+		});
+
+		const createResponse = await fetch(`${baseUrl}/api/tasks`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				title: "Schema task",
+				fields: { status: "In Progress", side: "buyer" },
+				sections: { description: "Schema description" },
+				checklist: [{ section: "acceptance", op: "add", text: "Ready" }],
+				log: { section: "log", body: "Created through API", author: "@alice", date: "2026-10-25" },
+			}),
+		});
+		expect(createResponse.status).toBe(201);
+		const created = await createResponse.json();
+		expect(created.fields).toMatchObject({ status: "In Progress", side: "Buyer" });
+		expect(created.sections.description).toBe("Schema description");
+		expect(created.sections.acceptance[0]).toMatchObject({ index: 1, text: "Ready", checked: false });
+		expect(created.sections.log[0]).toMatchObject({ author: "@alice", body: "Created through API" });
+		expect(created.other.trim()).toBe("");
+
+		const view = await (await fetch(`${baseUrl}/api/tasks/${created.id}`)).json();
+		expect(view.fields.side).toBe("Buyer");
+		expect(view.sections.description).toBe("Schema description");
+	});
+
+	it("PATCH validates mixed fields and section operations before writing", async () => {
+		const { task } = await core.createTaskFromInput({ title: "Patch target" });
+		const patch = (body: unknown) =>
+			fetch(`${baseUrl}/api/tasks/${task.id}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+		const updatedResponse = await patch({
+			fields: { priority: "high", side: "seller" },
+			sections: { description: "Updated description" },
+			checklist: [{ section: "acceptance", op: "add", text: "Verify" }],
+			log: { section: "log", body: "Reviewed", author: "@alice" },
+		});
+		expect(updatedResponse.status).toBe(200);
+		const updated = await updatedResponse.json();
+		expect(updated.fields).toMatchObject({ priority: "high", side: "Seller" });
+		expect(updated.sections.description).toBe("Updated description");
+		expect(updated.sections.acceptance[0].text).toBe("Verify");
+		expect(updated.sections.log[0].body).toBe("Reviewed");
+
+		const invalid = await patch({ fields: { side: "unsupported" } });
+		expect(invalid.status).toBe(422);
+		expect(await invalid.json()).toMatchObject({ errors: [{ key: "fields.side" }] });
+		expect((await core.filesystem.loadTask(task.id))?.fieldValues?.side).toBe("Seller");
+	});
+});

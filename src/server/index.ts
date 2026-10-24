@@ -9,8 +9,13 @@ import type { SearchService } from "../core/search-service.ts";
 import { getTaskStatistics } from "../core/statistics.ts";
 import { loadTaskDetail } from "../core/task-detail.ts";
 import { isCreateLockError, isTaskLockError } from "../file-system/operations.ts";
+import { toSchemaTaskJson } from "../formatters/json-output.ts";
+import { parseSections } from "../markdown/sections.ts";
 import { BacklogToolError } from "../mcp/errors/mcp-errors.ts";
 import { MilestoneHandlers } from "../mcp/tools/milestones/handlers.ts";
+import { applyCreateFieldValues } from "../schema/create-input.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import {
 	type ContentRecordKind,
 	DOCUMENT_TYPE_VALUES,
@@ -18,6 +23,7 @@ import {
 	type SearchPriorityFilter,
 	type SearchResultType,
 	type Task,
+	type TaskCreateInput,
 	type TaskUpdateInput,
 } from "../types/index.ts";
 import { launchBrowser } from "../utils/browser-launch.ts";
@@ -101,6 +107,98 @@ class DocumentPayloadValidationError extends Error {
 		super(message);
 		this.name = "DocumentPayloadValidationError";
 	}
+}
+
+class SchemaApiError extends Error {
+	constructor(
+		readonly key: string,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+function payloadObject(value: unknown, key: string): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new SchemaApiError(key, "Expected an object.");
+	}
+	return value as Record<string, unknown>;
+}
+
+function schemaErrorResponse(error: unknown, key = "task"): Response {
+	return Response.json(
+		{
+			errors: [
+				{
+					key: error instanceof SchemaApiError ? error.key : key,
+					message: error instanceof Error ? error.message : String(error),
+				},
+			],
+		},
+		{ status: 422 },
+	);
+}
+
+type SchemaChecklistOperation = {
+	section: string;
+	op: "add" | "check" | "uncheck" | "remove";
+	text?: string;
+	index?: number;
+};
+
+function readSchemaSections(value: unknown, schema: TaskSchema): Record<string, string> {
+	const sections = payloadObject(value, "sections");
+	const result: Record<string, string> = {};
+	for (const [id, text] of Object.entries(sections)) {
+		if (schema.sections[id]?.kind !== "markdown")
+			throw new SchemaApiError(`sections.${id}`, "Expected a configured Markdown section.");
+		if (typeof text !== "string") throw new SchemaApiError(`sections.${id}`, "Expected text.");
+		result[id] = text;
+	}
+	return result;
+}
+
+function readSchemaChecklist(value: unknown, schema: TaskSchema): SchemaChecklistOperation[] {
+	if (!Array.isArray(value)) throw new SchemaApiError("checklist", "Expected an array of checklist operations.");
+	return value.map((entry, position) => {
+		const item = payloadObject(entry, `checklist.${position}`);
+		const section = item.section;
+		if (typeof section !== "string" || schema.sections[section]?.kind !== "checklist") {
+			throw new SchemaApiError(`checklist.${position}.section`, "Expected a configured checklist section.");
+		}
+		const op = item.op;
+		if (op !== "add" && op !== "check" && op !== "uncheck" && op !== "remove") {
+			throw new SchemaApiError(`checklist.${position}.op`, "Expected add, check, uncheck, or remove.");
+		}
+		if (op === "add") {
+			if (typeof item.text !== "string" || !item.text.trim())
+				throw new SchemaApiError(`checklist.${position}.text`, "Expected nonempty text.");
+			return { section, op, text: item.text };
+		}
+		if (typeof item.index !== "number" || !Number.isInteger(item.index) || item.index < 1) {
+			throw new SchemaApiError(`checklist.${position}.index`, "Expected a positive integer.");
+		}
+		return { section, op, index: item.index };
+	});
+}
+
+function readSchemaLog(value: unknown, schema: TaskSchema): NonNullable<TaskUpdateInput["appendLog"]> {
+	const log = payloadObject(value, "log");
+	const section = log.section ?? "log";
+	if (typeof section !== "string" || schema.sections[section]?.kind !== "log") {
+		throw new SchemaApiError("log.section", "Expected a configured log section.");
+	}
+	if (typeof log.body !== "string" || !log.body.trim()) throw new SchemaApiError("log.body", "Expected nonempty text.");
+	if (log.author !== undefined && typeof log.author !== "string")
+		throw new SchemaApiError("log.author", "Expected a user handle.");
+	if (log.date !== undefined && typeof log.date !== "string")
+		throw new SchemaApiError("log.date", "Expected YYYY-MM-DD.");
+	return {
+		section,
+		body: log.body,
+		...(log.author !== undefined && { author: log.author }),
+		...(log.date !== undefined && { date: log.date }),
+	};
 }
 
 function parseDocumentType(value: unknown): Document["type"] | undefined {
@@ -431,6 +529,10 @@ export class BacklogServer {
 					"/api/tasks/:id": {
 						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id),
 						PUT: async (req: Request & { params: { id: string } }) => await this.handleUpdateTask(req, req.params.id),
+						PATCH: async (req: Request & { params: { id: string } }) => await this.handlePatchTask(req, req.params.id),
+					},
+					"/api/schema": {
+						GET: async () => Response.json({ schemaVersion: 2, kind: "schema", ...this.core.filesystem.taskSchema }),
 					},
 					"/api/tasks/:id/archive": {
 						POST: async (req: Request & { params: { id: string } }) => await this.handleArchiveTask(req.params.id),
@@ -815,7 +917,8 @@ export class BacklogServer {
 			refreshCrossBranch,
 		});
 
-		return Response.json(tasks);
+		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+		return Response.json(tasks.map((task) => this.taskResponse(task, registry)));
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
@@ -978,8 +1081,58 @@ export class BacklogServer {
 		}
 	}
 
+	private taskResponse(
+		task: Task,
+		registry = new FieldRegistry(this.core.filesystem.taskSchema),
+	): Record<string, unknown> {
+		const body = parseSections(task.rawContent ?? "", registry.schema);
+		return {
+			...task,
+			...toSchemaTaskJson(task, registry),
+			sections: task.sections ?? body.sections,
+			other: task.other ?? body.other,
+		};
+	}
+
+	private async handleCreateSchemaTask(value: unknown): Promise<Response> {
+		try {
+			const payload = payloadObject(value, "task");
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const fields = payload.fields === undefined ? {} : payloadObject(payload.fields, "fields");
+			const title = payload.title ?? fields.title;
+			if (typeof title !== "string" || !title.trim()) throw new SchemaApiError("title", "Title is required.");
+			let input: TaskCreateInput = applyCreateFieldValues(registry, { title }, fields);
+			if (payload.sections !== undefined) input.sections = readSchemaSections(payload.sections, registry.schema);
+			if (payload.checklist !== undefined) {
+				const sectionItems: Record<string, string[]> = {};
+				const sectionChecks: Record<string, number[]> = {};
+				for (const operation of readSchemaChecklist(payload.checklist, registry.schema)) {
+					if (operation.op === "add") {
+						sectionItems[operation.section] = [...(sectionItems[operation.section] ?? []), operation.text as string];
+					} else if (operation.op === "check") {
+						sectionChecks[operation.section] = [...(sectionChecks[operation.section] ?? []), operation.index as number];
+					} else throw new SchemaApiError("checklist", "Only add and check are available when creating a task.");
+				}
+				input = { ...input, sectionItems, sectionChecks };
+			}
+			if (payload.log !== undefined) input.appendLog = readSchemaLog(payload.log, registry.schema);
+			const { task } = await this.core.createTaskFromInput(input);
+			return Response.json(this.taskResponse(task), { status: 201 });
+		} catch (error) {
+			if (isCreateLockError(error)) return Response.json({ error: (error as Error).message }, { status: 409 });
+			return schemaErrorResponse(error);
+		}
+	}
+
 	private async handleCreateTask(req: Request): Promise<Response> {
 		const payload = await req.json();
+		if (
+			payload &&
+			typeof payload === "object" &&
+			("fields" in payload || "sections" in payload || "checklist" in payload || "log" in payload)
+		) {
+			return await this.handleCreateSchemaTask(payload);
+		}
 
 		if (!payload || typeof payload.title !== "string" || payload.title.trim().length === 0) {
 			return Response.json({ error: "Title is required" }, { status: 400 });
@@ -1028,7 +1181,7 @@ export class BacklogServer {
 				definitionOfDoneAdd,
 				disableDefinitionOfDoneDefaults,
 			});
-			return Response.json(createdTask, { status: 201 });
+			return Response.json(this.taskResponse(createdTask), { status: 201 });
 		} catch (error) {
 			if (isCreateLockError(error)) {
 				const message = error instanceof Error ? error.message : "Failed to create task";
@@ -1077,7 +1230,62 @@ export class BacklogServer {
 		const resolved = await this.resolveDetailTask(taskId);
 		if (resolved instanceof Response) return resolved;
 		await this.ensureServicesReady();
-		return Response.json(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true }));
+		return Response.json(this.taskResponse(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true })));
+	}
+
+	private async handlePatchTask(req: Request, taskId: string): Promise<Response> {
+		try {
+			const payload = payloadObject(await req.json(), "task");
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const update: TaskUpdateInput = {};
+			if (payload.fields !== undefined) {
+				const fields = payloadObject(payload.fields, "fields");
+				update.schemaFields = {};
+				update.clearSchemaFields = [];
+				for (const [key, value] of Object.entries(fields)) {
+					if (!registry.schema.fields[key]) throw new SchemaApiError(`fields.${key}`, `Unknown task field "${key}".`);
+					if (value === null) update.clearSchemaFields.push(key);
+					else {
+						try {
+							update.schemaFields[key] = registry.validateValue(key, value);
+						} catch (error) {
+							throw new SchemaApiError(`fields.${key}`, error instanceof Error ? error.message : String(error));
+						}
+					}
+				}
+			}
+			if (payload.sections !== undefined) update.setSections = readSchemaSections(payload.sections, registry.schema);
+			if (payload.checklist !== undefined) {
+				for (const operation of readSchemaChecklist(payload.checklist, registry.schema)) {
+					if (operation.op === "add") {
+						update.addSectionItems ??= {};
+						update.addSectionItems[operation.section] = [
+							...(update.addSectionItems[operation.section] ?? []),
+							operation.text as string,
+						];
+					} else {
+						const key =
+							operation.op === "check"
+								? "checkSectionItems"
+								: operation.op === "uncheck"
+									? "uncheckSectionItems"
+									: "removeSectionItems";
+						update[key] ??= {};
+						update[key][operation.section] = [...(update[key][operation.section] ?? []), operation.index as number];
+					}
+				}
+			}
+			if (payload.log !== undefined) update.appendLog = readSchemaLog(payload.log, registry.schema);
+			const task = isDraftId(taskId)
+				? (await this.core.editTaskOrDraft(taskId, update)).task
+				: await this.core.updateTaskFromInput(taskId, update);
+			return Response.json(this.taskResponse(task));
+		} catch (error) {
+			if (isAmbiguousIdError(error) || isAmbiguousTaskIdError(error) || isTaskLockError(error)) {
+				return Response.json({ error: (error as Error).message }, { status: 409 });
+			}
+			return schemaErrorResponse(error);
+		}
 	}
 
 	private async handleUpdateTask(req: Request, taskId: string): Promise<Response> {

@@ -2214,6 +2214,12 @@ export class Core {
 			for (const [id, values] of Object.entries(input.sectionItems ?? {})) {
 				for (const value of values) checklistAdd(createdSections, id, value, taskSchema);
 			}
+			for (const [id, indices] of Object.entries(input.sectionChecks ?? {})) {
+				for (const index of indices) checklistCheck(createdSections, id, index, taskSchema);
+			}
+			if (input.appendLog) {
+				logAppend(createdSections, input.appendLog.section ?? "log", input.appendLog, taskSchema);
+			}
 			const task: Task = {
 				id,
 				title: input.title.trim(),
