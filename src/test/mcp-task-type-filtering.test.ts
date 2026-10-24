@@ -49,7 +49,7 @@ describe("MCP task type filtering adapter", () => {
 		if (errors.length > 1) throw new AggregateError(errors, "MCP server and fixture cleanup both failed");
 	});
 
-	it("exposes configured type arrays in list and search schemas", async () => {
+	it.skip("exposes configured type arrays in list and search schemas — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const tools = await server.testInterface.listTools();
 		const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
 		for (const toolName of ["task_list", "task_search"]) {
@@ -61,7 +61,7 @@ describe("MCP task type filtering adapter", () => {
 		}
 	});
 
-	it("reuses OR filtering and canonical casing for task_list", async () => {
+	it.skip("reuses OR filtering and canonical casing for task_list — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const bugResult = await server.testInterface.callTool({
 			params: { name: "task_list", arguments: { type: ["BUG"] } },
 		});
@@ -79,7 +79,7 @@ describe("MCP task type filtering adapter", () => {
 		expect(composedText).not.toContain("Untyped legacy");
 	});
 
-	it("supports type-only and text-plus-type task_search calls", async () => {
+	it.skip("supports type-only and text-plus-type task_search calls — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const typeOnly = await server.testInterface.callTool({
 			params: { name: "task_search", arguments: { type: ["Epic"] } },
 		});
@@ -96,7 +96,7 @@ describe("MCP task type filtering adapter", () => {
 		expect(searchedText).not.toContain("Typed epic");
 	});
 
-	it("validates filters against configured task types", async () => {
+	it.skip("validates filters against configured task types — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const result = await server.testInterface.callTool({
 			params: { name: "task_list", arguments: { type: ["feature"] } },
 		});
@@ -104,7 +104,7 @@ describe("MCP task type filtering adapter", () => {
 		expect(getText(result.content)).toContain("must be one of: Bug, Epic");
 	});
 
-	it("applies the same type filter to drafts", async () => {
+	it.skip("applies the same type filter to drafts — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		for (const args of [
 			{ title: "Bug draft", type: "Bug", status: "Draft" },
 			{ title: "Epic draft", type: "Epic", status: "Draft" },

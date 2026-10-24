@@ -23,10 +23,7 @@ describe("Config loading and legacy migration", () => {
 
 	it("should load config from standard backlog directory", async () => {
 		const config = `project_name: "Test Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones: []
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -39,6 +36,7 @@ auto_commit: false`;
 
 		expect(loadedConfig).toBeTruthy();
 		expect(loadedConfig?.projectName).toBe("Test Project");
+		expect(fs.taskSchema.fields.status?.values).toEqual(["To Do", "In Progress", "Done"]);
 	});
 
 	it("should load config from .backlog directory without migrating it", async () => {
@@ -50,10 +48,7 @@ auto_commit: false`;
 		await mkdir(hiddenBacklogDir, { recursive: true });
 
 		const hiddenConfig = `project_name: "Legacy Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones: []
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -66,6 +61,7 @@ auto_commit: false`;
 		// Check that config was loaded
 		expect(config).toBeTruthy();
 		expect(config?.projectName).toBe("Legacy Project");
+		expect(fs.taskSchema.fields.status?.values).toEqual(["To Do", "In Progress", "Done"]);
 
 		// Check that the directory stayed in place
 		const newBacklogExists = await Bun.file(join(testRoot, "backlog", "config.yml")).exists();
@@ -77,10 +73,7 @@ auto_commit: false`;
 
 	it("migrates legacy config milestones into milestone files and removes config milestones key", async () => {
 		const config = `project_name: "Legacy Milestones Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones: ["Release 1", "Release 2"]
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -98,10 +91,7 @@ auto_commit: false`;
 
 	it("migrates quoted legacy milestone names containing commas", async () => {
 		const config = `project_name: "Legacy Milestones Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones: ["Release, Part 1", "Release 2"]
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -116,13 +106,10 @@ auto_commit: false`;
 
 	it("migrates multiline legacy milestone list values with comments", async () => {
 		const config = `project_name: "Legacy Milestones Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones:
   - "Release 1"
   - Release 2 # comment
   - 'Release #3'
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -144,13 +131,10 @@ auto_commit: false`;
 
 	it("migrates multiline bracketed legacy milestone arrays", async () => {
 		const config = `project_name: "Legacy Milestones Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones: [
   "Release 1",
   "Release 2"
 ]
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;
@@ -165,11 +149,8 @@ auto_commit: false`;
 
 	it("migrates single-quoted legacy milestones with escaped apostrophes", async () => {
 		const config = `project_name: "Legacy Milestones Project"
-statuses: ["To Do", "In Progress", "Done"]
-labels: []
 milestones:
   - 'Release ''Alpha'''
-default_status: "To Do"
 date_format: "yyyy-mm-dd"
 max_column_width: 20
 auto_commit: false`;

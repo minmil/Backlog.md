@@ -11,6 +11,7 @@ import {
 	initializeFilesystemTestProject,
 	isWindows,
 	safeCleanup,
+	updateTestTaskSchema,
 	waitUntil,
 	withTimeout,
 } from "./test-utils.ts";
@@ -148,7 +149,7 @@ describe("CLI JSON watch", () => {
 		await writeFile(`${path}.tmp`, markdown.replace("labels:", "priority: high\nlabels:"));
 		await rename(`${path}.tmp`, path);
 		await expectCurrent(watch);
-		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks[0].priority).toBe("high");
+		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks[0].fields.priority).toBe("high");
 
 		const count = watch.snapshots.length;
 		await writeFile(path, await readFile(path, "utf8"));
@@ -178,29 +179,27 @@ describe("CLI JSON watch", () => {
 		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks[0].id).toBe("TASK-1");
 	});
 
-	it("refreshes readiness from completed dependencies and configuration", async () => {
+	it("refreshes --ready results from completed dependencies and schema status changes", async () => {
 		await create("TASK-1", { dependencies: ["TASK-2"] });
 		await create("TASK-2", { status: "Done" });
 		await core.archiveTask("TASK-2");
 		const args = ["--parent", "TASK-9"];
 		// Readiness must see completed dependencies even when only one local task remains.
-		const watch = startWatch();
-		await expectCurrent(watch);
-		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks[0].isReady).toBe(true);
+		const watch = startWatch(["--ready"]);
+		await expectCurrent(watch, ["--ready"]);
+		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks.map((task: Task) => task.id)).toEqual(["TASK-1"]);
 		const completed = (await core.filesystem.listArchivedTasks())[0];
 		if (!completed?.filePath) throw new Error("Missing completed task path");
 		await rm(completed.filePath);
-		await expectCurrent(watch);
-		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks[0].isReady).toBe(false);
+		await expectCurrent(watch, ["--ready"]);
+		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks).toEqual([]);
 		await create("TASK-2", { status: "Done" });
-		await expectCurrent(watch);
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Missing config");
-		await core.filesystem.saveConfig({ ...config, statuses: ["To Do", "Done", "Finished"] });
-		await expectCurrent(watch);
-		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks.find((task: Task) => task.id === "TASK-1").isReady).toBe(
-			false,
-		);
+		await expectCurrent(watch, ["--ready"]);
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.status!.values = ["To Do", "Done", "Finished"];
+		});
+		await expectCurrent(watch, ["--ready"]);
+		expect(JSON.parse(watch.snapshots.at(-1) ?? "").tasks.map((task: Task) => task.id)).toEqual(["TASK-2"]);
 		// A failed initial lookup produces no JSON, exactly as in one-shot mode.
 		const invalid = startWatch(args);
 		expect(await invalid.process.exited).toBe(1);

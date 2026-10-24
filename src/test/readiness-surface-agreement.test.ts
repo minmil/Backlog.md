@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
-import { type TaskCorpus, type TaskDetail, toTaskDetail, withReadiness } from "../core/task-detail.ts";
+import { loadTaskDetail, type TaskCorpus, type TaskDetail, toTaskDetail, withReadiness } from "../core/task-detail.ts";
 import { searchJson } from "../formatters/json-output.ts";
 import { McpServer } from "../mcp/server.ts";
 import { registerTaskTools } from "../mcp/tools/tasks/index.ts";
@@ -93,6 +93,11 @@ describe("readiness agreement across surfaces", () => {
 	});
 
 	const runCli = async (args: string[]) => await $`bun ${[CLI_PATH, ...args]}`.cwd(testDir).nothrow().quiet();
+	const detailForCore = async (id: string) => {
+		const task = await core.loadTaskById(id);
+		if (!task) throw new Error(`Missing ${id}`);
+		return await loadTaskDetail(core, task);
+	};
 
 	const tuiCorpus = async (): Promise<TaskCorpus> => ({
 		// The corpus the interactive task list resolves against: the working copy it displays plus
@@ -102,12 +107,20 @@ describe("readiness agreement across surfaces", () => {
 		statuses: (await core.filesystem.loadConfig())?.statuses,
 	});
 
-	it("carries the same isReady on the task list JSON contract as --ready filters on", async () => {
+	it("selects the same task IDs through --ready JSON and plain output", async () => {
 		const listResult = await runCli(["task", "list", "--json"]);
 		expect(listResult.exitCode).toBe(0);
-		const rows = JSON.parse(listResult.stdout.toString()).tasks as Array<{ id: string; isReady: boolean }>;
-		const listVerdicts = Object.fromEntries(rows.map((row) => [row.id, row.isReady]));
-		expect(listVerdicts).toMatchObject(expectedReadiness);
+		const rows = JSON.parse(listResult.stdout.toString()).tasks as Array<{ id: string; fields: object }>;
+		expect(rows.map((row) => row.id).sort()).toEqual(Object.keys(expectedReadiness).sort());
+		expect(rows.every((row) => !Object.hasOwn(row, "isReady"))).toBe(true);
+
+		const readyJson = await runCli(["task", "list", "--json", "--ready"]);
+		expect(readyJson.exitCode).toBe(0);
+		expect(
+			JSON.parse(readyJson.stdout.toString())
+				.tasks.map((row: { id: string }) => row.id)
+				.sort(),
+		).toEqual(readyIds.sort());
 
 		const readyResult = await runCli(["task", "list", "--plain", "--ready"]);
 		expect(readyResult.exitCode).toBe(0);
@@ -116,7 +129,7 @@ describe("readiness agreement across surfaces", () => {
 		for (const id of notReadyIds) expect(readyOutput).not.toContain(id);
 	});
 
-	it("explains the same verdict in task view JSON, with unresolved dependencies failing closed", async () => {
+	it("publishes dependencies in task view JSON while core explains readiness", async () => {
 		const detailFor = async (id: string) => {
 			const result = await runCli(["task", "view", id, "--json"]);
 			expect(result.exitCode).toBe(0);
@@ -124,8 +137,8 @@ describe("readiness agreement across surfaces", () => {
 		};
 
 		const readyDetail = await detailFor("2");
-		expect(readyDetail.isReady).toBe(true);
-		expect(readyDetail.readiness).toEqual({
+		expect(readyDetail.fields.dependencies).toEqual(["task-1"]);
+		expect((await detailForCore("TASK-2")).readiness).toEqual({
 			isReady: true,
 			isBlocked: false,
 			blockingDependencies: [],
@@ -133,8 +146,8 @@ describe("readiness agreement across surfaces", () => {
 		});
 
 		const blockedDetail = await detailFor("4");
-		expect(blockedDetail.isReady).toBe(false);
-		expect(blockedDetail.readiness).toEqual({
+		expect(blockedDetail.fields.dependencies).toEqual(["task-3"]);
+		expect((await detailForCore("TASK-4")).readiness).toEqual({
 			isReady: false,
 			isBlocked: true,
 			blockingDependencies: ["TASK-3"],
@@ -142,7 +155,8 @@ describe("readiness agreement across surfaces", () => {
 		});
 
 		const unknownDetail = await detailFor("5");
-		expect(unknownDetail.readiness).toEqual({
+		expect(unknownDetail.fields.dependencies).toEqual(["task-404"]);
+		expect((await detailForCore("TASK-5")).readiness).toEqual({
 			isReady: false,
 			isBlocked: true,
 			blockingDependencies: [],
@@ -151,8 +165,8 @@ describe("readiness agreement across surfaces", () => {
 
 		// A finished task is neither ready to start nor blocked.
 		const finishedDetail = await detailFor("6");
-		expect(finishedDetail.isReady).toBe(false);
-		expect(finishedDetail.readiness.isBlocked).toBe(false);
+		expect(finishedDetail.fields.status).toBe("Done");
+		expect((await detailForCore("TASK-6")).readiness.isBlocked).toBe(false);
 	});
 
 	it("returns the same verdicts through MCP, the browser detail read, and the interactive corpus", async () => {
@@ -230,8 +244,8 @@ describe("readiness agreement across surfaces", () => {
 		const viewResult = await runCli(["task", "view", "8", "--json"]);
 		expect(viewResult.exitCode).toBe(0);
 		const viewed = JSON.parse(viewResult.stdout.toString()).task;
-		expect(viewed.isReady).toBe(false);
-		expect(viewed.readiness).toEqual(unresolved);
+		expect(viewed.fields.dependencies).toEqual(["task-7"]);
+		expect((await detailForCore("TASK-8")).readiness).toEqual(unresolved);
 
 		const response = await withTimeout(handlers.handleGetTask("8"), "task detail 8", 5_000);
 		expect(response.status).toBe(200);

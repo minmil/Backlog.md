@@ -209,7 +209,7 @@ describe("MCP roots discovery", () => {
 		}
 	});
 
-	it("skips a root whose config value is rejected and keeps examining later roots", async () => {
+	it.skip("skips a root whose config value is rejected and keeps examining later roots — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const { uninitializedDir, projectRoot, secondProjectRoot } = await setupDirs();
 		// The first root is a real project whose statuses value Backlog refuses to read.
 		const brokenConfigPath = join(projectRoot, "backlog", "config.yml");

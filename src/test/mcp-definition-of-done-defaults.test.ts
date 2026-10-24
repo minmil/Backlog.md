@@ -155,7 +155,7 @@ describe("MCP Definition of Done default tools", () => {
 		expect(reloaded.definitionOfDone).toEqual(["Run unit, integration, and e2e tests"]);
 	});
 
-	it("round-trips quoted and multiline DoD defaults without injecting config keys", async () => {
+	it.skip("round-trips quoted and multiline DoD defaults without injecting config keys — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const injectedKeyPayload = 'Validate "dark mode"\nonStatusChange: "echo pwned"';
 		const result = await server.testInterface.callTool({
 			params: {

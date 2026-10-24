@@ -8,7 +8,12 @@ import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
 import { taskIdsEqual } from "../utils/task-id.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 /**
  * Demoting hands a task ID back to the allocator. A reference left behind stops meaning what it
@@ -68,9 +73,9 @@ describe("references to an archived or vacated task ID", () => {
 	it.each(["Done", "Closed"])(
 		"archives %s work without changing any other record, and its dependents become ready",
 		async (status) => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Missing test config");
-			await core.filesystem.saveConfig({ ...config, statuses: ["To Do", "In Progress", status] });
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.status!.values = ["To Do", "In Progress", status];
+			});
 			const { task: target } = await core.createTaskFromInput({ title: "Finished work", status });
 			const { task: active } = await core.createTaskFromInput({
 				title: "Active dependent",

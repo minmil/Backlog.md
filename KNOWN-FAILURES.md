@@ -8,4 +8,37 @@ The current full-suite run is still in progress. Entries will be added from its 
 
 ## TUI/MCP exclusions
 
-The TUI and MCP are not upgraded: owner decision 2026-10-24. Failing TUI/MCP tests are retained and marked skipped with the reason `TUI/MCP not upgraded – owner decision 2026-10-24`. Their exact file and test names will be recorded after the full-suite triage.
+TUI/MCP not upgraded – owner decision 2026-10-24. These previously failing tests are retained and marked skipped. No TUI test failed in the diagnostic full-suite run.
+
+- `src/test/mcp-definition-of-done-defaults.test.ts`
+  - `MCP Definition of Done default tools > round-trips quoted and multiline DoD defaults without injecting config keys`
+- `src/test/mcp-roots-discovery.test.ts`
+  - `MCP roots discovery > skips a root whose config value is rejected and keeps examining later roots`
+- `src/test/mcp-task-project-filtering.test.ts`
+  - `MCP task project filtering adapter > exposes configured project arrays in list and search schemas`
+  - `MCP task project filtering adapter > reuses OR filtering and canonical casing for task_list`
+  - `MCP task project filtering adapter > supports project-only and text-plus-project task_search calls`
+  - `MCP task project filtering adapter > validates filters against configured projects`
+  - `MCP task project filtering adapter > applies the same project filter to drafts`
+- `src/test/mcp-task-type-filtering.test.ts`
+  - `MCP task type filtering adapter > exposes configured type arrays in list and search schemas`
+  - `MCP task type filtering adapter > reuses OR filtering and canonical casing for task_list`
+  - `MCP task type filtering adapter > supports type-only and text-plus-type task_search calls`
+  - `MCP task type filtering adapter > validates filters against configured task types`
+  - `MCP task type filtering adapter > applies the same type filter to drafts`
+- `src/test/mcp-tasks.test.ts`
+  - `MCP task tools (MVP) > renders every task result through the one plain serializer`
+  - `MCP task tools (MVP) > treats an explicit empty assignee as unassigned in task_create and task_edit`
+  - `MCP task tools (MVP) > appends and renders task comments through task_edit and task_view`
+  - `MCP task tools (MVP) > filters task_list to unassigned tasks and rejects combining with assignee`
+  - `MCP task tools (MVP) > applies unassigned filtering in task_list draft status path`
+  - `MCP task tools (MVP) > exposes configured priority enums and accepts custom priority values`
+  - `MCP task tools (MVP) > exposes task type enums from configuration without a default`
+  - `MCP task tools (MVP) > creates and edits tasks with a project when configured and shows it in view and list output`
+- `src/test/task-list-order.test.ts`
+  - `task list order across surfaces > lists the same sections in the same order through MCP task_list`
+  - `task list order across surfaces > keeps the MCP limit on the rows as they print, section by section`
+- `src/test/task-search-parity.test.ts`
+  - `filter wiring across surfaces > requires every label through the MCP task_list labels argument`
+  - `filter wiring across surfaces > matches MCP labels case-insensitively like every other surface`
+  - `filter wiring across surfaces > filters by project identically through Core, the search service, MCP, and both CLI entry points`

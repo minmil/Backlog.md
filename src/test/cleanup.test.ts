@@ -6,7 +6,7 @@ import { Core, formatCleanupResult } from "../core/backlog.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
-import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, initializeTestProject, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 pinTimeZone("Asia/Taipei");
 
@@ -151,15 +151,10 @@ describe("Cleanup functionality", () => {
 			expect(allDoneTasks).toHaveLength(2);
 		});
 
-		it("uses the final configured status as the cleanup status", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) {
-				throw new Error("Expected test project config to exist");
-			}
-			await core.filesystem.saveConfig({
-				...config,
-				statuses: ["To Do", "Review", "Closed"],
-				defaultStatus: "To Do",
+		it("uses the final schema status as the cleanup status", async () => {
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.status!.values = ["To Do", "Review", "Closed"];
+				schema.fields.status!.default = "To Do";
 			});
 
 			const oldDate = new Date();
@@ -202,17 +197,14 @@ describe("Cleanup functionality", () => {
 				},
 				false,
 			);
-			await core.createTask(
-				{
-					...sampleTask,
-					id: "task-4",
-					title: "Old Literal Done Task",
-					status: "Done",
-					createdDate: oldDateValue,
-					updatedDate: oldDateValue,
-				},
-				false,
-			);
+			await core.filesystem.saveTask({
+				...sampleTask,
+				id: "task-4",
+				title: "Old Literal Done Task",
+				status: "Done",
+				createdDate: oldDateValue,
+				updatedDate: oldDateValue,
+			});
 
 			const oldTasks = await core.getTerminalStatusTasksByAge(3);
 			expect(oldTasks.map((task) => task.id)).toEqual(["TASK-1"]);
@@ -222,14 +214,9 @@ describe("Cleanup functionality", () => {
 		});
 
 		it("does not collapse internal spaces when matching the cleanup status", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) {
-				throw new Error("Expected test project config to exist");
-			}
-			await core.filesystem.saveConfig({
-				...config,
-				statuses: ["To Do", "In Progress", "InProgress"],
-				defaultStatus: "To Do",
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.status!.values = ["To Do", "In Progress", "InProgress"];
+				schema.fields.status!.default = "To Do";
 			});
 
 			const oldDate = new Date();
