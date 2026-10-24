@@ -931,6 +931,8 @@ async function requireProjectRoot(): Promise<string> {
 		console.error("No Backlog.md project found. Run `backlog init` to initialize.");
 		process.exit(1);
 	}
+	// Fail before command-specific lookups or mutations when the project schema is unusable.
+	void new Core(root).filesystem.taskSchema;
 	return root;
 }
 
@@ -4433,7 +4435,11 @@ addListWindowOptions(draftListCommand)
 	.option("--plain", "use plain text output")
 	.option("--json", "print versioned machine-readable JSON output")
 	.action(async (options: ListWindowOptions & { plain?: boolean; sort?: string }) => {
-		const listOutput = resolveListOutput({ ...options, plain: isPlainRequested(options) }, draftListCommand);
+		const effectiveOptions = { ...draftCmd.opts(), ...options };
+		const listOutput = resolveListOutput(
+			{ ...effectiveOptions, plain: isPlainRequested(effectiveOptions) },
+			draftListCommand,
+		);
 		if (!listOutput) return;
 		const { outputMode, listWindow } = listOutput;
 		// The draft list keeps its own default: drafts are sorted by priority unless --sort is given.
@@ -4652,7 +4658,7 @@ draftCmd
 	.action(async (taskId: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
-		await viewDraftById(core, taskId, options);
+		await viewDraftById(core, taskId, { ...draftCmd.opts(), ...options });
 	});
 
 draftCmd

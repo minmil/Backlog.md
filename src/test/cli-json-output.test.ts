@@ -89,43 +89,35 @@ describe("CLI JSON output", () => {
 		expect(result.stdout.toString().endsWith("\n")).toBe(true);
 
 		const output = JSON.parse(result.stdout.toString());
-		expect(output).toEqual({
-			schemaVersion: 1,
-			kind: "task-list",
-			tasks: [
-				{
-					id: "TASK-1",
-					title: "JSON task",
-					status: "In Progress",
-					archived: false,
-					type: "enhancement",
-					priority: "high",
-					project: null,
-					customFields: {},
-					assignees: ["@alex"],
-					reporter: "@sam",
-					labels: ["cli", "json"],
-					milestone: "m-1",
-					parentTaskId: null,
-					acceptanceCriteriaCompleted: 1,
-					acceptanceCriteriaCount: 1,
-					references: ["https://example.com/issue"],
-					modifiedFiles: ["src/cli.ts"],
-					ordinal: 1000,
-					createdAt: "2026-07-14T09:30:00Z",
-					updatedAt: "2026-07-14T10:45:00Z",
-					dueDate: "2026-08-10",
-					// TASK-2 is not a task anything can resolve, so the verdict fails closed.
-					isReady: false,
-				},
-			],
+		expect(output.schemaVersion).toBe(2);
+		expect(output.kind).toBe("task-list");
+		expect(output.tasks).toHaveLength(1);
+		expect(output.tasks[0]).toMatchObject({
+			id: "TASK-1",
+			title: "JSON task",
+			fields: {
+				status: "In Progress",
+				type: "enhancement",
+				priority: "high",
+				assignee: ["@alex"],
+				reporter: "@sam",
+				labels: ["cli", "json"],
+				milestone: "m-1",
+				references: ["https://example.com/issue"],
+				modified_files: ["src/cli.ts"],
+				ordinal: 1000,
+				due_date: "2026-08-10",
+				onStatusChange: "echo secret",
+			},
+			unknownFields: {},
 		});
+		expect(output.tasks[0]).not.toHaveProperty("status");
+		expect(output.tasks[0]).not.toHaveProperty("customFields");
 		expect(result.stdout.toString()).not.toContain("rawContent");
 		expect(result.stdout.toString()).not.toContain("secret-branch");
-		expect(result.stdout.toString()).not.toContain("onStatusChange");
 	});
 
-	it("emits empty reference and modified-file arrays for tasks without them", async () => {
+	it("omits absent list fields and emits unknownFields for tasks without them", async () => {
 		const core = new Core(TEST_DIR);
 		await core.createTask(
 			{
@@ -143,8 +135,9 @@ describe("CLI JSON output", () => {
 		const result = await runCli(["task", "list", "--json"]);
 		expect(result.exitCode).toBe(0);
 		const bare = JSON.parse(result.stdout.toString()).tasks.find((t: { id: string }) => t.id === "TASK-3");
-		expect(bare.references).toEqual([]);
-		expect(bare.modifiedFiles).toEqual([]);
+		expect(bare.fields.references).toBeUndefined();
+		expect(bare.fields.modified_files).toBeUndefined();
+		expect(bare.unknownFields).toEqual({});
 	});
 
 	it("returns a compact versioned decision-list envelope", async () => {
@@ -172,7 +165,7 @@ describe("CLI JSON output", () => {
 	it("returns a versioned draft-list envelope in the plain output order", async () => {
 		const empty = await runCli(["draft", "list", "--json"]);
 		expect(empty.exitCode).toBe(0);
-		expect(JSON.parse(empty.stdout.toString())).toEqual({ schemaVersion: 1, kind: "draft-list", drafts: [] });
+		expect(JSON.parse(empty.stdout.toString())).toEqual({ schemaVersion: 2, kind: "draft-list", drafts: [] });
 
 		const core = new Core(TEST_DIR);
 		for (const [id, title, priority] of [
@@ -201,7 +194,11 @@ describe("CLI JSON output", () => {
 		expect(jsonIds).toEqual(["DRAFT-2", "DRAFT-1"]);
 		const plain = await runCli(["draft", "list", "--plain"]);
 		expect(plain.stdout.toString().match(/DRAFT-\d+/g)).toEqual(jsonIds);
-		expect(output.drafts[0]).toMatchObject({ title: "High draft", status: "Draft", priority: "high" });
+		expect(output.drafts[0]).toMatchObject({
+			title: "High draft",
+			fields: { status: "Draft", priority: "high" },
+			unknownFields: {},
+		});
 		// Readiness is derived against tasks only, so a draft entry never carries it.
 		for (const draft of output.drafts) expect(draft).not.toHaveProperty("isReady");
 		expect(result.stdout.toString()).not.toContain("secret body");
@@ -224,35 +221,12 @@ describe("CLI JSON output", () => {
 			const result = await runCli(args);
 			expect(result.exitCode).toBe(0);
 			const output = JSON.parse(result.stdout.toString());
-			expect(output.schemaVersion).toBe(1);
+			expect(output.schemaVersion).toBe(2);
 			expect(output.kind).toBe("task-view");
 			expect(output.task.path).toMatch(/^backlog\/tasks\/task-1 - JSON-task\.md$/);
-			expect(output.task.archived).toBe(false);
-			expect(output.task.description).toBe("Machine-readable output");
-			expect(output.task.dependencies).toEqual(["TASK-2"]);
-			// The summary verdict and the detail explanation behind it, from the same derivation.
-			expect(output.task.isReady).toBe(false);
-			expect(output.task.readiness).toEqual({
-				isReady: false,
-				isBlocked: true,
-				blockingDependencies: [],
-				missingDependencies: ["TASK-2"],
-			});
-			expect(output.task.acceptanceCriteriaCompleted).toBe(1);
-			expect(output.task.acceptanceCriteriaCount).toBe(1);
-			expect(output.task.acceptanceCriteria).toEqual([{ index: 1, text: "Produces JSON", checked: true }]);
-			expect(output.task.definitionOfDone).toEqual([{ index: 1, text: "Tests pass", checked: false }]);
-			expect(output.task.comments).toEqual([
-				{
-					index: 1,
-					body: "Keep this stable",
-					createdAt: "2026-07-14T11:00:00Z",
-					author: "@alex",
-				},
-			]);
-			expect(output.task.subtasks).toEqual([]);
-			expect(output.task.finalSummary).toBe("Ready for review");
-			expect(output.task.dueDate).toBe("2026-08-10");
+			expect(output.task.fields.dependencies).toEqual(["TASK-2"]);
+			expect(output.task.fields.due_date).toBe("2026-08-10");
+			expect(output.task.unknownFields).toEqual({});
 			expect(output.task.rawContent).toBeUndefined();
 			expect(output.task.filePath).toBeUndefined();
 			expect(output.task.branch).toBeUndefined();
@@ -266,12 +240,12 @@ describe("CLI JSON output", () => {
 
 		expect(result.exitCode).toBe(0);
 		const output = JSON.parse(result.stdout.toString());
-		expect(output.schemaVersion).toBe(1);
-		expect(output.task.archived).toBe(true);
+		expect(output.schemaVersion).toBe(2);
+		expect(output.task.fields.status).toBe("In Progress");
 		expect(output.task.path).toMatch(/^backlog\/archive\/tasks\/task-1 - JSON-task\.md$/);
 	});
 
-	it("serializes an absent description as null and preserves Markdown verbatim", async () => {
+	it("serializes an absent description as an empty section and preserves Markdown verbatim", async () => {
 		const withoutDescription = await runCli(["task", "create", "No description", "--plain"]);
 		expect(withoutDescription.exitCode).toBe(0);
 		const withMarkdown = await runCli([
@@ -286,25 +260,23 @@ describe("CLI JSON output", () => {
 
 		const absent = await runCli(["task", "view", "2", "--json"]);
 		expect(absent.exitCode).toBe(0);
-		expect(JSON.parse(absent.stdout.toString()).task.description).toBeNull();
+		expect(JSON.parse(absent.stdout.toString()).task.sections.description).toBe("");
 
 		const markdown = await runCli(["task", "view", "3", "--json"]);
 		expect(markdown.exitCode).toBe(0);
-		expect(JSON.parse(markdown.stdout.toString()).task.description).toBe("First line\n\n- item with `code`");
+		expect(JSON.parse(markdown.stdout.toString()).task.sections.description).toBe("First line\n\n- item with `code`");
 	});
 
 	it("preserves heterogeneous search rank and omits scores", async () => {
 		const result = await runCli(["search", "JSON task", "--json"]);
 		expect(result.exitCode).toBe(0);
 		const output = JSON.parse(result.stdout.toString());
-		expect(output.schemaVersion).toBe(1);
+		expect(output.schemaVersion).toBe(2);
 		expect(output.kind).toBe("search");
 		expect(output.results.map((entry: { type: string }) => entry.type)).toEqual(["task", "document", "decision"]);
 		expect(output.results[0].data.id).toBe("TASK-1");
-		expect(output.results[0].data.acceptanceCriteriaCompleted).toBe(1);
-		expect(output.results[0].data.acceptanceCriteriaCount).toBe(1);
-		// Task results carry the same verdict the task list publishes.
-		expect(output.results[0].data.isReady).toBe(false);
+		expect(output.results[0].data.fields.status).toBe("In Progress");
+		expect(output.results[0].data.unknownFields).toEqual({});
 		expect(output.results[1].data).toEqual({
 			id: "doc-1",
 			title: "JSON guide",
@@ -451,10 +423,10 @@ describe("CLI JSON output", () => {
 
 	it("returns successful empty envelopes", async () => {
 		const list = await runCli(["task", "list", "--status", "Done", "--json"]);
-		expect(JSON.parse(list.stdout.toString())).toEqual({ schemaVersion: 1, kind: "task-list", tasks: [] });
+		expect(JSON.parse(list.stdout.toString())).toEqual({ schemaVersion: 2, kind: "task-list", tasks: [] });
 
 		const search = await runCli(["search", "no-such-content", "--json"]);
-		expect(JSON.parse(search.stdout.toString())).toEqual({ schemaVersion: 1, kind: "search", results: [] });
+		expect(JSON.parse(search.stdout.toString())).toEqual({ schemaVersion: 2, kind: "search", results: [] });
 	});
 
 	it("rejects conflicting output modes without stdout", async () => {
@@ -477,7 +449,7 @@ describe("CLI JSON output", () => {
 		const json = await runCli(["search", "--json", "--", "--plain"]);
 		expect(json.exitCode).toBe(0);
 		expect(json.stderr.toString()).toBe("");
-		expect(JSON.parse(json.stdout.toString())).toEqual({ schemaVersion: 1, kind: "search", results: [] });
+		expect(JSON.parse(json.stdout.toString())).toEqual({ schemaVersion: 2, kind: "search", results: [] });
 
 		const plain = await runCli(["search", "--plain", "--", "--json"]);
 		expect(plain.exitCode).toBe(0);
