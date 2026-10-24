@@ -4,7 +4,49 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-The current full-suite run is still in progress. Entries will be added from its final file and test names, with an owning Task 4, 5, 9, or 10 and a one-line reason.
+The stable full-suite run at `bdee6ca` had 36 active failures beyond the 19 baseline failures. Each entry below gives the owning task and the missing contract.
+
+### Task 4 — generic sections, log, and plain/JSON detail (10)
+
+- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > writes explicit UTC through CLI create, edit and comments on a non-UTC host` — Task 4: comments become log entries with a recorded UTC `created` timestamp.
+- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > preserves historical creation values on read and edit, including midnight and date-only values` — Task 4: the new log parser must preserve recorded creation timestamps.
+- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > keeps a comment before an unquoted timestamp outside the stored date value` — Task 4: comment metadata parsing moves to the generic log section.
+- `src/test/cli-json-output.test.ts` — `CLI JSON output > serializes an absent description as an empty section and preserves Markdown verbatim` — Task 4: task view needs the JSON v2 `sections` and `other` contract.
+- `src/test/cli-json-output.test.ts` — `CLI JSON output > returns complete, partial, and empty acceptance-criteria progress across task JSON surfaces` — Task 4: checklist progress moves to the generic section engine.
+- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with task view --plain` — Task 4: plain detail must render schema sections in order.
+- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with task <id> --plain shortcut` — Task 4: the shortcut uses the same new plain section renderer.
+- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with draft view --plain` — Task 4: draft detail needs the generic plain section renderer.
+- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with draft <id> --plain shortcut` — Task 4: the draft shortcut uses the same renderer.
+- `src/test/utc-date-display.test.ts` — `UTC date display > adds UTC labels to plain task and comment date fields` — Task 4: plain log output must format recorded UTC creation dates.
+
+### Task 5 — server schema/API and live-update paths (26)
+
+- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > filters search results by a single project` — Task 5: server search must read project values from the schema.
+- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > applies OR semantics for repeated project params` — Task 5: server project filters need schema-backed OR matching.
+- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > rejects unsupported project filters with 400 and lists valid values` — Task 5: server validation must use schema project values.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > reuses branch state while reconciling cached working-copy tasks across statistics requests` — Task 5: statistics must load tasks and metadata with the active schema.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > keeps board work blocked by an unfinished archived dependency without counting that dependency` — Task 5: statistics readiness needs schema-backed task loading.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > uses fresh priorities without rebuilding the task corpus` — Task 5: priority values moved from config to the schema.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > reconciles a selected backlog root before reading its statistics` — Task 5: root reconciliation must include the selected schema.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > refreshes statistics after an active branch ref moves` — Task 5: branch statistics must use schema-backed metadata after refresh.
+- `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > keeps task and config generations coherent during a same-root config change` — Task 5: generation coherence must include schema changes.
+- `src/test/server-task-project-endpoint.test.ts` — `BacklogServer task project field > persists project selected via the create endpoint` — Task 5: create must validate and write project through the registry.
+- `src/test/server-task-project-endpoint.test.ts` — `BacklogServer task project field > persists and clears project through the update endpoint` — Task 5: update must validate and clear project through the registry.
+- `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > previews and executes cleanup for the final configured status` — Task 5: cleanup must read final status from the schema.
+- `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > archives only the tasks the preview showed` — Task 5: cleanup preview and execution must share schema-backed status rules.
+- `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > skips a previewed task that left the final status before the click` — Task 5: cleanup must recheck the schema-backed final status.
+- `src/test/content-store.test.ts` — `ContentStore > reconciles stopped current-root watchers after a root transition is superseded` — Task 5: content-store root watchers must include schema state.
+- `src/test/content-store.test.ts` — `ContentStore > retries public root reconciliation when content loading fails after watchers bind` — Task 5: schema-aware root reconciliation must recover after load failure.
+- `src/test/content-store.test.ts` — `ContentStore > publishes coherent A to B to A snapshots and rebinds every root watcher` — Task 5: snapshots and watchers must carry each root's schema.
+- `src/test/content-store.test.ts` — `ContentStore > rebinds both config and content watchers when browser initialization selects a custom root` — Task 5: browser root selection must bind its schema watcher too.
+- `src/test/server-tasks-spa-fallback.test.ts` — `BacklogServer task SPA fallback > keeps config and duplicate-task reads fail-closed while a watched config is unusable` — Task 5: server watcher validation must handle config and schema separately.
+- `src/test/shared-branch-task-loader.test.ts` — `shared immutable branch task loading > returns statistics metadata from the same stable config generation as its tasks` — Task 5: branch loading must keep schema and task generations coherent.
+- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > uses configured custom priorities for task and search filters` — Task 5: server task/search priority values must come from schema.
+- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > persists configured task types through create, edit, and clear` — Task 5: server writes must use registry type validation.
+- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > rejects unsupported task types from the Web task API` — Task 5: API validation must reject types outside the schema.
+- `src/test/config-watcher.test.ts` — `config watcher > retains the cached defaultAssignee while an inline edit is not a usable assignee value` — Task 5: default user moved to the schema's `users` block.
+- `src/test/config-watcher.test.ts` — `config watcher > publishes root config resolution from the same accepted content` — Task 5: watcher acceptance must track schema and config together.
+- `src/test/config-watcher.test.ts` — `config watcher > keeps accepting the sparse config shape supported by the parser` — Task 5: watcher validation must accept config without moved schema keys.
 
 ## TUI/MCP exclusions
 
