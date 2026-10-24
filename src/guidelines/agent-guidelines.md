@@ -35,9 +35,9 @@ remains fully synchronized and up-to-date.
 - **Use `--plain`** for readable task context, or **use `--json`** when code needs structured fields
 - **Never bypass the CLI** - It handles Git, metadata, file naming, and relationships
 
-### Custom fields
+### Task fields
 
-If the project has `backlog/fields.yml`, run `backlog fields` before creating or editing tasks. Use repeatable `--field key=value` on create or edit, `--clear-field key` on edit, `task list --where 'key=value'` for filters, and `--sort key[:asc|:desc]` for date or enum fields. Copy enum values exactly as listed. Never hand-edit task frontmatter.
+Run `backlog schema` before creating or editing unfamiliar task fields. Use repeatable `--field key=value` on create or edit, `--clear-field key` on edit, `task list --where 'key=value'` for filters, and `--sort key[:asc|:desc]` for ordering. Copy enum values exactly as listed. Never hand-edit task frontmatter.
 
 ---
 

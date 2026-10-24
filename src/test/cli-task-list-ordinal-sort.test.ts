@@ -62,6 +62,9 @@ describe("CLI task list ordinal sorting", () => {
 
 		expect(result.exitCode).toBe(1);
 		expect(result.stderr.toString()).toContain("Invalid sort field: invalid");
-		expect(result.stderr.toString()).toContain("Valid values are: priority, id, ordinal");
+		const validValues = result.stderr.toString().split("Valid values are: ")[1]?.trim().split(", ");
+		expect(validValues).toContain("priority");
+		expect(validValues).toContain("id");
+		expect(validValues).toContain("ordinal");
 	});
 });

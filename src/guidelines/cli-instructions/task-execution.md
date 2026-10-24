@@ -1,8 +1,8 @@
 ## Task Execution Guide
 
-### Custom fields
+### Task fields
 
-Run `backlog fields` before editing custom values. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, and `--sort key[:asc|:desc]` for date or enum fields. Copy enum values exactly as listed and never hand-edit frontmatter.
+Run `backlog schema` to inspect allowed fields and values. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, and `--sort key[:asc|:desc]` for declared fields. Never hand-edit frontmatter.
 
 Use this guide when you are working on an existing Backlog task.
 

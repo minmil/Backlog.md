@@ -2067,7 +2067,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		{ name: "priority", type: priorityType, description: "Task priority" },
 		{ name: "type", type: taskType, description: "Task type; case-insensitive" },
 		{ name: "project", type: projectType, description: "Task project; case-insensitive" },
-		{ name: "field", type: "key=value", description: "Set a declared custom field; repeatable" },
+		{ name: "field", type: "key=value", description: "Set any editable schema field; repeatable" },
 		{ name: "due-date", type: "date", description: "Optional due date (YYYY-MM-DD)" },
 		{ name: "acceptanceCriteria", type: "Markdown list item text", description: "Repeat --ac for multiple criteria" },
 		{ name: "ordinal", type: "Integer", description: "Non-negative manual ordering value" },
@@ -3092,8 +3092,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 			type: () => projectType({ multiple: true }),
 			description: "Filter by one or more configured projects; repeat or comma-separate values",
 		},
-		{ name: "where", type: "key<op>value", description: "Filter a declared custom field; repeat for AND" },
-		{ name: "show-fields", type: "k1,k2", description: "Append selected custom fields to --plain task rows" },
+		{ name: "where", type: "key<op>value", description: "Filter a declared schema field; repeat for AND" },
+		{ name: "show-fields", type: "k1,k2", description: "Append selected schema fields to --plain task rows" },
 		{
 			name: "labels",
 			type: "Comma-separated strings",
@@ -3156,8 +3156,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 		"filter tasks by configured project (repeatable or comma-separated)",
 		createMultiValueAccumulator(),
 	)
-	.option("--where <expr>", "filter a declared custom field (repeatable; AND)", createMultiValueAccumulator())
-	.option("--show-fields <names>", "append comma-separated custom fields to plain task rows")
+	.option("--where <expr>", "filter a declared schema field (repeatable; AND)", createMultiValueAccumulator())
+	.option("--show-fields <names>", "append comma-separated schema fields to plain task rows")
 	.option(
 		"-l, --labels <labels>",
 		"filter tasks by labels; require every comma-separated label (repeatable)",
@@ -4065,8 +4065,8 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: projectType,
 			description: "Replacement task project; case-insensitive; pass an empty value to clear",
 		},
-		{ name: "field", type: "key=value", description: "Set a declared custom field; repeatable" },
-		{ name: "clear-field", type: "key", description: "Clear a declared custom field; repeatable" },
+		{ name: "field", type: "key=value", description: "Set any editable schema field; repeatable" },
+		{ name: "clear-field", type: "key", description: "Clear an editable schema field; repeatable" },
 		{ name: "due-date", type: "date", description: "Set the task due date (YYYY-MM-DD)" },
 		{ name: "clear-due-date", type: "Boolean", description: "Clear the task due date" },
 		{
@@ -4503,7 +4503,7 @@ draftCmd
 	)
 	.option("-s, --status <status>")
 	.option("-l, --labels <labels>", "add draft labels (comma-separated or repeatable)", createMultiValueAccumulator())
-	.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
+	.option("--field <key=value>", "set any editable schema field (repeatable)", createMultiValueAccumulator())
 	.action(async (title: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);

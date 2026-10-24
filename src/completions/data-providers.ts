@@ -1,8 +1,5 @@
 import { type Core, createRuntimeCore } from "../core/backlog.ts";
-import type { BacklogConfig } from "../types/index.ts";
-import { getPriorityValues } from "../utils/priority-config.ts";
-import { getProjectValues } from "../utils/project-config.ts";
-import { getTaskTypeValues } from "../utils/task-type-config.ts";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 
 type CoreCallback<T> = (core: Core) => Promise<T>;
 
@@ -18,8 +15,12 @@ async function withCore<T>(callback: CoreCallback<T>, fallback: T): Promise<T> {
 	}
 }
 
-function getDefaultStatuses(): string[] {
-	return ["To Do", "In Progress", "Done"];
+function fieldValues(core: Core, key: "status" | "priority" | "type" | "project"): string[] {
+	return [...(core.filesystem.taskSchema.fields[key]?.values ?? [])];
+}
+
+function defaultFieldValues(key: "status" | "priority" | "type" | "project"): string[] {
+	return [...(getDefaultTaskSchema().fields[key]?.values ?? [])];
 }
 
 /**
@@ -47,13 +48,8 @@ export async function getArchivedTaskIds(): Promise<string[]> {
  */
 export async function getStatuses(): Promise<string[]> {
 	return await withCore(async (core) => {
-		const config: BacklogConfig | null = await core.filesystem.loadConfig();
-		const statuses = config?.statuses;
-		if (Array.isArray(statuses) && statuses.length > 0) {
-			return statuses;
-		}
-		return getDefaultStatuses();
-	}, getDefaultStatuses());
+		return fieldValues(core, "status");
+	}, defaultFieldValues("status"));
 }
 
 /**
@@ -61,9 +57,8 @@ export async function getStatuses(): Promise<string[]> {
  */
 export async function getPriorities(): Promise<string[]> {
 	return await withCore(async (core) => {
-		const config: BacklogConfig | null = await core.filesystem.loadConfig();
-		return getPriorityValues(config);
-	}, getPriorityValues());
+		return fieldValues(core, "priority");
+	}, defaultFieldValues("priority"));
 }
 
 /**
@@ -71,9 +66,8 @@ export async function getPriorities(): Promise<string[]> {
  */
 export async function getTaskTypes(): Promise<string[]> {
 	return await withCore(async (core) => {
-		const config: BacklogConfig | null = await core.filesystem.loadConfig();
-		return getTaskTypeValues(config);
-	}, getTaskTypeValues());
+		return fieldValues(core, "type");
+	}, defaultFieldValues("type"));
 }
 
 /**
@@ -81,8 +75,7 @@ export async function getTaskTypes(): Promise<string[]> {
  */
 export async function getProjects(): Promise<string[]> {
 	return await withCore(async (core) => {
-		const config: BacklogConfig | null = await core.filesystem.loadConfig();
-		return getProjectValues(config);
+		return fieldValues(core, "project");
 	}, []);
 }
 

@@ -1156,7 +1156,7 @@ export class FileSystem {
 
 				const promotedStatus =
 					!draft.status || draft.status.trim().toLowerCase() === "draft"
-						? config?.defaultStatus || FALLBACK_STATUS
+						? (this.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS
 						: draft.status;
 
 				// Draft-only statuses should enter the normal task workflow.

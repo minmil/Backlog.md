@@ -171,28 +171,17 @@ describe("Enhanced init command", () => {
 		};
 
 		await core.filesystem.ensureBacklogStructure();
-		await core.filesystem.saveConfig(initialConfig);
-
-		const existingConfig = await core.filesystem.loadConfig();
-		if (!existingConfig) throw new Error("Expected existing config");
+		const legacyConfig = 'project_name: "Preserve Fields Project"\nstatuses: ["To Do", "In Progress", "Done"]\n';
+		await Bun.write(core.filesystem.configFilePath, legacyConfig);
 
 		await expect(
 			initializeProject(core, {
 				projectName: "Preserve Fields Project Updated",
 				integrationMode: "none",
-				existingConfig,
+				existingConfig: initialConfig,
 			}),
 		).rejects.toThrow(/Move this config.yml key to task-schema.yml/);
-
-		const reloaded = await core.filesystem.loadConfig();
-		expect(reloaded?.projectName).toBe("Preserve Fields Project");
-		expect(reloaded?.definitionOfDone).toEqual(["Run tests", "Update docs"]);
-		expect(reloaded?.defaultAssignee).toEqual(["@alex"]);
-		expect(reloaded?.defaultReporter).toBe("@bot");
-		expect(reloaded?.includeDateTimeInDates).toBe(true);
-		expect(reloaded?.onStatusChange).toBe("echo changed");
-		expect(reloaded?.mcp?.http?.host).toBe("127.0.0.1");
-		expect(reloaded?.mcp?.http?.port).toBe(7777);
+		expect(await Bun.file(core.filesystem.configFilePath).text()).toBe(legacyConfig);
 	});
 
 	test("initializeProject keeps body-section configuration in task-schema.yml", async () => {

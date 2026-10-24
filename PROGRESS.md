@@ -77,7 +77,7 @@ The categories are (a) removed behavior or old separate flag validation, to dele
 - `src/test/task-project.test.ts`: `task project field > config override > should round-trip the projects config key`.
 - `src/test/task-type.test.ts`: `task type field > config override > should round-trip the types config key`.
 
-### (b) Changed contract or fixture shape — 159 failures
+### (b) Changed contract or fixture shape — 161 failures
 
 - `src/test/cleanup.test.ts`: `Cleanup functionality > getTerminalStatusTasksByAge > uses the final configured status as the cleanup status`; `Cleanup functionality > getTerminalStatusTasksByAge > does not collapse internal spaces when matching the cleanup status`.
 - `src/test/cli-dependency-graph.test.ts`: `CLI dependency graph > renders view, create, and edit through the one plain serializer`; `CLI dependency graph > reports an unknown dependency reference explicitly`; `CLI dependency graph > reports an ambiguous dependency identity explicitly and never picks a record`; `CLI dependency graph > adds root, nodes, and directed edges to the JSON task view without changing dependencies`.
@@ -124,11 +124,11 @@ The categories are (a) removed behavior or old separate flag validation, to dele
 - `src/test/utc-date-display.test.ts`: `UTC date display > adds UTC labels to plain task and comment date fields`.
 - `src/test/vacated-task-references.test.ts`: `references to an archived or vacated task ID > archives Closed work without changing any other record, and its dependents become ready`.
 
-### (c) Regressions — 15 failures
+- `src/test/enhanced-init.test.ts`: `Enhanced init command > re-initialization rejects config keys that moved into task-schema.yml`.
+- `src/test/cli-task-list-ordinal-sort.test.ts`: `CLI task list ordinal sorting > shows ordinal in the invalid sort field message`.
+### (c) Regressions — 13 failures
 
 - `src/test/cli-custom-prefix-id-resolution.test.ts`: `CLI task ID resolution with a custom ID prefix > stores the canonical dependency ID when a bare numeric ID is supplied`; `CLI task ID resolution with a custom ID prefix > stores one dependency when equivalent ID forms name the same task`; `CLI task ID resolution with a custom ID prefix > fails closed when a dependency ID matches two files claiming one identity`; `CLI task ID resolution with a custom ID prefix > fails closed when a dependency ID matches two files declaring the exact same ID`; `CLI task ID resolution with a custom ID prefix > fails closed when a bare dependency ID matches both a task and a draft`.
-- `src/test/cli-task-list-ordinal-sort.test.ts`: `CLI task list ordinal sorting > shows ordinal in the invalid sort field message`.
-- `src/test/enhanced-init.test.ts`: `Enhanced init command > re-initialization rejects config keys that moved into task-schema.yml`.
 - `src/test/filesystem-task-cache.test.ts`: `FileSystem task parse cache > reuses exact active and archived contents without sharing mutable parse results`; `FileSystem task parse cache > reparses an exact-content change even when size and timestamps are unchanged`; `FileSystem task parse cache > never serves a stale cached task while the file is malformed`; `FileSystem task parse cache > does not let an older in-flight read replace a newer cached value`.
 - `src/test/local-task-command-performance.test.ts`: `local task command performance boundaries > keeps CLI reads, parent resolution, and dependency validation scoped to the working copy`.
 - `src/test/mcp-stdio-exit.test.ts`: `MCP stdio shutdown > exits when stdin closes`.
@@ -136,3 +136,18 @@ The categories are (a) removed behavior or old separate flag validation, to dele
 - `src/test/web-task-list-labels-menu.test.tsx`: `TaskList labels filter menu > sorts by ID, priority and ordinal in the order the CLI lists the same tasks`.
 
 The three lists total 223 additional failures. The archive and document/decision record failures remain in the 19-failure baseline; no new archive/record failure was excluded. Focused follow-up: numeric ID and configured priority sorting now pass 49/49 tests; filesystem task cache now passes 9/9; dependency ID canonicalization and ambiguity checks pass in the focused custom-prefix suite. The other focused custom-prefix task-list failures did not reproduce in the stable full-suite snapshot and need a second gate run before a conclusion.
+
+## Combined-gate decision point after triage
+
+The stable suite classification above was corrected after inspection: the enhanced-init test wrote moved keys through `saveConfig`, which now intentionally omits them, and the ordinal-sort test asserted the old three-field error list. Both are shape changes, not regressions. Totals remain 223: (a) 49, (b) 161, (c) 13. The enhanced-init test now writes a real legacy `config.yml` and verifies re-initialization rejects it without modifying the file; its 26 focused tests pass. The ordinal-sort test now checks that the registry's valid-field list contains `id`, `priority`, and `ordinal`.
+
+Additional Task 3 work: built-in agent guides and CLI help now direct users to `backlog schema` and describe `--field`, `--where`, `--sort`, and `--show-fields` for all declared fields. Shared readiness corpus status order, draft-promotion default status, and shell completion values now read `task-schema.yml` through the schema accessor. No `custom-fields` reference remains under `src/`. `bun run check`, `bun run check:types`, and `bun run build` pass; the focused shortcut-equivalence test passes 2/2 with 51 assertions. These are focused checks, not the combined gate.
+
+The transition bridge that copied schema values onto `BacklogConfig` is removed. Remaining consumers of moved config properties are explicit stale call sites, not an active bridge:
+
+- Task 4: `src/core/backlog.ts` still reads `definitionOfDone` for legacy checklist creation; `src/core/init.ts` removes that key; `src/core/config-migration.ts` still fills old status/label keys. Task 4 removes the hard-coded sections and their config migration.
+- Task 5: `src/utils/config-watcher.ts` still validates `statuses`, `labels`, and `definitionOfDone` on watched config; it must watch and validate the schema instead.
+- Task 9/10: `src/web/App.tsx` still passes `priorities`, `definitionOfDone`, and `defaultAssignee` from config to old task screens; the schema-backed detail/create and remaining screens replace these props.
+- Task 10: `src/ui/view-switcher.ts`, `src/ui/unified-view.ts`, and `src/ui/task-viewer-with-search.ts` still read status/label/priority/type/project config properties; `src/mcp/utils/schema-generators.ts`, `src/mcp/tools/tasks/handlers.ts`, and `src/mcp/tools/definition-of-done/handlers.ts` still read old status/priority/DoD properties. The plan assigns TUI/MCP completion to Task 10.
+
+The requested **19-failure full-suite gate cannot be reached at the end of Task 3 without implementing later planned work**. Task 4 must replace the removed section flags and add JSON `sections`/`other`; Task 5 must move server task endpoints and watched schema handling; Tasks 9–10 must replace remaining web, TUI, and MCP config consumers. The (b) fixture updates must assert those new contracts, so changing only expectations now would either test absent behavior or recreate the forbidden bridge. Proposal: merge the full-suite baseline gate for Tasks 2–10, require a focused relevant test gate plus `check`, `check:types`, and `build` and a commit after each subtask, and require the 19-baseline full-suite gate before Task 11. The current combined Tasks 2–3 gate is **not passed**; the `feat(schema): tasks 2–3 schema and field registry` closure commit has not been made. Await the owner's decision on the merged gate before starting Task 4. The last stable full-suite result is still 3,379 pass / 13 skip / 242 fail; no post-triage full-suite result is claimed.
