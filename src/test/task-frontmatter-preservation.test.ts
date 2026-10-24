@@ -100,8 +100,9 @@ describe("task and draft unknown frontmatter", () => {
 			expect(parseTask(saved).updatedDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/);
 		}
 		const output = await $`bun ${CLI_PATH} task view TASK-1 --json`.cwd(root).text();
-		expect(output).not.toContain("example-capture");
-		expect(output).not.toContain("external_copy");
+		const viewed = JSON.parse(output).task;
+		expect(viewed.unknownFields.approval.origin.app).toBe("example-capture");
+		expect(viewed.unknownFields.external_copy).toEqual(viewed.unknownFields.external);
 	});
 
 	it("keeps opaque metadata while clearing owned fields and skips unchanged task and draft edits", async () => {
@@ -112,7 +113,7 @@ describe("task and draft unknown frontmatter", () => {
 				METADATA,
 				"due_date: 2026-02-01\nreferences: [old]\ndocumentation: [old]\nmodified_files: []\ntype: bug\nproject: app\nreporter: ''\nparent_task_id: ''\nsubtasks: []\npriority: ''\nonStatusChange: ''\n",
 			);
-			await $`bun ${CLI_PATH} ${command} edit ${id} --clear-due-date --clear-refs --clear-docs --type ${""} --project ${""} --label changed`
+			await $`bun ${CLI_PATH} ${command} edit ${id} --clear-due-date --clear-refs --clear-docs --clear-field type --clear-field project --label changed`
 				.cwd(root)
 				.quiet();
 			const saved = await expectMetadata(path);

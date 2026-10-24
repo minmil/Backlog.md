@@ -28,10 +28,8 @@ describe("Offline Integration Tests", () => {
 		await mkdir(join(backlogDir, "drafts"), { recursive: true });
 
 		// Create config with remote operations disabled
-		const config: BacklogConfig = {
+		const config = {
 			projectName: "Offline Test Project",
-			statuses: ["To Do", "In Progress", "Done"],
-			labels: ["bug", "feature"],
 			milestones: [],
 			dateFormat: "YYYY-MM-DD",
 			remoteOperations: false,
@@ -40,8 +38,6 @@ describe("Offline Integration Tests", () => {
 		await writeFile(
 			join(backlogDir, "config.yml"),
 			`project_name: "${config.projectName}"
-statuses: ["To Do", "In Progress", "Done"]
-labels: ["bug", "feature"]
 milestones: []
 date_format: YYYY-MM-DD
 backlog_directory: "backlog"
@@ -178,8 +174,6 @@ remote_operations: false
 		await writeFile(
 			join(backlogDir, "config.yml"),
 			`project_name: "Legacy Project"
-statuses: ["To Do", "Done"]
-labels: []
 milestones: []
 date_format: YYYY-MM-DD
 backlog_directory: "backlog"

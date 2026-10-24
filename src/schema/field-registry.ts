@@ -200,7 +200,10 @@ export class FieldRegistry {
 	setField(task: Task, key: string, value: unknown, options: { allowManaged?: boolean } = {}): Task {
 		const field = this.definition(key);
 		if (field.managed && !options.allowManaged) throw new Error(`Task field "${key}" is managed by Backlog`);
-		const normalized = this.validateValue(key, value);
+		const normalized =
+			key === "status" && /^DRAFT-/i.test(task.id) && typeof value === "string" && value.toLowerCase() === "draft"
+				? "Draft"
+				: this.validateValue(key, value);
 		if (field.required && (normalized === "" || (Array.isArray(normalized) && normalized.length === 0))) {
 			throw new Error(`Task field "${key}" is required`);
 		}

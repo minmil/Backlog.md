@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
+import { FileSystem } from "../file-system/operations.ts";
 import { CLI_AGENT_NUDGE } from "../index.ts";
 import { BACKLOG_CWD_ENV } from "../utils/runtime-cwd.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 const normalizeCliOutput = (output: string) => output.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
@@ -201,14 +202,7 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Prefix Project"',
-					'statuses: ["To Do", "In Progress", "Done"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					'task_prefix: "feat"',
-					"",
-				].join("\n"),
+				['project_name: "Prefix Project"', "date_format: yyyy-mm-dd", 'task_prefix: "feat"', ""].join("\n"),
 			);
 
 			const overview = await $`bun ${CLI_PATH} instructions overview`.cwd(TEST_DIR).text();
@@ -234,15 +228,12 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Runtime Cwd Schema Project"',
-					'statuses: ["Ready", "Review", "Closed"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					'task_prefix: "feat"',
-					"",
-				].join("\n"),
+				['project_name: "Runtime Cwd Schema Project"', "date_format: yyyy-mm-dd", 'task_prefix: "feat"', ""].join("\n"),
 			);
+			await updateTestTaskSchema(new FileSystem(TEST_DIR), (schema) => {
+				schema.fields.status!.values = ["Ready", "Review", "Closed"];
+				schema.fields.status!.default = "Ready";
+			});
 			const outsideDir = join(TEST_DIR, "outside");
 			await mkdir(outsideDir, { recursive: true });
 			const env = { ...process.env, [BACKLOG_CWD_ENV]: TEST_DIR };
@@ -327,10 +318,10 @@ describe("CLI Integration", () => {
 			expect(createHelp).toContain("title: String");
 			expect(createHelp).toContain("description: Markdown");
 			expect(createHelp).toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(createHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(createHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(createHelp).toContain("ordinal: Integer");
 			expect(createHelpCompact).toContain(
-				"assignee: Comma-separated strings - Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the configured defaultAssignee",
+				"assignee: Comma-separated strings - Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the schema default user",
 			);
 			expect(createHelpCompact).toContain(
 				'assign task to one or more @names (comma-separated or repeatable); pass "" to leave it unassigned',
@@ -346,7 +337,7 @@ describe("CLI Integration", () => {
 			);
 			expect(listHelp).toContain("status: one or more of configured statuses: To Do, In Progress, Done");
 			expect(listHelp).not.toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(listHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(listHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(listHelp).toContain("labels: Comma-separated strings");
 			expect(listHelp).toContain("search: String");
 			expect(listHelp).toContain("limit: Positive integer");
@@ -458,14 +449,12 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Schema Project"',
-					'statuses: ["Ready", "Review", "Closed"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					"",
-				].join("\n"),
+				['project_name: "Schema Project"', "date_format: yyyy-mm-dd", ""].join("\n"),
 			);
+			await updateTestTaskSchema(new FileSystem(TEST_DIR), (schema) => {
+				schema.fields.status!.values = ["Ready", "Review", "Closed"];
+				schema.fields.status!.default = "Ready";
+			});
 
 			const createHelp = await $`bun ${CLI_PATH} task create --help`.cwd(TEST_DIR).text();
 			const listHelp = await $`bun ${CLI_PATH} task list --help`.cwd(TEST_DIR).text();
@@ -490,12 +479,14 @@ describe("CLI Integration", () => {
 			expect(docHelp).toContain("content: Markdown");
 			expect(docHelp).toContain("path: Docs-relative path");
 			expect(docHelp).toContain("type: one of: readme, guide, specification, other");
-			expect(configHelp).toContain("key: one of: defaultEditor, projectName, defaultAssignee, defaultStatus");
+			expect(configHelp).toContain("key: one of: defaultEditor, projectName, dateFormat");
+			expect(configHelp).not.toContain("defaultAssignee");
+			expect(configHelp).not.toContain("defaultStatus");
 			expect(configHelp).toContain("value: String");
 			expect(searchHelp).toContain("type: one or more of: task, document, decision");
 			expect(searchHelp).toContain("status: one or more of configured statuses: To Do, In Progress, Done");
 			expect(searchHelp).not.toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(searchHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(searchHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(searchHelp).toContain("modified-file: Project-root-relative path");
 			expect(cleanupHelp).toContain("Writes:");
 		});
@@ -536,7 +527,7 @@ describe("CLI Integration", () => {
 			const docPathOutput = docPath.stdout.toString() + docPath.stderr.toString();
 
 			expect(priority.exitCode).not.toBe(0);
-			expect(priorityOutput).toContain("Invalid priority: urgent. Valid values are: High, Medium, Low");
+			expect(priorityOutput).toContain('Invalid task field "priority": allowed values: high, medium, low');
 			expect(priorityOutput).not.toContain("Error:");
 			expect(docPath.exitCode).not.toBe(0);
 			expect(docPathOutput).toContain("Document path cannot include traversal segments.");

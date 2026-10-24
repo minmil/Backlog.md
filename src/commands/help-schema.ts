@@ -127,9 +127,9 @@ function configuredFieldValues(key: "status" | "priority" | "type" | "project"):
 		let current = getRuntimeConfigStartDir();
 		while (current !== dirname(current)) {
 			const resolution = resolveBacklogDirectory(current);
-			if (resolution.configPath === configPath && resolution.backlogDir) {
+			if (resolution.configPath === configPath && resolution.backlogPath) {
 				try {
-					return [...(loadTaskSchema(resolution.backlogDir, configPath).fields[key]?.values ?? [])];
+					return [...(loadTaskSchema(resolution.backlogPath, configPath).fields[key]?.values ?? [])];
 				} catch {
 					break;
 				}

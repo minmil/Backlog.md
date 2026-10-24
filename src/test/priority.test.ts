@@ -4,7 +4,7 @@ import { parseTask } from "../markdown/parser.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
 import { getPriorityOptions, getPriorityRank, resolvePriorityValue } from "../utils/priority-config.ts";
-import { createUniqueTestDir, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 describe("Priority functionality", () => {
 	describe("priority configuration", () => {
@@ -23,21 +23,17 @@ describe("Priority functionality", () => {
 			expect(getPriorityRank("very low", config)).toBe(1);
 		});
 
-		it("round-trips configured priorities through config.yml", async () => {
+		it("round-trips configured priorities through task-schema.yml", async () => {
 			const testDir = createUniqueTestDir("priority-config");
 			const filesystem = new FileSystem(testDir);
 			try {
 				await filesystem.ensureBacklogStructure();
-				await filesystem.saveConfig({
-					projectName: "Priority Config",
-					statuses: ["To Do", "Done"],
-					labels: [],
-					priorities: ["Very High", "High", "Medium", "Low", "Very Low"],
-					dateFormat: "yyyy-mm-dd",
+				await updateTestTaskSchema(filesystem, (schema) => {
+					schema.fields.priority!.values = ["Very High", "High", "Medium", "Low", "Very Low"];
 				});
 
-				const reloaded = await new FileSystem(testDir).loadConfig();
-				expect(reloaded?.priorities).toEqual(["Very High", "High", "Medium", "Low", "Very Low"]);
+				const reloaded = new FileSystem(testDir).taskSchema;
+				expect(reloaded.fields.priority?.values).toEqual(["Very High", "High", "Medium", "Low", "Very Low"]);
 			} finally {
 				await safeCleanup(testDir);
 			}

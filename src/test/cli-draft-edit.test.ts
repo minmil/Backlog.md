@@ -217,14 +217,14 @@ describe("CLI draft edit", () => {
 			.quiet();
 		const output = normalizeCliOutput(result.stdout.toString() + result.stderr.toString());
 		expect(result.exitCode).toBe(1);
-		expect(output).toContain("Cannot combine --clear-labels with --label, --add-label, or --remove-label.");
+		expect(output).toContain('Cannot set and clear task field "labels" in one edit');
 
 		const conflict = await $`bun ${CLI_PATH} draft edit ${draft.id} --due-date 2026-01-01 --clear-due-date`
 			.cwd(TEST_DIR)
 			.nothrow()
 			.quiet();
 		expect(normalizeCliOutput(conflict.stderr.toString())).toContain(
-			"Cannot use --due-date and --clear-due-date together.",
+			'Cannot set and clear task field "due_date" in one edit',
 		);
 	});
 

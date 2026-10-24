@@ -96,7 +96,7 @@ describe("CLI milestone management", () => {
 		const core = new Core(TEST_DIR);
 
 		await $`bun ${cliPath} milestone add "Release A"`.cwd(TEST_DIR).quiet();
-		await $`bun ${cliPath} task create "Task A" --milestone "Release A" --plain`.cwd(TEST_DIR).quiet();
+		await $`bun ${cliPath} task create "Task A" --milestone m-0 --plain`.cwd(TEST_DIR).quiet();
 		await core.editTask("task-1", { milestone: "Release A" }, false);
 
 		const rename = await $`bun ${cliPath} milestone rename "Release A" "Release Prime"`.cwd(TEST_DIR).quiet();
@@ -116,7 +116,7 @@ describe("CLI milestone management", () => {
 		const core = new Core(TEST_DIR);
 
 		await $`bun ${cliPath} milestone add "Legacy Release"`.cwd(TEST_DIR).quiet();
-		await $`bun ${cliPath} task create "Legacy task" --milestone "Legacy Release" --plain`.cwd(TEST_DIR).quiet();
+		await $`bun ${cliPath} task create "Legacy task" --milestone m-0 --plain`.cwd(TEST_DIR).quiet();
 		await core.editTask("task-1", { milestone: "Legacy Release" }, false);
 
 		const rename = await $`bun ${cliPath} milestone rename "Legacy Release" "Renamed Release" --no-update-tasks`
@@ -134,7 +134,7 @@ describe("CLI milestone management", () => {
 		const core = new Core(TEST_DIR);
 
 		await $`bun ${cliPath} milestone add "Release A"`.cwd(TEST_DIR).quiet();
-		await $`bun ${cliPath} task create "Task A" --milestone "Release A" --plain`.cwd(TEST_DIR).quiet();
+		await $`bun ${cliPath} task create "Task A" --milestone m-0 --plain`.cwd(TEST_DIR).quiet();
 
 		const clear = await $`bun ${cliPath} milestone remove "Release A"`.cwd(TEST_DIR).quiet();
 
@@ -147,7 +147,7 @@ describe("CLI milestone management", () => {
 		const core = new Core(TEST_DIR);
 
 		await $`bun ${cliPath} milestone add "Keep Value"`.cwd(TEST_DIR).quiet();
-		await $`bun ${cliPath} task create "Task A" --milestone "Keep Value" --plain`.cwd(TEST_DIR).quiet();
+		await $`bun ${cliPath} task create "Task A" --milestone m-0 --plain`.cwd(TEST_DIR).quiet();
 
 		const keep = await $`bun ${cliPath} milestone remove "Keep Value" --task-handling keep`.cwd(TEST_DIR).quiet();
 
@@ -161,7 +161,7 @@ describe("CLI milestone management", () => {
 
 		await $`bun ${cliPath} milestone add "Release A"`.cwd(TEST_DIR).quiet();
 		await $`bun ${cliPath} milestone add "Release B"`.cwd(TEST_DIR).quiet();
-		await $`bun ${cliPath} task create "Task A" --milestone "Release A" --plain`.cwd(TEST_DIR).quiet();
+		await $`bun ${cliPath} task create "Task A" --milestone m-0 --plain`.cwd(TEST_DIR).quiet();
 
 		const reassign =
 			await $`bun ${cliPath} milestone remove "Release A" --task-handling reassign --reassign-to "Release B"`

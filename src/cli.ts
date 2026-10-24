@@ -2059,7 +2059,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			name: "assignee",
 			type: "Comma-separated strings",
 			description:
-				'Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the configured defaultAssignee, while -a "" leaves the task unassigned',
+				'Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the schema default user, while -a "" leaves the task unassigned',
 		},
 		{
 			name: "labels",
@@ -2126,7 +2126,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--notes <text>", "add implementation notes")
 	.option("--final-summary <text>", "add final summary")
 	.option("--ordinal <number>", "set task ordinal for custom ordering")
-	.option("-m, --milestone <milestone>", "assign task to milestone by ID or title")
+	.option("-m, --milestone <milestone>", "assign task to milestone by ID")
 	.option("--draft")
 	.option("-p, --parent <taskId>", "specify existing parent task ID, not a milestone ID")
 	.option(
@@ -3916,7 +3916,7 @@ function configureEditCommand(cmd: Command) {
 		.option("--reporter <handle>", "set task reporter")
 		.option("--clear-due-date", "clear task due date")
 		.option("--ordinal <number>", "set task ordinal for custom ordering")
-		.option("-m, --milestone <milestone>", "assign task to milestone by ID or title")
+		.option("-m, --milestone <milestone>", "assign task to milestone by ID")
 		.option("--clear-milestone", "clear task milestone assignment")
 		.option("--plain", "use plain text output after editing")
 		.option(
@@ -4562,7 +4562,7 @@ const draftEditCommand = addHelpSchema(draftCmd.command("edit [taskId]"), {
 		{ name: "clear-labels", type: "Boolean", description: "Remove all labels" },
 		{ name: "priority", type: "String", description: "Set priority (configured priorities)" },
 		{ name: "ordinal", type: "Number", description: "Set ordinal for custom ordering" },
-		{ name: "milestone", type: "String", description: "Assign to milestone by ID or title" },
+		{ name: "milestone", type: "String", description: "Assign to milestone by ID" },
 		{ name: "clear-milestone", type: "Boolean", description: "Clear the milestone assignment" },
 		{ name: "ac", type: "Comma-separated strings", description: "Add acceptance criteria; repeatable" },
 		{
