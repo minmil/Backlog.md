@@ -3,6 +3,7 @@ import type { TaskSchema } from "../schema/types.ts";
 import type { AcceptanceCriterion, Decision, Document, Task } from "../types/index.ts";
 import { normalizeAssignee } from "../utils/assignee.ts";
 import { stringifyFrontmatter } from "./frontmatter.ts";
+import { parseSections, serializeSections } from "./sections.ts";
 import {
 	AcceptanceCriteriaManager,
 	CommentsManager,
@@ -107,6 +108,19 @@ export function serializeTask(
 	}
 	if (typeof task.finalSummary === "string" && sectionChanged(rawContent, "finalSummary", task.finalSummary)) {
 		contentBody = updateTaskFinalSummary(contentBody, task.finalSummary);
+	}
+	if (task.sections) {
+		const originalSections = parseSections(rawContent, taskSchema).sections;
+		const changedIds = Object.keys(taskSchema.sections).filter(
+			(id) => JSON.stringify(task.sections?.[id]) !== JSON.stringify(originalSections[id]),
+		);
+		if (changedIds.length > 0) {
+			const parsed = parseSections(contentBody, taskSchema);
+			for (const id of changedIds) {
+				parsed.sections[id] = task.sections[id] ?? (taskSchema.sections[id]?.kind === "markdown" ? "" : []);
+			}
+			contentBody = serializeSections(parsed, taskSchema);
+		}
 	}
 
 	const serialized = stringifyFrontmatter(contentBody, frontmatter, originalContent);

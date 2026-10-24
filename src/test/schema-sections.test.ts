@@ -1,4 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { Core } from "../core/backlog.ts";
 import {
 	appendMarkdown,
 	checklistAdd,
@@ -11,6 +13,12 @@ import {
 	setMarkdown,
 } from "../markdown/sections.ts";
 import { getDefaultTaskSchema } from "../schema/index.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 function schema() {
 	const result = structuredClone(getDefaultTaskSchema());
@@ -19,6 +27,10 @@ function schema() {
 }
 
 describe("schema section engine", () => {
+	const createdDirectories: string[] = [];
+	afterEach(async () => {
+		for (const path of createdDirectories.splice(0)) await safeCleanup(path);
+	});
 	it("round-trips markdown, checklist and log with content outside markers unchanged", () => {
 		const taskSchema = schema();
 		const body = [
@@ -83,5 +95,42 @@ describe("schema section engine", () => {
 		const reloaded = parseSections(body, taskSchema);
 		expect(reloaded.other).toBe(body);
 		expect(serializeSections(reloaded, taskSchema)).toBe(body);
+	});
+
+	it("persists generic sections through core create and edit without changing other text", async () => {
+		const path = createUniqueTestDir("schema-sections-core");
+		createdDirectories.push(path);
+		const core = new Core(path);
+		await initializeFilesystemTestProject(core, "Sections");
+		await updateTestTaskSchema(core.filesystem, (value) => {
+			value.users = [{ handle: "@alice", name: "Alice", default: true }];
+		});
+		const created = await core.createTaskFromInput(
+			{
+				title: "Generic sections",
+				rawContent: "Owner note with  spaces",
+				sections: { description: "Initial description" },
+			},
+			false,
+		);
+		const updated = await core.updateTaskFromInput(
+			created.task.id,
+			{
+				appendSections: { description: ["Second paragraph"] },
+				addSectionItems: { acceptance: ["Confirm result"] },
+				appendLog: { body: "Discussed with client", date: "2026-10-23" },
+			},
+			false,
+		);
+		if (!updated.filePath) throw new Error("Updated task has no file path");
+		const content = await readFile(updated.filePath, "utf8");
+		expect(content).toContain("Owner note with  spaces");
+		expect(content).toContain("<!-- SECTION:DESCRIPTION:BEGIN -->");
+		expect(content).toContain("Initial description\n\nSecond paragraph");
+		expect(content).toContain("- [ ] #1 Confirm result");
+		expect(content).toContain("author: @alice");
+		const reloaded = await core.filesystem.loadTask(created.task.id);
+		expect(reloaded?.sections?.description).toBe("Initial description\n\nSecond paragraph");
+		expect(reloaded?.other).toContain("Owner note with  spaces");
 	});
 });

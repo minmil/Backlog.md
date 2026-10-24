@@ -61,6 +61,10 @@ export interface Task {
 	documentation?: string[];
 	modifiedFiles?: string[];
 	readonly rawContent?: string; // Raw markdown content without frontmatter (read-only: do not modify directly)
+	/** Values of body sections declared by task-schema.yml. */
+	sections?: Record<string, import("../markdown/sections.ts").SectionValue>;
+	/** Body content outside configured section markers, in its original order. */
+	other?: string;
 	description?: string;
 	implementationPlan?: string;
 	implementationNotes?: string;
@@ -130,6 +134,7 @@ export function isReadOnlyTask(task: Task): boolean {
 
 export interface TaskCreateInput {
 	title: string;
+	sections?: Record<string, string>;
 	reporter?: string;
 	onStatusChange?: string;
 	fieldValues?: Record<string, unknown>;
@@ -158,6 +163,13 @@ export interface TaskCreateInput {
 }
 
 export interface TaskUpdateInput {
+	setSections?: Record<string, string>;
+	appendSections?: Record<string, string[]>;
+	addSectionItems?: Record<string, string[]>;
+	checkSectionItems?: Record<string, number[]>;
+	uncheckSectionItems?: Record<string, number[]>;
+	removeSectionItems?: Record<string, number[]>;
+	appendLog?: { section?: string; body: string; author?: string; date?: string };
 	/** Schema field writes, including both core and declared custom keys. */
 	schemaFields?: Record<string, unknown>;
 	clearSchemaFields?: string[];

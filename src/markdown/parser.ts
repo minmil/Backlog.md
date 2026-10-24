@@ -5,6 +5,7 @@ import type { AcceptanceCriterion, Decision, Document, Milestone, ParsedMarkdown
 import { normalizeDueDate } from "../utils/due-date.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
 import { parseFrontmatter, preprocessFrontmatter } from "./frontmatter.ts";
+import { parseSections } from "./sections.ts";
 import {
 	AcceptanceCriteriaManager,
 	CommentsManager,
@@ -118,6 +119,7 @@ export function parseTask(content: string, _legacySchema?: unknown, suppliedSche
 	const structuredCriteria: AcceptanceCriterion[] = AcceptanceCriteriaManager.parseAllCriteria(rawContent);
 	const structuredDefinitionOfDone: AcceptanceCriterion[] = DefinitionOfDoneManager.parseAllCriteria(rawContent);
 	const comments = CommentsManager.parseAllComments(rawContent);
+	const parsedSections = parseSections(rawContent, taskSchema);
 
 	// Parse other sections
 	const descriptionSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.description) || "";
@@ -145,6 +147,8 @@ export function parseTask(content: string, _legacySchema?: unknown, suppliedSche
 		documentation: Array.isArray(frontmatter.documentation) ? frontmatter.documentation.map(String) : [],
 		modifiedFiles: Array.isArray(frontmatter.modified_files) ? frontmatter.modified_files.map(String) : [],
 		rawContent,
+		sections: parsedSections.sections,
+		other: parsedSections.other,
 		acceptanceCriteriaItems: structuredCriteria,
 		definitionOfDoneItems: structuredDefinitionOfDone,
 		description: descriptionSection,

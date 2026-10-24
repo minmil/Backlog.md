@@ -1,5 +1,6 @@
 import { isAbsolute, join, relative } from "node:path";
 import type { TaskDetail, TaskListItem } from "../core/task-detail.ts";
+import { parseSections } from "../markdown/sections.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
 import { getDefaultTaskSchema } from "../schema/index.ts";
 import type {
@@ -121,10 +122,16 @@ export function taskViewJson(
 	projectRoot: string,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
 ) {
+	const body = parseSections(task.rawContent ?? "", registry.schema);
 	return {
 		schemaVersion: 2,
 		kind: "task-view" as const,
-		task: { ...toSchemaTaskJson(task, registry), path: toProjectRelativePath(projectRoot, task.filePath) },
+		task: {
+			...toSchemaTaskJson(task, registry),
+			path: toProjectRelativePath(projectRoot, task.filePath),
+			sections: body.sections,
+			other: body.other,
+		},
 	};
 }
 
@@ -133,10 +140,16 @@ export function draftViewJson(
 	projectRoot: string,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
 ) {
+	const body = parseSections(draft.rawContent ?? "", registry.schema);
 	return {
 		schemaVersion: 2,
 		kind: "draft-view" as const,
-		draft: { ...toSchemaTaskJson(draft, registry), path: toProjectRelativePath(projectRoot, draft.filePath) },
+		draft: {
+			...toSchemaTaskJson(draft, registry),
+			path: toProjectRelativePath(projectRoot, draft.filePath),
+			sections: body.sections,
+			other: body.other,
+		},
 	};
 }
 

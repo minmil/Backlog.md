@@ -17,6 +17,16 @@ import {
 import { type GitBranchTip, type GitIndexEntry, GitOperations } from "../git/operations.ts";
 import { FrontmatterReferenceError, parseFrontmatter } from "../markdown/frontmatter.ts";
 import { extractSection, parseTask } from "../markdown/parser.ts";
+import {
+	appendMarkdown,
+	checklistAdd,
+	checklistCheck,
+	checklistRemove,
+	checklistUncheck,
+	logAppend,
+	parseSections,
+	setMarkdown,
+} from "../markdown/sections.ts";
 import { assertSectionInputHasNoMarkerLines, assertValidChecklistMarks } from "../markdown/structured-sections.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
 import {
@@ -2242,6 +2252,10 @@ export class Core {
 				throw formatMissingDependenciesError(invalidDependencies);
 			}
 			const ordinal = await this.resolveCreateOrdinal(input.ordinal, isDraft);
+			const createdSections = parseSections(input.rawContent ?? "", taskSchema);
+			for (const [id, value] of Object.entries(input.sections ?? {})) {
+				setMarkdown(createdSections, id, value, taskSchema);
+			}
 			const task: Task = {
 				id,
 				title: input.title.trim(),
@@ -2256,6 +2270,8 @@ export class Core {
 				documentation: normalizedDocumentation,
 				modifiedFiles: normalizedModifiedFiles,
 				rawContent: input.rawContent ?? "",
+				sections: createdSections.sections,
+				other: createdSections.other,
 				createdDate,
 				...(dueDate && { dueDate }),
 				...(parentTaskId && { parentTaskId }),
@@ -3045,6 +3061,47 @@ export class Core {
 		}
 
 		task.definitionOfDoneItems = definitionOfDone;
+
+		const sectionEditRequested = Boolean(
+			input.setSections ||
+				input.appendSections ||
+				input.addSectionItems ||
+				input.checkSectionItems ||
+				input.uncheckSectionItems ||
+				input.removeSectionItems ||
+				input.appendLog,
+		);
+		if (sectionEditRequested) {
+			const parsed = parseSections(task.rawContent ?? "", taskSchema);
+			const before = JSON.stringify(parsed.sections);
+			for (const [id, value] of Object.entries(input.setSections ?? {})) setMarkdown(parsed, id, value, taskSchema);
+			for (const [id, values] of Object.entries(input.appendSections ?? {})) {
+				for (const value of values) appendMarkdown(parsed, id, value, taskSchema);
+			}
+			for (const [id, values] of Object.entries(input.addSectionItems ?? {})) {
+				for (const value of values) checklistAdd(parsed, id, value, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(input.checkSectionItems ?? {})) {
+				for (const index of indices) checklistCheck(parsed, id, index, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(input.uncheckSectionItems ?? {})) {
+				for (const index of indices) checklistUncheck(parsed, id, index, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(input.removeSectionItems ?? {})) {
+				for (const index of [...indices].sort((a, b) => b - a)) checklistRemove(parsed, id, index, taskSchema);
+			}
+			if (input.appendLog) {
+				const logId =
+					input.appendLog.section ??
+					Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+				if (!logId) throw new Error("No log section is configured in task-schema.yml.");
+				logAppend(parsed, logId, input.appendLog, taskSchema);
+			}
+			if (JSON.stringify(parsed.sections) !== before) {
+				task.sections = parsed.sections;
+				mutated = true;
+			}
+		}
 
 		return { task, mutated };
 	}
