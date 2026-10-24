@@ -2432,8 +2432,15 @@ export class Core {
 				}
 			};
 			for (const key of input.clearSchemaFields ?? []) apply(key, registry.clearField(task, key));
-			for (const [key, value] of Object.entries(input.schemaFields ?? {}))
-				apply(key, registry.setField(task, key, value, { allowManaged: key === "ordinal" }));
+			for (const [key, value] of Object.entries(input.schemaFields ?? {})) {
+				let resolved = value;
+				if (key === "dependencies" && Array.isArray(value)) {
+					const { valid, invalid } = await validateDependencies(value, this, task);
+					if (invalid.length > 0) throw formatMissingDependenciesError(invalid);
+					resolved = valid;
+				}
+				apply(key, registry.setField(task, key, resolved, { allowManaged: key === "ordinal" }));
+			}
 			for (const [operation, assignments] of [
 				["add", input.addSchemaFields],
 				["remove", input.removeSchemaFields],

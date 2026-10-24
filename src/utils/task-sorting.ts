@@ -225,7 +225,7 @@ export function sortTasks<T extends SortableTask>(
 		return [...items].sort((a, b) => {
 			const left = registry.getField(a as unknown as Task, fieldKey);
 			const right = registry.getField(b as unknown as Task, fieldKey);
-			const order = registry.compare(fieldKey, left, right);
+			const order = registry.compare(fieldKey, left, right, fieldKey === "priority" ? priorityOrder : undefined);
 			return order ? (direction === "desc" ? -order : order) : compareTaskIds(a.id, b.id);
 		});
 	}

@@ -1,0 +1,46 @@
+# Task fields and body sections are configured here. Edit this file to suit your project.
+# Example: project.values: [Website, API], then set project.hidden: false and add
+# project to ui.board.card and ui.board.filters to show it on the board.
+users: []
+
+fields:
+  id: {type: id, core: true, managed: true, hidden: true, required: true}
+  title: {type: text, core: true, required: true, label: Title}
+  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
+  assignee: {type: user-list, core: true, label: Assignee}
+  reporter: {type: user, core: true, label: Reporter}
+  created_date: {type: datetime, core: true, managed: true, required: true, label: Created}
+  updated_date: {type: datetime, core: true, managed: true, label: Updated}
+  due_date: {type: date, core: true, label: Due}
+  labels: {type: string-list, core: true, label: Labels, values: []}
+  milestone: {type: milestone-ref, core: true, label: Milestone}
+  dependencies: {type: task-ref-list, core: true, label: Dependencies}
+  references: {type: string-list, core: true, label: References}
+  documentation: {type: string-list, core: true, label: Documentation}
+  modified_files: {type: string-list, core: true, hidden: true, label: Modified files}
+  parent_task_id: {type: task-ref, core: true, label: Parent task}
+  subtasks: {type: task-ref-list, core: true, managed: true, hidden: true, label: Subtasks}
+  priority: {type: enum, core: true, values: [high, medium, low], label: Priority}
+  type: {type: enum, core: true, values: [bug, feature, enhancement, task, chore, docs, spike], label: Type}
+  project: {type: enum, core: true, values: [], hidden: true, label: Project}
+  ordinal: {type: number, core: true, managed: true, label: Ordinal}
+  onStatusChange: {type: text, core: true, hidden: true, label: On status change}
+  # Computed from Git; read-only and never written as task frontmatter.
+  branch: {type: text, core: true, managed: true, hidden: true, label: Branch}
+
+sections:
+  description: {kind: markdown, title: Description}
+  acceptance: {kind: checklist, title: Acceptance Criteria}
+  log: {kind: log, title: Log}
+
+ui:
+  board:
+    card: [type, priority, labels, created_date, updated_date, due_date, assignee]
+    filters: [assignee, labels, type, priority]
+  task_list:
+    columns: [status, priority, ordinal, labels, assignee, milestone, created_date]
+    filters: [status, priority, milestone, labels]
+  milestones:
+    row: [status, priority]
+  detail:
+    order: []

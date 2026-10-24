@@ -277,13 +277,15 @@ export class FieldRegistry {
 		}
 	}
 
-	compare(key: string, a: FieldValue | undefined, b: FieldValue | undefined): number {
+	compare(key: string, a: FieldValue | undefined, b: FieldValue | undefined, enumOrder?: readonly string[]): number {
 		const field = this.definition(key);
 		if (a === undefined) return b === undefined ? 0 : 1;
 		if (b === undefined) return -1;
+		if (key === "id" && typeof a === "string" && typeof b === "string")
+			return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
 		if (field.type === "enum" && typeof a === "string" && typeof b === "string") {
 			const order = (value: string) => {
-				const index = (field.values ?? []).indexOf(value);
+				const index = (enumOrder ?? field.values ?? []).indexOf(value);
 				return index < 0 ? Number.POSITIVE_INFINITY : index;
 			};
 			const aOrder = order(a);
