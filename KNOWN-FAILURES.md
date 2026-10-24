@@ -6,19 +6,14 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 The Task 4 diagnostic full-suite run at `3aefddf` exposed fixture migrations and two additional server API contracts. The active ledger below assigns those contracts to Task 5. All ten former Task 4 entries were cleared by the generic section engine and migrated tests.
 
-### Task 5 — server schema/API and live-update paths (28)
+### Task 5 — server schema/API and live-update paths (18)
 
-- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > filters search results by a single project` — Task 5: server search must read project values from the schema.
-- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > applies OR semantics for repeated project params` — Task 5: server project filters need schema-backed OR matching.
-- `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > rejects unsupported project filters with 400 and lists valid values` — Task 5: server validation must use schema project values.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > reuses branch state while reconciling cached working-copy tasks across statistics requests` — Task 5: statistics must load tasks and metadata with the active schema.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > keeps board work blocked by an unfinished archived dependency without counting that dependency` — Task 5: statistics readiness needs schema-backed task loading.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > uses fresh priorities without rebuilding the task corpus` — Task 5: priority values moved from config to the schema.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > reconciles a selected backlog root before reading its statistics` — Task 5: root reconciliation must include the selected schema.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > refreshes statistics after an active branch ref moves` — Task 5: branch statistics must use schema-backed metadata after refresh.
 - `src/test/server-statistics-endpoint.test.ts` — `BacklogServer statistics endpoint > keeps task and config generations coherent during a same-root config change` — Task 5: generation coherence must include schema changes.
-- `src/test/server-task-project-endpoint.test.ts` — `BacklogServer task project field > persists project selected via the create endpoint` — Task 5: create must validate and write project through the registry.
-- `src/test/server-task-project-endpoint.test.ts` — `BacklogServer task project field > persists and clears project through the update endpoint` — Task 5: update must validate and clear project through the registry.
 - `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > previews and executes cleanup for the final configured status` — Task 5: cleanup must read final status from the schema.
 - `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > archives only the tasks the preview showed` — Task 5: cleanup preview and execution must share schema-backed status rules.
 - `src/test/server-cleanup-endpoint.test.ts` — `BacklogServer cleanup endpoints > skips a previewed task that left the final status before the click` — Task 5: cleanup must recheck the schema-backed final status.
@@ -28,11 +23,6 @@ The Task 4 diagnostic full-suite run at `3aefddf` exposed fixture migrations and
 - `src/test/content-store.test.ts` — `ContentStore > rebinds both config and content watchers when browser initialization selects a custom root` — Task 5: browser root selection must bind its schema watcher too.
 - `src/test/server-tasks-spa-fallback.test.ts` — `BacklogServer task SPA fallback > keeps config and duplicate-task reads fail-closed while a watched config is unusable` — Task 5: server watcher validation must handle config and schema separately.
 - `src/test/shared-branch-task-loader.test.ts` — `shared immutable branch task loading > returns statistics metadata from the same stable config generation as its tasks` — Task 5: branch loading must keep schema and task generations coherent.
-- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > uses configured custom priorities for task and search filters` — Task 5: server task/search priority values must come from schema.
-- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > persists configured task types through create, edit, and clear` — Task 5: server writes must use registry type validation.
-- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > rejects unsupported task types from the Web task API` — Task 5: API validation must reject types outside the schema.
-- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > appends comments through the task update API and indexes comment text` — Task 5: replace the legacy comment request with the schema log operation and index its content.
-- `src/test/server-acceptance-criteria.test.ts` — `browser acceptance criteria replacement > honors explicit true and false instead of inheriting matching checks` — Task 5: replace the legacy checklist request with the schema checklist operation.
 - `src/test/config-watcher.test.ts` — `config watcher > retains the cached defaultAssignee while an inline edit is not a usable assignee value` — Task 5: default user moved to the schema's `users` block.
 - `src/test/config-watcher.test.ts` — `config watcher > publishes root config resolution from the same accepted content` — Task 5: watcher acceptance must track schema and config together.
 - `src/test/config-watcher.test.ts` — `config watcher > keeps accepting the sparse config shape supported by the parser` — Task 5: watcher validation must accept config without moved schema keys.

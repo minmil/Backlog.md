@@ -20,7 +20,6 @@ import {
 	type ContentRecordKind,
 	DOCUMENT_TYPE_VALUES,
 	type Document,
-	type SearchPriorityFilter,
 	type SearchResultType,
 	type Task,
 	type TaskCreateInput,
@@ -32,13 +31,6 @@ import { normalizeDueDate } from "../utils/due-date.ts";
 import { isAmbiguousIdError } from "../utils/entity-id.ts";
 import { resolveMilestoneInputForStorage } from "../utils/milestone-storage.ts";
 import { DRAFT_PREFIX, extractAnyPrefix, getTaskPrefixError } from "../utils/prefix-config.ts";
-import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
-import {
-	formatValidProjectValues,
-	getProjectValues,
-	noProjectsConfiguredMessage,
-	resolveProjectValues,
-} from "../utils/project-config.ts";
 import { formatValidStatuses, getCanonicalStatuses, getValidStatuses } from "../utils/status.ts";
 import { isValidTaskId } from "../utils/task-id.ts";
 import { isAmbiguousTaskIdError, LOCAL_TASK_LOOKUP_HINT, taskNotFoundMessage } from "../utils/task-path.ts";
@@ -853,17 +845,19 @@ export class BacklogServer {
 		}
 		const labels = labelParams.map((label) => label.trim()).filter((label) => label.length > 0);
 
-		const config = await this.core.filesystem.loadConfig();
+		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 		let priority: string | undefined;
 		if (priorityParam) {
-			const normalizedPriority = resolvePriorityValue(priorityParam, config);
-			if (!normalizedPriority) {
+			try {
+				priority = registry.validateValue("priority", priorityParam) as string;
+			} catch {
 				return Response.json(
-					{ error: `Invalid priority filter. Valid values are: ${formatValidPriorityValues(config)}` },
+					{
+						error: `Invalid priority filter. Valid values are: ${(registry.schema.fields.priority?.values ?? []).join(", ")}`,
+					},
 					{ status: 400 },
 				);
 			}
-			priority = normalizedPriority;
 		}
 
 		let excludeStatus: string[] | undefined;
@@ -917,7 +911,6 @@ export class BacklogServer {
 			refreshCrossBranch,
 		});
 
-		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 		return Response.json(tasks.map((task) => this.taskResponse(task, registry)));
 	}
 
@@ -981,7 +974,7 @@ export class BacklogServer {
 			const filters: {
 				status?: string | string[];
 				excludeStatus?: string | string[];
-				priority?: SearchPriorityFilter | SearchPriorityFilter[];
+				priority?: string | string[];
 				project?: string | string[];
 				assignee?: string | string[];
 				labels?: string | string[];
@@ -1008,39 +1001,54 @@ export class BacklogServer {
 			}
 
 			if (priorityParamsRaw.length > 0) {
-				const config = await this.core.filesystem.loadConfig();
-				const normalizedPriorities = priorityParamsRaw.map((value) => resolvePriorityValue(value, config));
-				const invalidPriority = priorityParamsRaw[normalizedPriorities.findIndex((value) => !value)];
+				const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+				const normalizedPriorities = priorityParamsRaw.map((value) => {
+					try {
+						return registry.validateValue("priority", value) as string;
+					} catch {
+						return null;
+					}
+				});
+				const invalidPriority = priorityParamsRaw[normalizedPriorities.findIndex((value) => value === null)];
 				if (invalidPriority) {
 					return Response.json(
 						{
-							error: `Unsupported priority '${invalidPriority}'. Use ${formatValidPriorityValues(config)}.`,
+							error: `Unsupported priority '${invalidPriority}'. Use ${(registry.schema.fields.priority?.values ?? []).join(", ")}.`,
 						},
 						{ status: 400 },
 					);
 				}
-				const casted = normalizedPriorities.filter((value): value is SearchPriorityFilter => Boolean(value));
+				const casted = normalizedPriorities.filter((value): value is string => value !== null);
 				filters.priority = casted.length === 1 ? casted[0] : casted;
 			}
 
 			if (projectParamsRaw.length > 0) {
-				const config = await this.core.filesystem.loadConfig();
-				if (getProjectValues(config).length === 0) {
+				const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+				const validProjects = registry.schema.fields.project?.values ?? [];
+				if (validProjects.length === 0) {
 					return Response.json(
-						{ error: noProjectsConfiguredMessage(this.core.filesystem.configFilePath) },
+						{ error: "No project values configured. Edit task-schema.yml fields.project.values." },
 						{ status: 400 },
 					);
 				}
-				const { values: canonicalProjects, invalid } = resolveProjectValues(projectParamsRaw, config);
-				if (invalid.length > 0) {
+				const canonicalProjects = projectParamsRaw.map((value) => {
+					try {
+						return registry.validateValue("project", value) as string;
+					} catch {
+						return null;
+					}
+				});
+				const invalidProject = projectParamsRaw[canonicalProjects.findIndex((value) => value === null)];
+				if (invalidProject) {
 					return Response.json(
 						{
-							error: `Unsupported project '${invalid[0]}'. Use ${formatValidProjectValues(config)}.`,
+							error: `Unsupported project '${invalidProject}'. Use ${validProjects.join(", ")}.`,
 						},
 						{ status: 400 },
 					);
 				}
-				filters.project = canonicalProjects.length === 1 ? canonicalProjects[0] : canonicalProjects;
+				const values = canonicalProjects.filter((value): value is string => value !== null);
+				filters.project = values.length === 1 ? values[0] : values;
 			}
 
 			if (assigneeParamsRaw.length > 0) {

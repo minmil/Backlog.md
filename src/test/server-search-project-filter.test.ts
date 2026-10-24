@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { FileSystem } from "../file-system/operations.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, retry, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, retry, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 let server: BacklogServer | null = null;
@@ -17,7 +17,7 @@ const webTask: Task = {
 	createdDate: "2025-09-20 10:00",
 	labels: [],
 	dependencies: [],
-	description: "Alpha token appears here",
+	sections: { description: "Alpha token appears here" },
 	project: "Web",
 };
 
@@ -29,7 +29,7 @@ const apiTask: Task = {
 	createdDate: "2025-09-20 10:30",
 	labels: [],
 	dependencies: [],
-	description: "Alpha token appears here too",
+	sections: { description: "Alpha token appears here too" },
 	project: "API",
 };
 
@@ -41,7 +41,7 @@ const unprojectedTask: Task = {
 	createdDate: "2025-09-20 11:00",
 	labels: [],
 	dependencies: [],
-	description: "Alpha token with no project",
+	sections: { description: "Alpha token with no project" },
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -61,9 +61,11 @@ describe("BacklogServer search endpoint project filtering", () => {
 			projectName: "Server Search Project Filter",
 			statuses: ["To Do", "In Progress", "Done"],
 			labels: [],
-			projects: ["Web", "API", "Mobile"],
 			dateFormat: "YYYY-MM-DD",
 			remoteOperations: false,
+		});
+		await updateTestTaskSchema(filesystem, (schema) => {
+			if (schema.fields.project) schema.fields.project.values = ["Web", "API", "Mobile"];
 		});
 
 		await filesystem.saveTask(webTask);

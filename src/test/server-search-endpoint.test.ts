@@ -5,7 +5,7 @@ import type { Core } from "../core/backlog.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Decision, Document, Milestone, Task } from "../types/index.ts";
-import { createUniqueTestDir, retry, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, retry, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 let server: BacklogServer | null = null;
@@ -84,13 +84,16 @@ describe("BacklogServer search endpoint", () => {
 		await filesystem.ensureBacklogStructure();
 		await filesystem.saveConfig({
 			projectName: "Server Search",
-			statuses: ["To Do", "In Progress", "Done"],
+			statuses: [],
 			labels: [],
-			types: ["Bug", "Feature", "Customer Request"],
-			priorities: ["Very High", "High", "Medium", "Low", "Very Low"],
 			milestones: [],
 			dateFormat: "YYYY-MM-DD",
 			remoteOperations: false,
+		});
+		await updateTestTaskSchema(filesystem, (schema) => {
+			schema.users = [{ handle: "@web", name: "Web", default: true }];
+			if (schema.fields.type) schema.fields.type.values = ["Bug", "Feature", "Customer Request"];
+			if (schema.fields.priority) schema.fields.priority.values = ["Very High", "High", "Medium", "Low", "Very Low"];
 		});
 
 		await filesystem.saveTask(baseTask);
@@ -356,7 +359,7 @@ describe("BacklogServer search endpoint", () => {
 
 		expect(createResponse.status).toBe(400);
 		expect(await createResponse.json()).toEqual({
-			error: "Invalid type: Epic. Valid types are: Bug, Feature, Customer Request",
+			error: 'Invalid task field "type": allowed values: Bug, Feature, Customer Request',
 		});
 
 		const created = await fetchJson<Task>("/api/tasks", {
@@ -372,12 +375,12 @@ describe("BacklogServer search endpoint", () => {
 
 		expect(updateResponse.status).toBe(400);
 		expect(await updateResponse.json()).toEqual({
-			error: "Invalid type: Epic. Valid types are: Bug, Feature, Customer Request",
+			error: 'Invalid task field "type": allowed values: Bug, Feature, Customer Request',
 		});
 		expect((await fetchJson<Task>(`/api/task/${created.id}`)).type).toBe("Bug");
 	});
 
-	it("appends comments through the task update API and indexes comment text", async () => {
+	it("appends schema log entries through the task update API and indexes their text", async () => {
 		const created = await fetchJson<Task>("/api/tasks", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
@@ -388,19 +391,17 @@ describe("BacklogServer search endpoint", () => {
 		});
 
 		const updated = await fetchJson<Task>(`/api/tasks/${created.id}`, {
-			method: "PUT",
+			method: "PATCH",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				commentsAppend: ["server-comment-token body"],
-				commentAuthor: "@web",
+				log: { section: "log", body: "server-comment-token body", author: "@web" },
 			}),
 		});
 
-		expect(updated.comments?.[0]?.author).toBe("@web");
-		expect(updated.comments?.[0]?.body).toBe("server-comment-token body");
+		expect(updated.sections?.log?.[0]).toMatchObject({ author: "@web", body: "server-comment-token body" });
 
 		const fetched = await fetchJson<Task>(`/api/task/${created.id}`);
-		expect(fetched.comments?.[0]?.body).toBe("server-comment-token body");
+		expect(fetched.sections?.log?.[0]).toMatchObject({ body: "server-comment-token body" });
 
 		const results = await retry(
 			async () => {
