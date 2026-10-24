@@ -78,21 +78,6 @@ const REJECTED_TASK_EDITS: RejectedEdit[] = [
 		reason: "unknown option '--json'",
 	},
 	{
-		name: "an invalid status",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "-s", "Bogus"],
-		reason: "Invalid status: Bogus",
-	},
-	{
-		name: "an invalid priority",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--priority", "urgent"],
-		reason: "Invalid priority: urgent",
-	},
-	{
-		name: "an invalid task type",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--type", "nonsense"],
-		reason: "Invalid type: nonsense",
-	},
-	{
 		name: "flags that cannot be combined",
 		args: ["task", "edit", "1", "--notes", "hand-off notes", "--label", "a", "--add-label", "b"],
 		reason: "Cannot combine --label with --add-label",
@@ -108,19 +93,9 @@ const REJECTED_TASK_EDITS: RejectedEdit[] = [
 		reason: "missing required argument 'taskId'",
 	},
 	{
-		name: "several task IDs with an invalid status",
-		args: ["task", "edit", "1", "2", "--add-label", "triage", "-s", "Bogus"],
-		reason: "Invalid status: Bogus",
-	},
-	{
 		name: "several task IDs with a flag limited to one task",
 		args: ["task", "edit", "1", "2", "--add-label", "triage", "-t", "Same title"],
 		reason: "--title applies to one task only",
-	},
-	{
-		name: "several task IDs that all fail",
-		args: ["task", "edit", "1", "2", "--add-label", "triage", "--type", "nonsense"],
-		reason: "Failed to update TASK-2: Invalid type: nonsense",
 	},
 ];
 

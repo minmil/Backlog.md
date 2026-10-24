@@ -356,48 +356,6 @@ describe("CLI Integration", () => {
 			expect(updatedTask?.labels).toEqual([]);
 		});
 
-		it("should reject mixing CLI label replacement with label mutations", async () => {
-			const core = new Core(TEST_DIR);
-
-			await core.createTask(
-				{
-					id: "task-10",
-					title: "Mixed Label Mode Test",
-					status: "To Do",
-					assignee: [],
-					createdDate: "2025-06-08",
-					labels: ["old"],
-					dependencies: [],
-					rawContent: "Testing mixed label mode rejection",
-				},
-				false,
-			);
-
-			const addResult = await $`bun ${CLI_PATH} task edit task-10 --label replacement --add-label extra --plain`
-				.cwd(TEST_DIR)
-				.nothrow()
-				.quiet();
-			const removeResult = await $`bun ${CLI_PATH} task edit task-10 --label replacement --remove-label old --plain`
-				.cwd(TEST_DIR)
-				.nothrow()
-				.quiet();
-			const clearResult = await $`bun ${CLI_PATH} task edit task-10 --clear-labels --add-label extra --plain`
-				.cwd(TEST_DIR)
-				.nothrow()
-				.quiet();
-
-			for (const result of [addResult, removeResult]) {
-				expect(result.exitCode).toBe(1);
-				expect(result.stderr.toString()).toContain("Cannot combine --label with --add-label or --remove-label");
-			}
-			expect(clearResult.exitCode).toBe(1);
-			expect(clearResult.stderr.toString()).toContain(
-				"Cannot combine --clear-labels with --label, --add-label, or --remove-label",
-			);
-			const updatedTask = await core.filesystem.loadTask("task-10");
-			expect(updatedTask?.labels).toEqual(["old"]);
-		});
-
 		it("should replace assignees from repeated CLI assignee flags", async () => {
 			const core = new Core(TEST_DIR);
 

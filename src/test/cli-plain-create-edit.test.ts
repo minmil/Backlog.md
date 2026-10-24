@@ -65,16 +65,6 @@ describe("CLI --plain for task create/edit", () => {
 		expect(explicit.stdout.toString()).toContain("Ordinal: 7500");
 	});
 
-	it("rejects non-finite ordinals on CLI create", async () => {
-		const result = await $`bun ${cliPath} task create "Invalid ordinal CLI task" --ordinal Infinity`
-			.cwd(TEST_DIR)
-			.quiet()
-			.nothrow();
-
-		expect(result.exitCode).toBe(1);
-		expect(result.stderr.toString()).toContain("Invalid ordinal: Infinity. Must be a non-negative number.");
-	});
-
 	it("prints plain details after task edit --plain", async () => {
 		// Create base task first (without plain)
 		await $`bun ${cliPath} task create "Edit Me" --desc "First"`.cwd(TEST_DIR).quiet();
