@@ -10,11 +10,23 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { $ } from "bun";
+import { stringify } from "yaml";
 import type { Core } from "../core/backlog.ts";
 import { initializeProject as initializeProjectShared } from "../core/init.ts";
 import type { FileSystem } from "../file-system/operations.ts";
 import { serializeTask } from "../markdown/serializer.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type { Task } from "../types/index.ts";
+
+/** Save a project schema for tests that exercise configured field behavior. */
+export async function updateTestTaskSchema(
+	filesystem: FileSystem,
+	update: (schema: TaskSchema) => void,
+): Promise<void> {
+	const schema = structuredClone(filesystem.taskSchema);
+	update(schema);
+	await Bun.write(join(filesystem.backlogDir, "task-schema.yml"), stringify(schema));
+}
 
 /**
  * Creates a unique test directory name to avoid conflicts in parallel execution

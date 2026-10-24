@@ -1,12 +1,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Command } from "commander";
-import { DEFAULT_STATUSES } from "../constants/index.ts";
+import { getDefaultTaskSchema, loadTaskSchema } from "../schema/index.ts";
 import { resolveBacklogDirectory } from "../utils/backlog-directory.ts";
-import { getPriorityLabels } from "../utils/priority-config.ts";
-import { getProjectValues } from "../utils/project-config.ts";
 import { BACKLOG_CWD_ENV } from "../utils/runtime-cwd.ts";
-import { getTaskTypeValues } from "../utils/task-type-config.ts";
 
 export interface HelpField {
 	name: string;
@@ -87,70 +84,6 @@ function stripYamlScalar(value: string): string {
 		.trim();
 }
 
-function parseFlowList(value: string): string[] | null {
-	const trimmed = value.trim();
-	if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-		return null;
-	}
-
-	return trimmed.slice(1, -1).split(",").map(stripYamlScalar).filter(Boolean);
-}
-
-function parseArrayFromConfig(content: string, keyName: string): string[] | null {
-	const lines = content.split(/\r?\n/);
-	for (let index = 0; index < lines.length; index++) {
-		const line = lines[index]?.trim() ?? "";
-		if (!line || line.startsWith("#")) {
-			continue;
-		}
-		const match = line.match(new RegExp(`^${keyName}\\s*:\\s*(.*)$`));
-		if (!match) {
-			continue;
-		}
-
-		const inlineValue = match[1] ?? "";
-		const flowList = parseFlowList(inlineValue);
-		if (flowList) {
-			return flowList;
-		}
-
-		const blockValues: string[] = [];
-		for (let blockIndex = index + 1; blockIndex < lines.length; blockIndex++) {
-			const blockLine = lines[blockIndex] ?? "";
-			const trimmedBlockLine = blockLine.trim();
-			if (!trimmedBlockLine || trimmedBlockLine.startsWith("#")) {
-				continue;
-			}
-			if (/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(trimmedBlockLine)) {
-				break;
-			}
-			const itemMatch = trimmedBlockLine.match(/^-\s*(.+)$/);
-			if (itemMatch?.[1]) {
-				blockValues.push(stripYamlScalar(itemMatch[1]));
-			}
-		}
-		return blockValues.filter(Boolean);
-	}
-
-	return null;
-}
-
-function parseStatusesFromConfig(content: string): string[] | null {
-	return parseArrayFromConfig(content, "statuses");
-}
-
-function parsePrioritiesFromConfig(content: string): string[] | null {
-	return parseArrayFromConfig(content, "priorities");
-}
-
-function parseTaskTypesFromConfig(content: string): string[] | null {
-	return parseArrayFromConfig(content, "types");
-}
-
-function parseProjectsFromConfig(content: string): string[] | null {
-	return parseArrayFromConfig(content, "projects");
-}
-
 function parseStringValueFromConfig(content: string, keys: string[]): string | null {
 	for (const rawLine of content.split(/\r?\n/)) {
 		const line = rawLine.trim();
@@ -188,6 +121,25 @@ function getRuntimeConfigStartDir(): string {
 	return override ? resolve(override) : process.cwd();
 }
 
+function configuredFieldValues(key: "status" | "priority" | "type" | "project"): string[] {
+	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
+	if (configPath) {
+		let current = getRuntimeConfigStartDir();
+		while (current !== dirname(current)) {
+			const resolution = resolveBacklogDirectory(current);
+			if (resolution.configPath === configPath && resolution.backlogDir) {
+				try {
+					return [...(loadTaskSchema(resolution.backlogDir, configPath).fields[key]?.values ?? [])];
+				} catch {
+					break;
+				}
+			}
+			current = dirname(current);
+		}
+	}
+	return [...(getDefaultTaskSchema().fields[key]?.values ?? [])];
+}
+
 function includeDraftStatus(statuses: string[]): string[] {
 	const normalizedStatuses = normalizeStatusValues(statuses);
 	const hasDraft = normalizedStatuses.some((status) => status.toLowerCase() === "draft");
@@ -199,62 +151,20 @@ function normalizeStatusValues(statuses: string[]): string[] {
 }
 
 export function getCliStatusValues(options?: { includeDraft?: boolean }): string[] {
-	let configuredStatuses: string[] = [...DEFAULT_STATUSES];
-	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
-	if (configPath) {
-		try {
-			const parsed = parseStatusesFromConfig(readFileSync(configPath, "utf8"));
-			if (parsed && parsed.length > 0) {
-				configuredStatuses = parsed;
-			}
-		} catch {
-			configuredStatuses = [...DEFAULT_STATUSES];
-		}
-	}
-
-	const normalizedStatuses = normalizeStatusValues(configuredStatuses);
+	const normalizedStatuses = normalizeStatusValues(configuredFieldValues("status"));
 	return options?.includeDraft ? includeDraftStatus(normalizedStatuses) : normalizedStatuses;
 }
 
 export function getCliPriorityValues(): string[] {
-	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
-	if (configPath) {
-		try {
-			const parsed = parsePrioritiesFromConfig(readFileSync(configPath, "utf8"));
-			if (parsed && parsed.length > 0) {
-				return getPriorityLabels(parsed);
-			}
-		} catch {
-			return getPriorityLabels();
-		}
-	}
-	return getPriorityLabels();
+	return configuredFieldValues("priority");
 }
 
 export function getCliTaskTypeValues(): string[] {
-	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
-	if (configPath) {
-		try {
-			const parsed = parseTaskTypesFromConfig(readFileSync(configPath, "utf8"));
-			return getTaskTypeValues(parsed);
-		} catch {
-			return getTaskTypeValues();
-		}
-	}
-	return getTaskTypeValues();
+	return configuredFieldValues("type");
 }
 
 export function getCliProjectValues(): string[] {
-	const configPath = findBacklogConfigPathSync(getRuntimeConfigStartDir());
-	if (configPath) {
-		try {
-			const parsed = parseProjectsFromConfig(readFileSync(configPath, "utf8"));
-			return getProjectValues(parsed ?? []);
-		} catch {
-			return [];
-		}
-	}
-	return [];
+	return configuredFieldValues("project");
 }
 
 export function getCliTaskPrefix(): string {
@@ -304,7 +214,7 @@ export function taskType(options?: { multiple?: boolean }): string {
 export function projectType(options?: { multiple?: boolean }): string {
 	const values = getCliProjectValues();
 	if (values.length === 0) {
-		return "no projects configured; add a 'projects:' list to the project config file";
+		return "no projects configured; add values to task-schema.yml fields.project.values";
 	}
 	const cardinality = options?.multiple ? "one or more of" : "one of";
 	return `${cardinality} configured projects: ${values.join(", ")}`;

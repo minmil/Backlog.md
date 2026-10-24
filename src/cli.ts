@@ -349,23 +349,23 @@ async function normalizeCliPriority(core: Core, value: string): Promise<string |
 	}
 }
 
-async function normalizeCliTaskTypes(core: Core, values: string[], optionName: string): Promise<string[] | null> {
+async function normalizeCliTaskTypes(core: Core, values: string[], _optionName: string): Promise<string[] | null> {
 	try {
 		const registry = new FieldRegistry(core.filesystem.taskSchema);
 		return values.map((value) => registry.parseInput("type", value) as string);
 	} catch (error) {
-		console.error(`Invalid ${optionName}: ${error instanceof Error ? error.message : String(error)}`);
+		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
 		return null;
 	}
 }
 
-async function normalizeCliProjects(core: Core, values: string[], optionName: string): Promise<string[] | null> {
+async function normalizeCliProjects(core: Core, values: string[], _optionName: string): Promise<string[] | null> {
 	try {
 		const registry = new FieldRegistry(core.filesystem.taskSchema);
 		return values.map((value) => registry.parseInput("project", value) as string);
 	} catch (error) {
-		console.error(`Invalid ${optionName}: ${error instanceof Error ? error.message : String(error)}`);
+		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
 		return null;
 	}

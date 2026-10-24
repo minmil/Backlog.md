@@ -6,10 +6,19 @@ import { CLI_AGENT_NUDGE, Core } from "../index.ts";
 import { BACKLOG_CWD_ENV } from "../utils/runtime-cwd.ts";
 import { LOCAL_TASK_LOOKUP_HINT } from "../utils/task-path.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, initializeTestProject, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 const CLI_PATH = getTestCliPath();
+
+async function configureDefaultUser(): Promise<void> {
+	await updateTestTaskSchema(new Core(TEST_DIR).filesystem, (schema) => {
+		schema.users = [
+			{ handle: "@alice", name: "Alice", default: true },
+			{ handle: "@carol", name: "Carol" },
+		];
+	});
+}
 
 describe("CLI Integration", () => {
 	// Every CLI subprocess below inherits this process's environment. A BACKLOG_CWD exported in
@@ -513,17 +522,17 @@ describe("CLI Integration", () => {
 			expect(task?.labels).toEqual(["ui", "bug", "api"]);
 		});
 
-		it("should apply the configured defaultAssignee when task create has no -a", async () => {
-			await $`bun ${CLI_PATH} config set defaultAssignee ${"@alice,@bob"}`.cwd(TEST_DIR).quiet();
+		it("should apply the schema default user when task create has no -a", async () => {
+			await configureDefaultUser();
 			await $`bun ${CLI_PATH} task create "Default assignee task"`.cwd(TEST_DIR).quiet();
 
 			const core = new Core(TEST_DIR);
 			const task = await core.filesystem.loadTask("task-1");
-			expect(task?.assignee).toEqual(["@alice", "@bob"]);
+			expect(task?.assignee).toEqual(["@alice"]);
 		});
 
-		it("should let an explicit -a override the configured defaultAssignee on task create", async () => {
-			await $`bun ${CLI_PATH} config set defaultAssignee ${"@alice,@bob"}`.cwd(TEST_DIR).quiet();
+		it("should let an explicit -a override the schema default user on task create", async () => {
+			await configureDefaultUser();
 			await $`bun ${CLI_PATH} task create "Explicit assignee task" -a @carol`.cwd(TEST_DIR).quiet();
 
 			const core = new Core(TEST_DIR);
@@ -531,8 +540,8 @@ describe("CLI Integration", () => {
 			expect(task?.assignee).toEqual(["@carol"]);
 		});
 
-		it("should leave a task unassigned when -a is empty while defaultAssignee is set", async () => {
-			await $`bun ${CLI_PATH} config set defaultAssignee ${"@alice,@bob"}`.cwd(TEST_DIR).quiet();
+		it("should leave a task unassigned when -a is empty while a default user is set", async () => {
+			await configureDefaultUser();
 			await $`bun ${CLI_PATH} task create "Explicitly unassigned task" -a ${""}`.cwd(TEST_DIR).quiet();
 
 			const core = new Core(TEST_DIR);

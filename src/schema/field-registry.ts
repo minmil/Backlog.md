@@ -137,6 +137,8 @@ export class FieldRegistry {
 			return value as string[];
 		};
 		const enumValue = (value: unknown): string => {
+			if ((field.values ?? []).length === 0)
+				return fail(`no values configured; add values to task-schema.yml fields.${key}.values`);
 			if (typeof value !== "string") return fail(`allowed values: ${(field.values ?? []).join(", ")}`);
 			const match = field.values?.find((option) => option.toLowerCase() === value.trim().toLowerCase());
 			return match ?? fail(`allowed values: ${(field.values ?? []).join(", ")}`);

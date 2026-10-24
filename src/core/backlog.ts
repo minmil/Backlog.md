@@ -2209,9 +2209,11 @@ export class Core {
 			: status || (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS;
 		// An absent assignee means "no opinion" and takes the configured default; an explicit
 		// assignee replaces it entirely, and an explicit empty list means "unassigned".
+		const defaultUser = taskSchema.users.find((user) => user.default)?.handle;
 		const resolvedAssignees =
 			input.assignee === undefined
-				? (normalizeStringList(this.fs.taskSchema.fields.assignee?.default as string[] | undefined) ?? [])
+				? (normalizeStringList(this.fs.taskSchema.fields.assignee?.default as string[] | undefined) ??
+					(defaultUser ? [defaultUser] : []))
 				: normalizedAssignees;
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
 

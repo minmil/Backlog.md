@@ -3,7 +3,12 @@ import { mkdir } from "node:fs/promises";
 import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 const CLI_PATH = getTestCliPath();
 let TEST_DIR: string;
@@ -25,23 +30,22 @@ describe("CLI task projects", () => {
 	it("fails closed when no projects are configured", async () => {
 		const created = await $`bun ${CLI_PATH} task create "Web task" --project web`.cwd(TEST_DIR).quiet().nothrow();
 		expect(created.exitCode).toBe(1);
-		expect(created.stderr.toString()).toContain("No projects are configured. Add a 'projects:' list to");
+		expect(created.stderr.toString()).toContain(
+			"no values configured; add values to task-schema.yml fields.project.values",
+		);
 
 		const createHelp = await $`bun ${CLI_PATH} task create --help`.cwd(TEST_DIR).text();
-		expect(createHelp).toContain("no projects configured; add a 'projects:' list to the project config file");
-
-		// `config get <list key>` stays machine-readable: an unset list prints nothing, the same
-		// as labels or definitionOfDone, so scripts can test it for emptiness.
-		const getOutput = await $`bun ${CLI_PATH} config get projects`.cwd(TEST_DIR).text();
-		expect(getOutput.trim()).toBe("");
+		expect(createHelp).toContain("task-schema.yml fields.project.values");
+		const schema = JSON.parse(await $`bun ${CLI_PATH} schema --json`.cwd(TEST_DIR).text());
+		expect(schema.fields.project.values).toEqual([]);
 	});
 
 	describe("with configured projects", () => {
 		beforeEach(async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Expected test config");
-			config.projects = ["Web", "API"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["Web", "API"];
+				schema.fields.project!.hidden = false;
+			});
 		});
 
 		it("creates and edits projected tasks with configured canonical casing", async () => {
@@ -60,7 +64,7 @@ describe("CLI task projects", () => {
 			await $`bun ${CLI_PATH} task edit TASK-1 --title "Still projected"`.cwd(TEST_DIR).quiet();
 			expect((await core.filesystem.loadTask("TASK-1"))?.project).toBe("Web");
 
-			const cleared = await $`bun ${CLI_PATH} task edit TASK-1 --project "" --plain`.cwd(TEST_DIR).quiet();
+			const cleared = await $`bun ${CLI_PATH} task edit TASK-1 --clear-field project --plain`.cwd(TEST_DIR).quiet();
 			expect(cleared.stdout.toString()).not.toContain("Project:");
 			expect((await core.filesystem.loadTask("TASK-1"))?.project).toBeUndefined();
 		});
@@ -71,12 +75,12 @@ describe("CLI task projects", () => {
 				.quiet()
 				.nothrow();
 			expect(invalidCreate.exitCode).toBe(1);
-			expect(invalidCreate.stderr.toString()).toContain("Invalid project: mobile. Valid projects are: Web, API");
+			expect(invalidCreate.stderr.toString()).toContain('Invalid task field "project": allowed values: Web, API');
 
 			await $`bun ${CLI_PATH} task create "Unprojected task"`.cwd(TEST_DIR).quiet();
 			const invalidEdit = await $`bun ${CLI_PATH} task edit TASK-1 --project mobile`.cwd(TEST_DIR).quiet().nothrow();
 			expect(invalidEdit.exitCode).toBe(1);
-			expect(invalidEdit.stderr.toString()).toContain("Invalid project: mobile. Valid projects are: Web, API");
+			expect(invalidEdit.stderr.toString()).toContain('Invalid task field "project": allowed values: Web, API');
 
 			const edited = await $`bun ${CLI_PATH} task edit TASK-1 --title "Still unprojected" --plain`
 				.cwd(TEST_DIR)
@@ -85,12 +89,12 @@ describe("CLI task projects", () => {
 			expect((await core.filesystem.loadTask("TASK-1"))?.project).toBeUndefined();
 		});
 
-		it("documents configured values and exposes them through read-only config commands", async () => {
-			const getOutput = await $`bun ${CLI_PATH} config get projects`.cwd(TEST_DIR).text();
-			expect(getOutput.trim()).toBe("Web, API");
+		it("documents configured values in the schema and command help", async () => {
+			const schema = JSON.parse(await $`bun ${CLI_PATH} schema --json`.cwd(TEST_DIR).text());
+			expect(schema.fields.project.values).toEqual(["Web", "API"]);
 
 			const listOutput = await $`bun ${CLI_PATH} config list`.cwd(TEST_DIR).text();
-			expect(listOutput).toContain("projects: [Web, API]");
+			expect(listOutput).not.toContain("projects:");
 
 			const createHelp = await $`bun ${CLI_PATH} task create --help`.cwd(TEST_DIR).text();
 			const editHelp = await $`bun ${CLI_PATH} task edit --help`.cwd(TEST_DIR).text();
@@ -103,9 +107,7 @@ describe("CLI task projects", () => {
 		it("rejects setting projects directly through config set", async () => {
 			const result = await $`bun ${CLI_PATH} config set projects "Web,API"`.cwd(TEST_DIR).quiet().nothrow();
 			expect(result.exitCode).toBe(1);
-			expect(result.stderr.toString()).toContain(
-				"projects cannot be set directly. View current values with 'backlog config get projects'.",
-			);
+			expect(result.stderr.toString()).toContain("task-schema.yml");
 		});
 
 		it("completes configured project values for create, edit, list, and search", async () => {

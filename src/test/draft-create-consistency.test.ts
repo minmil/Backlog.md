@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { Core } from "../index.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 let TEST_DIR: string;
 const CLI_PATH = getTestCliPath();
@@ -60,14 +65,19 @@ describe("Draft creation consistency", () => {
 		expect((await core.filesystem.loadDraft("draft-2"))?.labels).toEqual(["ui", "bug", "api"]);
 	});
 
-	it("applies the configured defaultAssignee to drafts created without -a", async () => {
-		await $`bun ${CLI_PATH} config set defaultAssignee ${"@alice,@bob"}`.cwd(TEST_DIR).quiet();
+	it("applies the schema default user to drafts created without -a", async () => {
+		await updateTestTaskSchema(new Core(TEST_DIR).filesystem, (schema) => {
+			schema.users = [
+				{ handle: "@alice", name: "Alice", default: true },
+				{ handle: "@carol", name: "Carol" },
+			];
+		});
 		await $`bun ${CLI_PATH} draft create "Default assignees"`.cwd(TEST_DIR).quiet();
 		await $`bun ${CLI_PATH} draft create "Explicit assignee" -a @carol`.cwd(TEST_DIR).quiet();
 		await $`bun ${CLI_PATH} draft create "Explicitly unassigned" -a ${""}`.cwd(TEST_DIR).quiet();
 
 		const core = new Core(TEST_DIR);
-		expect((await core.filesystem.loadDraft("draft-1"))?.assignee).toEqual(["@alice", "@bob"]);
+		expect((await core.filesystem.loadDraft("draft-1"))?.assignee).toEqual(["@alice"]);
 		expect((await core.filesystem.loadDraft("draft-2"))?.assignee).toEqual(["@carol"]);
 		expect((await core.filesystem.loadDraft("draft-3"))?.assignee).toEqual([]);
 	});
