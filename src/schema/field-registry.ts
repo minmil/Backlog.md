@@ -39,6 +39,18 @@ const CORE_PROPERTIES: Record<string, keyof Task> = {
 
 const LIST_TYPES = new Set<FieldType>(["multi-enum", "string-list", "user-list", "task-ref-list"]);
 const COMPARABLE_TYPES = new Set<FieldType>(["date", "datetime", "number"]);
+const FILTERABLE_TYPES = new Set<FieldType>([
+	"enum",
+	"multi-enum",
+	"bool",
+	"date",
+	"datetime",
+	"number",
+	"user",
+	"user-list",
+	"string-list",
+	"milestone-ref",
+]);
 const USER_HANDLE = /^@[A-Za-z0-9._-]+$/;
 
 function validDay(value: string): boolean {
@@ -224,6 +236,7 @@ export class FieldRegistry {
 		if (!match) throw new Error(`Invalid --where "${expression}". Expected key=value.`);
 		const [, key = "", operator = "=", raw = ""] = match;
 		const field = this.definition(key);
+		if (!FILTERABLE_TYPES.has(field.type)) throw new Error(`Field ${key} (${field.type}) cannot be filtered`);
 		const op = operator as FieldOperator;
 		if (COMPARABLE_TYPES.has(field.type) === false && op !== "=" && op !== "!=")
 			throw new Error(`Field ${key} does not support range comparisons`);

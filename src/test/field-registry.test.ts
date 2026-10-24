@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Core } from "../core/backlog.ts";
 import { FileSystem } from "../file-system/operations.ts";
+import { taskListJson } from "../formatters/json-output.ts";
 import { parseTask } from "../markdown/parser.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import { FieldRegistry, type FieldValue } from "../schema/field-registry.ts";
@@ -104,11 +105,34 @@ describe("field registry", () => {
 		expect(fields.matches(current, fields.parseCondition("status=done"))).toBe(true);
 		expect(fields.matches(current, fields.parseCondition("uat_date>=today", new Date(2026, 9, 24, 12)))).toBe(true);
 		expect(fields.matches(current, fields.parseCondition("side="))).toBe(true);
+		expect(() => fields.parseCondition("title=First")).toThrow(/cannot be filtered/);
 		expect(fields.compare("status", "To Do", "Done")).toBeLessThan(0);
 		expect(fields.compare("rank", 2, 10)).toBeLessThan(0);
 		expect(fields.compare("rank", undefined, 10)).toBeGreaterThan(0);
 		expect(fields.format("tags", ["a", "b"], "plain")).toBe("a, b");
 		expect(fields.format("tags", ["a", "b"], "json")).toEqual(["a", "b"]);
+	});
+
+	test("task-list JSON v2 uses the canonical fields object", () => {
+		const fields = registry();
+		const item = { ...fields.setField(task(), "side", "Buyer"), unknownFields: { legacy: "keep" }, isReady: true };
+		const json = taskListJson([item], undefined, fields);
+		expect(json.schemaVersion).toBe(2);
+		expect(json.tasks[0]).toEqual({
+			id: "task-1",
+			title: "First",
+			fields: {
+				id: "task-1",
+				title: "First",
+				status: "To Do",
+				assignee: [],
+				created_date: "2026-10-24T00:00:00Z",
+				labels: [],
+				dependencies: [],
+				side: "Buyer",
+			},
+			unknownFields: { legacy: "keep" },
+		});
 	});
 
 	test("declared custom values round-trip while unknown frontmatter survives", () => {

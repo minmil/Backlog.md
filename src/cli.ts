@@ -327,13 +327,24 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	return message;
 }
 
-function formatPlainTaskListRow(task: Task, options: { includeStatus?: boolean; showFields?: string[] } = {}): string {
+function formatPlainTaskListRow(
+	task: Task,
+	options: { includeStatus?: boolean; showFields?: string[]; registry?: FieldRegistry } = {},
+): string {
 	const priorityIndicator = task.priority ? `[${task.priority.toUpperCase()}] ` : "";
 	const typeIndicator = task.type ? `[${task.type}] ` : "";
 	const statusIndicator = options.includeStatus && task.status ? ` (${task.status})` : "";
 	const acceptanceCriteria = formatAcceptanceCriteriaSummarySuffix(task);
 	const dueDate = task.dueDate ? ` (due ${formatUtcDateForDisplay(task.dueDate)})` : "";
-	const fields = options.showFields?.length ? ` ${formatPlainTaskListFields(task, options.showFields)}` : "";
+	const fields = options.showFields?.length
+		? ` ${
+				options.registry
+					? options.showFields
+							.map((key) => `${key}=${options.registry?.format(key, options.registry.getField(task, key), "plain")}`)
+							.join(" ")
+					: formatPlainTaskListFields(task, options.showFields)
+			}`
+		: "";
 	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
 }
 
@@ -2725,19 +2736,20 @@ function printTaskSections(
 	sortField: string | undefined,
 	statuses: string[],
 	showFields: string[] = [],
+	registry?: FieldRegistry,
 ): void {
 	// Use the stdout stream, as JSON output does, so pending pipe writes keep the CLI alive.
 	for (const section of sectionTasks(tasks, sortField, statuses)) {
 		if (section.status === null) {
 			process.stdout.write(`Tasks (sorted by ${sortField ?? "priority"}):\n`);
 			for (const task of section.tasks) {
-				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields })}\n`);
+				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields, registry })}\n`);
 			}
 			continue;
 		}
 		process.stdout.write(`${section.status || "No Status"}:\n`);
 		for (const task of section.tasks) {
-			process.stdout.write(`${formatPlainTaskListRow(task, { showFields })}\n`);
+			process.stdout.write(`${formatPlainTaskListRow(task, { showFields, registry })}\n`);
 		}
 		process.stdout.write("\n");
 	}
@@ -2754,6 +2766,8 @@ async function runTaskList(
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
 	const customFieldSchema = core.filesystem.customFieldSchema;
+	const taskSchema = core.filesystem.taskSchema;
+	const registry = taskSchema ? new FieldRegistry(taskSchema) : undefined;
 	const hasDuplicateIds = await printDuplicateIntegrityWarning(core);
 	const cleanup = () => {
 		core.disposeSearchService();
@@ -2770,11 +2784,16 @@ async function runTaskList(
 		return;
 	}
 	const baseFilters: TaskListFilter = {};
+	let schemaConditions: ReturnType<FieldRegistry["parseCondition"]>[] = [];
 	try {
-		const where = toStringArray(options.where).map((expression) =>
-			parseCustomFieldCondition(expression, customFieldSchema),
-		);
-		if (where.length > 0) baseFilters.where = where;
+		if (registry) {
+			schemaConditions = toStringArray(options.where).map((expression) => registry.parseCondition(expression));
+		} else {
+			const where = toStringArray(options.where).map((expression) =>
+				parseCustomFieldCondition(expression, customFieldSchema),
+			);
+			if (where.length > 0) baseFilters.where = where;
+		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
@@ -2783,9 +2802,9 @@ async function runTaskList(
 	}
 	const showFields = parseDelimitedStringList(options.showFields) ?? [];
 	for (const name of showFields) {
-		if (!Object.hasOwn(customFieldSchema.fields, name)) {
+		if (!(registry ? Object.hasOwn(taskSchema?.fields ?? {}, name) : Object.hasOwn(customFieldSchema.fields, name))) {
 			console.error(
-				`Unknown custom field "${name}" in --show-fields. Declared fields: ${Object.keys(customFieldSchema.fields).join(", ") || "(none)"}`,
+				`Unknown task field "${name}" in --show-fields. Declared fields: ${Object.keys(taskSchema?.fields ?? customFieldSchema.fields).join(", ") || "(none)"}`,
 			);
 			process.exitCode = 1;
 			cleanup();
@@ -2879,11 +2898,17 @@ async function runTaskList(
 		const [sortField, direction = "asc"] = String(options.sort).split(":");
 		const definition = customFieldSchema.fields[sortField as string];
 		if (
-			!(TASK_SORT_FIELDS.includes(sortField?.toLowerCase() ?? "") && !String(options.sort).includes(":")) &&
-			!(definition && (definition.type === "date" || definition.type === "enum") && ["asc", "desc"].includes(direction))
+			registry
+				? !sortField || !taskSchema?.fields[sortField] || !["asc", "desc"].includes(direction)
+				: !(TASK_SORT_FIELDS.includes(sortField?.toLowerCase() ?? "") && !String(options.sort).includes(":")) &&
+					!(
+						definition &&
+						(definition.type === "date" || definition.type === "enum") &&
+						["asc", "desc"].includes(direction)
+					)
 		) {
 			console.error(
-				`Invalid sort field: ${options.sort}. Valid values are: ${TASK_SORT_FIELD_LIST}, or a custom date/enum field[:asc|:desc]`,
+				`Invalid sort field: ${options.sort}. Valid values are: ${registry ? Object.keys(taskSchema?.fields ?? {}).join(", ") : `${TASK_SORT_FIELD_LIST}, or a custom date/enum field[:asc|:desc]`}`,
 			);
 			process.exitCode = 1;
 			cleanup();
@@ -2906,11 +2931,14 @@ async function runTaskList(
 			baseFilters.parentTaskId = resolvedParentId;
 		}
 
-		const tasks = await core.queryTasks({
+		const queriedTasks = await core.queryTasks({
 			query: searchQuery || undefined,
 			filters: Object.keys(baseFilters).length > 0 ? baseFilters : undefined,
 			includeCrossBranch: false,
 		});
+		const tasks = registry
+			? queriedTasks.filter((task) => schemaConditions.every((condition) => registry.matches(task, condition)))
+			: queriedTasks;
 		const config = await core.filesystem.loadConfig();
 
 		// Ordering, the parent narrowing and the limit are the same whatever the rows carry, so the
@@ -2919,7 +2947,17 @@ async function runTaskList(
 		// The sort was validated above, before any task was read. Without one, sortTasks uses the
 		// default order of every task list.
 		const narrowForDisplay = <T extends Task>(rows: T[]): T[] => {
-			const sorted = sortTasks(rows, options.sort, config?.priorities, customFieldSchema);
+			const sorted =
+				registry && options.sort
+					? [...rows].sort((a, b) => {
+							const [key = "", direction = "asc"] = String(options.sort).split(":");
+							const left = registry.getField(a, key);
+							const right = registry.getField(b, key);
+							if (left === undefined || right === undefined) return registry.compare(key, left, right);
+							const order = registry.compare(key, left, right);
+							return order === 0 ? a.id.localeCompare(b.id) : direction === "desc" ? -order : order;
+						})
+					: sortTasks(rows, options.sort, config?.priorities, customFieldSchema);
 			const narrowed = parentFilter
 				? sorted.filter((task) => task.parentTaskId && taskIdsEqual(parentFilter, task.parentTaskId))
 				: sorted;
@@ -2935,7 +2973,7 @@ async function runTaskList(
 		const readyRows = options.ready ? readinessRows.filter((row) => row.isReady) : readinessRows;
 		if (outputMode === "json") {
 			const page = selectListWindow(narrowForDisplay(readyRows), listWindow);
-			emitJson(taskListJson(page.items, page));
+			emitJson(taskListJson(page.items, page, registry));
 			cleanup();
 			return;
 		}
@@ -2953,7 +2991,7 @@ async function runTaskList(
 				}
 				return;
 			}
-			printTaskSections(windowTasks, options.sort, statuses, showFields);
+			printTaskSections(windowTasks, options.sort, statuses, showFields, registry);
 		});
 		cleanup();
 		return;
@@ -3216,6 +3254,7 @@ addListWindowOptions(taskListCommand)
 			filesystem.milestonesDir,
 			filesystem.archiveMilestonesDir,
 			filesystem.configFilePath,
+			join(filesystem.backlogDir, "task-schema.yml"),
 			join(filesystem.backlogDir, "fields.yml"),
 		];
 		await watchJson([filesystem.backlogDir, dirname(filesystem.configFilePath)], inputs, async () => {

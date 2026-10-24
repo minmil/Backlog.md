@@ -1,5 +1,6 @@
 import { isAbsolute, join, relative } from "node:path";
 import type { TaskDetail, TaskListItem } from "../core/task-detail.ts";
+import type { FieldRegistry } from "../schema/field-registry.ts";
 import type {
 	Decision,
 	DecisionSearchResult,
@@ -234,7 +235,24 @@ function cutListJson(page: ListPage<unknown> | undefined): { total?: number; nex
 	return page?.cut ? { total: page.total, nextSkip: page.nextSkip } : {};
 }
 
-export function taskListJson(tasks: TaskListItem[], page?: ListPage<unknown>) {
+function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
+	const fields = Object.fromEntries(
+		Object.keys(registry.schema.fields).flatMap((key) => {
+			const value = registry.getField(task, key);
+			return value === undefined ? [] : [[key, registry.format(key, value, "json")]];
+		}),
+	);
+	return { id: task.id, title: task.title, fields, unknownFields: task.unknownFields ?? {} };
+}
+
+export function taskListJson(tasks: TaskListItem[], page?: ListPage<unknown>, registry?: FieldRegistry) {
+	if (registry)
+		return {
+			schemaVersion: 2,
+			kind: "task-list" as const,
+			tasks: tasks.map((task) => toSchemaTaskJson(task, registry)),
+			...cutListJson(page),
+		};
 	return { schemaVersion: 1, kind: "task-list" as const, tasks: tasks.map(toTaskSummaryJson), ...cutListJson(page) };
 }
 
