@@ -85,7 +85,12 @@ function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 	const fields = Object.fromEntries(
 		Object.keys(registry.schema.fields).flatMap((key) => {
 			const value = registry.getField(task, key);
-			return value === undefined ? [] : [[key, registry.format(key, value, "json")]];
+			if (value === undefined) return [];
+			const formatted =
+				registry.schema.fields[key]?.type === "datetime" && typeof value === "string"
+					? normalizePublicDate(value)
+					: registry.format(key, value, "json");
+			return [[key, formatted]];
 		}),
 	);
 	return { id: task.id, title: task.title, fields, unknownFields: task.unknownFields ?? {} };

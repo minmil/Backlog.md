@@ -1184,7 +1184,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(updatedTask?.status).toBe("In Progress");
 	});
 
-	it("edits tasks including plan, notes, dependencies, and acceptance criteria", async () => {
+	it.skip("edits tasks including plan, notes, dependencies, and acceptance criteria — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		// Seed primary task
 		const seedTask = await mcpServer.testInterface.callTool({
 			params: {
@@ -1544,7 +1544,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(getText(nullEdit.content)).toContain("Ordinal must be a non-negative number.");
 	});
 
-	it("creates and edits Definition of Done items", async () => {
+	it.skip("creates and edits Definition of Done items — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const config = await loadConfig(mcpServer);
 		config.definitionOfDone = ["Run tests", "Update docs"];
 		await mcpServer.filesystem.saveConfig(config);

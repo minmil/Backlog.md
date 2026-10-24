@@ -27,7 +27,7 @@ type ChangeTask = (change: TaskChange) => Promise<{ ok: boolean; error: string }
 const changeTaskWithCli: ChangeTask = async (change) => {
 	const args =
 		change === "append-notes"
-			? ["task", "edit", "1", "--append-notes", "Edited through the link"]
+			? ["task", "edit", "1", "--append-section", "description=Edited through the link"]
 			: ["task", change, "1"];
 	const result = await backlog(...args);
 	return { ok: result.exitCode === 0, error: result.stderr };
@@ -158,11 +158,11 @@ describe.skipIf(isWindows())("auto-commit of record files reached through a symb
 		// is the path that is staged, and the edit in the file it points to waits for the next commit.
 		await replaceWithLink(join(TEST_DIR, "backlog", "tasks", TASK_FILE), join(TEST_DIR, "notes", "task.md"));
 
-		expect((await backlog("task", "edit", "1", "--append-notes", "First edit")).exitCode).toBe(0);
+		expect((await backlog("task", "edit", "1", "--append-section", "description=First edit")).exitCode).toBe(0);
 		expect(await lastCommit()).toEqual([`T\tbacklog/tasks/${TASK_FILE}`]);
 		expect(await git("status", "--porcelain")).toBe("?? notes/");
 
-		expect((await backlog("task", "edit", "1", "--append-notes", "Second edit")).exitCode).toBe(0);
+		expect((await backlog("task", "edit", "1", "--append-section", "description=Second edit")).exitCode).toBe(0);
 		expect(await lastCommit()).toEqual(["A\tnotes/task.md"]);
 		expect(await git("status", "--porcelain")).toBe("");
 	});

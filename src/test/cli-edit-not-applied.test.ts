@@ -9,6 +9,7 @@ import {
 	initializeFilesystemTestProject,
 	initializeTestProject,
 	safeCleanup,
+	updateTestTaskSchema,
 } from "./test-utils.ts";
 
 const CLI_PATH = getTestCliPath();
@@ -39,57 +40,57 @@ type RejectedEdit = { name: string; args: string[]; reason: string };
 // field must be discarded with the rest.
 const REJECTED_TASK_EDITS: RejectedEdit[] = [
 	{
-		name: "an out-of-range --check-dod index next to valid fields",
+		name: "an out-of-range checklist index next to valid fields",
 		args: [
-			...["task", "edit", "1", "--notes", "hand-off notes", "--final-summary", "summary"],
-			...["--modified-file", "src/a.ts", "--ref", "docs/a.md", "--check-ac", "1", "--check-ac", "2"],
-			...["--check-dod", "1", "--check-dod", "2", "--check-dod", "3"],
+			...["task", "edit", "1", "--section", "description=hand-off notes"],
+			...["--modified-file", "src/a.ts", "--ref", "docs/a.md", "--check", "acceptance:1", "--check", "acceptance:2"],
+			...["--check", "acceptance:3"],
 		],
-		reason: "Definition of Done item #3 not found",
+		reason: "Section 'acceptance' has no item #3",
 	},
 	{
-		name: "an out-of-range --check-ac index",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--check-ac", "9"],
-		reason: "Acceptance criterion #9 not found",
+		name: "an out-of-range --check index",
+		args: ["task", "edit", "1", "--section", "description=hand-off notes", "--check", "acceptance:9"],
+		reason: "Section 'acceptance' has no item #9",
 	},
 	{
 		name: "an index that is not a number",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--check-ac", "zero"],
-		reason: "Invalid index: zero",
+		args: ["task", "edit", "1", "--section", "description=hand-off notes", "--check", "acceptance:zero"],
+		reason: "Invalid --check",
 	},
 	{
-		name: "a comment with a reserved delimiter line",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--comment", "first line\n---\nsecond line"],
-		reason: "Comment body cannot contain standalone '---' delimiter lines.",
+		name: "a log entry with a reserved delimiter line",
+		args: ["task", "edit", "1", "--section", "description=hand-off notes", "--comment", "first line\n---\nsecond line"],
+		reason: "Log body cannot contain a standalone '---' line.",
 	},
 	{
 		name: "an unknown option",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--bogus"],
+		args: ["task", "edit", "1", "--section", "description=hand-off notes", "--bogus"],
 		reason: "unknown option '--bogus'",
 	},
 	{
 		name: "an option without its value",
-		args: ["task", "edit", "1", "--title", "Renamed", "--notes"],
+		args: ["task", "edit", "1", "--title", "Renamed", "--section"],
 		reason: "argument missing",
 	},
 	{
 		name: "--json given to the parent command",
-		args: ["task", "--json", "edit", "1", "--notes", "hand-off notes"],
+		args: ["task", "--json", "edit", "1", "--section", "description=hand-off notes"],
 		reason: "unknown option '--json'",
 	},
 	{
 		name: "flags that cannot be combined",
-		args: ["task", "edit", "1", "--notes", "hand-off notes", "--label", "a", "--add-label", "b"],
+		args: ["task", "edit", "1", "--section", "description=hand-off notes", "--label", "a", "--add-label", "b"],
 		reason: "Cannot combine --label with --add-label",
 	},
 	{
 		name: "a task ID that does not exist",
-		args: ["task", "edit", "999", "--notes", "hand-off notes"],
+		args: ["task", "edit", "999", "--section", "description=hand-off notes"],
 		reason: "Task 999 not found",
 	},
 	{
 		name: "a missing task ID",
-		args: ["task", "edit", "--notes", "hand-off notes"],
+		args: ["task", "edit", "--section", "description=hand-off notes"],
 		reason: "missing required argument 'taskId'",
 	},
 	{
@@ -101,18 +102,18 @@ const REJECTED_TASK_EDITS: RejectedEdit[] = [
 
 const REJECTED_DRAFT_EDITS: RejectedEdit[] = [
 	{
-		name: "an out-of-range --check-ac index",
-		args: ["draft", "edit", "DRAFT-1", "--notes", "draft notes", "--check-ac", "4"],
-		reason: "Acceptance criterion #4 not found",
+		name: "an out-of-range --check index",
+		args: ["draft", "edit", "DRAFT-1", "--section", "description=draft notes", "--check", "acceptance:4"],
+		reason: "Section 'acceptance' has no item #4",
 	},
 	{
 		name: "an unknown option",
-		args: ["draft", "edit", "DRAFT-1", "--notes", "draft notes", "--bogus"],
+		args: ["draft", "edit", "DRAFT-1", "--section", "description=draft notes", "--bogus"],
 		reason: "unknown option '--bogus'",
 	},
 	{
 		name: "a status other than Draft",
-		args: ["draft", "edit", "DRAFT-1", "--notes", "draft notes", "-s", "In Progress"],
+		args: ["draft", "edit", "DRAFT-1", "--section", "description=draft notes", "-s", "In Progress"],
 		reason: "Invalid status: In Progress",
 	},
 ];
@@ -123,11 +124,13 @@ describe("an edit that is not applied", () => {
 		await mkdir(TEST_DIR, { recursive: true });
 		const core = new Core(TEST_DIR);
 		await initializeFilesystemTestProject(core, "Edit Not Applied Project");
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.users = [{ handle: "@reviewer", name: "Reviewer", default: true }];
+		});
 		await core.createTaskFromInput(
 			{
 				title: "First task",
-				acceptanceCriteria: [{ text: "First criterion" }, { text: "Second criterion" }],
-				definitionOfDoneAdd: ["First item", "Second item"],
+				sectionItems: { acceptance: ["First criterion", "Second criterion"] },
 			},
 			false,
 		);
@@ -160,19 +163,27 @@ describe("an edit that is not applied", () => {
 	}
 
 	it("keeps the output of a successful task edit unchanged", async () => {
-		const result = await runCli(["task", "edit", "1", "--notes", "hand-off notes", "--check-ac", "1"]);
+		const result = await runCli([
+			"task",
+			"edit",
+			"1",
+			"--section",
+			"description=hand-off notes",
+			"--check",
+			"acceptance:1",
+		]);
 
 		expect(result).toEqual({ exitCode: 0, stdout: "Updated task TASK-1\n", stderr: "" });
 	});
 
 	it("keeps the output of a successful draft edit unchanged", async () => {
-		const result = await runCli(["draft", "edit", "DRAFT-1", "--notes", "draft notes"]);
+		const result = await runCli(["draft", "edit", "DRAFT-1", "--section", "description=draft notes"]);
 
 		expect(result).toEqual({ exitCode: 0, stdout: "Updated draft DRAFT-1\n", stderr: "" });
 	});
 
 	it("keeps the plain output of a successful edit free of the sentence", async () => {
-		const result = await runCli(["task", "edit", "1", "--notes", "hand-off notes", "--plain"]);
+		const result = await runCli(["task", "edit", "1", "--section", "description=hand-off notes", "--plain"]);
 
 		expect(result.exitCode).toBe(0);
 		expect(result.stderr).toBe("");
@@ -231,7 +242,7 @@ describe("an edit that is saved but fails afterwards", () => {
 	it("does not say that no changes were applied", async () => {
 		const before = await readFile(taskFilePath);
 
-		const result = await runCli(["task", "edit", "1", "--notes", "saved but not committed"]);
+		const result = await runCli(["task", "edit", "1", "--section", "description=saved but not committed"]);
 
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stdout).toBe("");

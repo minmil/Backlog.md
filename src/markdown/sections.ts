@@ -148,13 +148,21 @@ function definitionFor(parsed: ParsedSections, id: string, schema: TaskSchema, k
 	if (!(id in parsed.sections)) parsed.sections[id] = emptyValue(definition.kind);
 }
 
+function assertNoStandaloneMarker(text: string): void {
+	if (/^<!-- SECTION:[A-Z][A-Z0-9_]*:(?:BEGIN|END) -->\r?$/m.test(text)) {
+		throw new Error("Section content cannot contain a standalone section marker line.");
+	}
+}
+
 export function setMarkdown(parsed: ParsedSections, id: string, text: string, schema: TaskSchema): void {
 	definitionFor(parsed, id, schema, "markdown");
+	assertNoStandaloneMarker(text);
 	parsed.sections[id] = text;
 }
 
 export function appendMarkdown(parsed: ParsedSections, id: string, text: string, schema: TaskSchema): void {
 	definitionFor(parsed, id, schema, "markdown");
+	assertNoStandaloneMarker(text);
 	const current = parsed.sections[id] as string;
 	parsed.sections[id] = current ? `${current}\n\n${text}` : text;
 }
@@ -166,6 +174,7 @@ function checklist(parsed: ParsedSections, id: string, schema: TaskSchema): Chec
 
 export function checklistAdd(parsed: ParsedSections, id: string, text: string, schema: TaskSchema): void {
 	const items = checklist(parsed, id, schema);
+	if (!text.trim() || /\r|\n/.test(text)) throw new Error("Checklist item text must be one nonempty line.");
 	items.push({ index: items.length + 1, text, checked: false });
 }
 
@@ -211,12 +220,16 @@ export function logAppend(
 	if (!author || !schema.users.some((user) => user.handle === author)) {
 		throw new Error(`Unknown log author '${author ?? ""}'. Add the handle to task-schema.yml users.`);
 	}
+	assertNoStandaloneMarker(input.body);
 	if (/^---\r?$/m.test(input.body)) throw new Error("Log body cannot contain a standalone '---' line.");
 	const date =
 		input.date ??
 		`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 	if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
 		throw new Error(`Invalid log date '${date}'; use YYYY-MM-DD.`);
+	}
+	if (new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+		throw new Error(`Invalid log date '${date}'; use a real calendar date.`);
 	}
 	(parsed.sections[id] as LogEntry[]).push({
 		author,

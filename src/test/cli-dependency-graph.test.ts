@@ -90,14 +90,15 @@ describe("CLI dependency graph", () => {
 		expect(created).toContain("└─ TASK-1 - Foundation [To Do]");
 	});
 
-	it("renders modified files with the plan and notes rather than in the header block", async () => {
+	it("keeps hidden modified files stored while rendering schema sections", async () => {
 		await addTask("task-1", "Selected");
-		await runCli(["task", "edit", "1", "--notes", "Did the work", "--modified-file", "src/api.ts"]);
+		await runCli(["task", "edit", "1", "--section", "description=Did the work", "--modified-file", "src/api.ts"]);
 
 		const stdout = (await runCli(["task", "view", "1", "--plain"])).stdout.toString();
-		expect(stdout).toContain("Modified files: src/api.ts");
-		expect(stdout.indexOf("Implementation Notes:")).toBeLessThan(stdout.indexOf("Modified files:"));
-		expect(stdout.indexOf("Description:")).toBeLessThan(stdout.indexOf("Modified files:"));
+		expect(stdout).toContain("Description:");
+		expect(stdout).toContain("Did the work");
+		expect(stdout).not.toContain("Modified files:");
+		expect((await new Core(TEST_DIR).filesystem.loadTask("task-1"))?.modifiedFiles).toEqual(["src/api.ts"]);
 	});
 
 	it("renders a diamond once and marks the repeated branch", async () => {

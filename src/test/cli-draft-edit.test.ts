@@ -332,7 +332,7 @@ describe("CLI draft edit", () => {
 	it("points recovery guidance at the draft commands", async () => {
 		const draft = await createDraft("Guidance target");
 
-		const result = await $`bun ${CLI_PATH} draft edit ${draft.id} --check-ac 7`.cwd(TEST_DIR).nothrow().quiet();
+		const result = await $`bun ${CLI_PATH} draft edit ${draft.id} --check acceptance:7`.cwd(TEST_DIR).nothrow().quiet();
 		const output = normalizeCliOutput(result.stdout.toString() + result.stderr.toString());
 		expect(result.exitCode).toBe(1);
 		expect(output).toContain(`backlog draft view ${draft.id} --plain`);

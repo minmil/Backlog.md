@@ -142,7 +142,7 @@ describe("task and draft unknown frontmatter", () => {
 
 	it("keeps metadata through draft renames, dedicated promotion/demotion, archive and restore", async () => {
 		const originalPath = await writeRecord("DRAFT-1");
-		await $`bun ${CLI_PATH} draft edit DRAFT-1 --title Renamed --ac "Keep checks"`.cwd(root).quiet();
+		await $`bun ${CLI_PATH} draft edit DRAFT-1 --title Renamed --add-item acceptance="Keep checks"`.cwd(root).quiet();
 		const renamedPath = join(await filesystem.getDraftsDir(), "draft-1 - Renamed.md");
 		expect(await Bun.file(originalPath).exists()).toBe(false);
 		await expectMetadata(renamedPath);
@@ -150,7 +150,7 @@ describe("task and draft unknown frontmatter", () => {
 		const taskPath = join(filesystem.tasksDir, "task-1 - Renamed.md");
 		await expectMetadata(taskPath);
 		expect(await Bun.file(renamedPath).exists()).toBe(false);
-		await $`bun ${CLI_PATH} task edit TASK-1 --check-ac 1`.cwd(root).quiet();
+		await $`bun ${CLI_PATH} task edit TASK-1 --check acceptance:1`.cwd(root).quiet();
 		const beforeArchive = await expectMetadata(taskPath);
 		await $`bun ${CLI_PATH} task archive TASK-1`.cwd(root).quiet();
 		const archived = (await filesystem.listArchivedTasks())[0];
@@ -162,7 +162,9 @@ describe("task and draft unknown frontmatter", () => {
 		const demoted = (await filesystem.listDrafts())[0];
 		if (!demoted?.filePath) throw new Error("Missing demoted draft");
 		const beforeDraftArchive = await expectMetadata(demoted.filePath);
-		expect(parseTask(beforeDraftArchive).acceptanceCriteriaItems?.[0]?.checked).toBe(true);
+		expect((parseTask(beforeDraftArchive).sections?.acceptance as Array<{ checked: boolean }>)?.[0]?.checked).toBe(
+			true,
+		);
 		await $`bun ${CLI_PATH} draft archive ${demoted.id}`.cwd(root).quiet();
 		const archivedDrafts = join(filesystem.backlogDir, "archive/drafts");
 		const filename = (await readdir(archivedDrafts))[0];

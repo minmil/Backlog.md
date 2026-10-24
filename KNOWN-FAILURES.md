@@ -69,6 +69,8 @@ TUI/MCP not upgraded – owner decision 2026-10-24. These previously failing tes
   - `MCP task type filtering adapter > validates filters against configured task types`
   - `MCP task type filtering adapter > applies the same type filter to drafts`
 - `src/test/mcp-tasks.test.ts`
+  - `MCP task tools (MVP) > edits tasks including plan, notes, dependencies, and acceptance criteria`
+  - `MCP task tools (MVP) > creates and edits Definition of Done items`
   - `MCP task tools (MVP) > renders every task result through the one plain serializer`
   - `MCP task tools (MVP) > treats an explicit empty assignee as unassigned in task_create and task_edit`
   - `MCP task tools (MVP) > appends and renders task comments through task_edit and task_view`
@@ -84,3 +86,5 @@ TUI/MCP not upgraded – owner decision 2026-10-24. These previously failing tes
   - `filter wiring across surfaces > requires every label through the MCP task_list labels argument`
   - `filter wiring across surfaces > matches MCP labels case-insensitively like every other surface`
   - `filter wiring across surfaces > filters by project identically through Core, the search service, MCP, and both CLI entry points`
+- `src/test/mcp-final-summary.test.ts`
+  - `MCP final summary > supports finalSummary on task_create and task_view output`

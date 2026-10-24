@@ -43,7 +43,7 @@ describe("CLI --plain for task create/edit", () => {
 		expect(out).toContain("Description:");
 		expect(out).toContain("Hello");
 		expect(out).toContain("Acceptance Criteria:");
-		expect(out).toContain("Definition of Done:");
+		expect(out).toContain("Log:");
 		// Should not contain TUI escape codes
 		expect(out).not.toContain("[?1049h");
 		expect(out).not.toContain("\x1b");
@@ -86,7 +86,7 @@ describe("CLI --plain for task create/edit", () => {
 		expect(out).toContain("Updated:");
 		expect(out).toContain("Description:");
 		expect(out).toContain("Acceptance Criteria:");
-		expect(out).toContain("Definition of Done:");
+		expect(out).toContain("Log:");
 		// Should not contain TUI escape codes
 		expect(out).not.toContain("[?1049h");
 		expect(out).not.toContain("\x1b");

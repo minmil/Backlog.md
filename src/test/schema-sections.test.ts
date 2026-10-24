@@ -91,6 +91,15 @@ describe("schema section engine", () => {
 		const parsed = parseSections("", taskSchema);
 		expect(() => logAppend(parsed, "log", { author: "@other", body: "Hi" }, taskSchema)).toThrow("Unknown log author");
 		expect(() => logAppend(parsed, "log", { body: "Hi\n---\nBye" }, taskSchema)).toThrow("standalone");
+		expect(() => logAppend(parsed, "log", { body: "Hi", date: "2026-02-31" }, taskSchema)).toThrow(
+			"real calendar date",
+		);
+		expect(() => logAppend(parsed, "log", { body: "<!-- SECTION:LOG:END -->" }, taskSchema)).toThrow("marker line");
+		expect(() => setMarkdown(parsed, "description", "<!-- SECTION:DESCRIPTION:END -->", taskSchema)).toThrow(
+			"marker line",
+		);
+		expect(() => checklistAdd(parsed, "acceptance", "two\nlines", taskSchema)).toThrow("one nonempty line");
+		expect(() => checklistCheck(parsed, "acceptance", 1, taskSchema)).toThrow("no item #1");
 		setMarkdown(parsed, "description", "Text", taskSchema);
 		const body = serializeSections(parsed, taskSchema);
 		delete taskSchema.sections.description;
@@ -134,6 +143,7 @@ describe("schema section engine", () => {
 		const reloaded = await core.filesystem.loadTask(created.task.id);
 		expect(reloaded?.sections?.description).toBe("Initial description\n\nSecond paragraph");
 		expect(reloaded?.other).toContain("Owner note with  spaces");
+		expect(reloaded?.updatedDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/);
 	});
 
 	it("accepts generic CLI section edits and appends log entries", async () => {

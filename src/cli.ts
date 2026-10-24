@@ -300,6 +300,9 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	if (message.startsWith("Invalid index:")) {
 		return `${message} Try 'backlog ${commandKind} edit ${taskId} --help' for index options.`;
 	}
+	if (/^Section '[^']+' has no item #\d+\.$/.test(message)) {
+		return `${message}\nRun 'backlog ${commandKind} view ${taskId} --plain' to inspect indexes, or 'backlog ${commandKind} edit ${taskId} --help' for edit options.`;
+	}
 	if (
 		message.includes(" not found") &&
 		(message.startsWith("Acceptance criterion ") || message.startsWith("Definition of Done item "))

@@ -310,6 +310,7 @@ function buildUpdatedDateComparableTask(task: Task): Record<string, unknown> {
 		documentation: task.documentation ?? [],
 		modifiedFiles: task.modifiedFiles ?? [],
 		rawContent: task.rawContent ?? "",
+		sections: task.sections ?? {},
 		description: task.description,
 		implementationPlan: task.implementationPlan,
 		implementationNotes: task.implementationNotes,
