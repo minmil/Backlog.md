@@ -1,4 +1,6 @@
-import type { CustomFieldSchema, CustomFieldValue } from "./custom-fields.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
+import { getDefaultTaskSchema } from "../schema/index.ts";
+import type { Task } from "../types/index.ts";
 import { getPriorityRank } from "./priority-config.ts";
 
 /**
@@ -187,7 +189,7 @@ type SortableTask = {
 	id: string;
 	priority?: string;
 	ordinal?: number;
-	customFields?: Record<string, CustomFieldValue>;
+	fieldValues?: Record<string, unknown>;
 };
 type TaskSorter = <T extends SortableTask>(items: T[], priorityOrder?: readonly string[]) => T[];
 
@@ -216,24 +218,14 @@ export function sortTasks<T extends SortableTask>(
 	items: T[],
 	sortField?: string,
 	priorityOrder?: readonly string[],
-	customFieldSchema?: CustomFieldSchema,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
 ): T[] {
-	const [customKey, direction = "asc"] = sortField?.split(":") ?? [];
-	const definition = customKey ? customFieldSchema?.fields[customKey] : undefined;
-	if (definition && (definition.type === "date" || definition.type === "enum")) {
+	const [fieldKey, direction = "asc"] = sortField?.split(":") ?? [];
+	if (fieldKey && registry.schema.fields[fieldKey]) {
 		return [...items].sort((a, b) => {
-			const rank = (task: T): string | number | undefined => {
-				const value = task.customFields?.[customKey as string];
-				if (typeof value !== "string") return undefined;
-				if (definition.type === "date") return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
-				const index = definition.values?.indexOf(value) ?? -1;
-				return index >= 0 ? index : undefined;
-			};
-			const left = rank(a);
-			const right = rank(b);
-			if (left === undefined) return right === undefined ? compareTaskIds(a.id, b.id) : 1;
-			if (right === undefined) return -1;
-			const order = left < right ? -1 : left > right ? 1 : 0;
+			const left = registry.getField(a as unknown as Task, fieldKey);
+			const right = registry.getField(b as unknown as Task, fieldKey);
+			const order = registry.compare(fieldKey, left, right);
 			return order ? (direction === "desc" ? -order : order) : compareTaskIds(a.id, b.id);
 		});
 	}

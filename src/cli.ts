@@ -57,7 +57,7 @@ import { MilestoneHandlers, type MilestoneRemoveArgs } from "./mcp/tools/milesto
 import type { CallToolResult } from "./mcp/types.ts";
 import { applyCreateFieldAssignments } from "./schema/create-input.ts";
 import { FieldRegistry } from "./schema/field-registry.ts";
-import { loadTaskSchema } from "./schema/index.ts";
+import { getDefaultTaskSchema, loadTaskSchema } from "./schema/index.ts";
 import { validateTaskFiles } from "./schema/validate-tasks.ts";
 import {
 	type BacklogConfig,
@@ -331,7 +331,7 @@ function formatPlainTaskListRow(
 					? options.showFields
 							.map((key) => `${key}=${options.registry?.format(key, options.registry.getField(task, key), "plain")}`)
 							.join(" ")
-					: formatPlainTaskListFields(task, options.showFields)
+					: formatPlainTaskListFields(task, options.showFields, new FieldRegistry(getDefaultTaskSchema()))
 			}`
 		: "";
 	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;

@@ -1,6 +1,7 @@
 import { isAbsolute, join, relative } from "node:path";
 import type { TaskDetail, TaskListItem } from "../core/task-detail.ts";
-import type { FieldRegistry } from "../schema/field-registry.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
+import { getDefaultTaskSchema } from "../schema/index.ts";
 import type {
 	Decision,
 	DecisionSearchResult,
@@ -9,86 +10,7 @@ import type {
 	Task,
 	TaskSearchResult,
 } from "../types/index.ts";
-import type { CustomFieldValue } from "../utils/custom-fields.ts";
-import type { DependencyGraph } from "../utils/dependency-graph.ts";
 import type { ListPage } from "../utils/list-window.ts";
-import type { TaskReadiness } from "../utils/readiness.ts";
-import { sortByTaskId } from "../utils/task-sorting.ts";
-
-/** The compact fields of a task-shaped list entry. Draft list entries use them as is; task entries add `isReady`. */
-type CompactTaskJson = {
-	id: string;
-	title: string;
-	status: string;
-	/** True for a task in the archive, which is read-only; false for a task on the board. */
-	archived: boolean;
-	type: string | null;
-	priority: string | null;
-	project: string | null;
-	customFields: Record<string, CustomFieldValue>;
-	assignees: string[];
-	reporter: string | null;
-	labels: string[];
-	milestone: string | null;
-	parentTaskId: string | null;
-	acceptanceCriteriaCompleted: number;
-	acceptanceCriteriaCount: number;
-	references: string[];
-	modifiedFiles: string[];
-	ordinal: number | null;
-	createdAt: string | null;
-	updatedAt: string | null;
-	dueDate: string | null;
-};
-
-type TaskSummaryJson = CompactTaskJson & {
-	/**
-	 * Derived from the whole visible corpus at read time, never stored: work can start now because
-	 * the task is unfinished and every dependency it names resolved to a completed task.
-	 */
-	isReady: boolean;
-};
-
-type ChecklistItemJson = {
-	index: number;
-	text: string;
-	checked: boolean;
-};
-
-type TaskCommentJson = {
-	index: number;
-	body: string;
-	createdAt: string | null;
-	author: string | null;
-};
-
-/** The normalized dependency context: an explicit root, every reached node, and directed edges. */
-type DependencyGraphJson = {
-	root: string;
-	nodes: DependencyGraph["nodes"];
-	edges: DependencyGraph["edges"];
-};
-
-type TaskDetailsJson = TaskSummaryJson & {
-	path: string | null;
-	description: string | null;
-	dependencies: string[];
-	/**
-	 * Derived from the whole visible corpus at read time. `dependencies` above it stays the task's
-	 * own list of direct dependency IDs, unchanged.
-	 */
-	dependencyGraph: DependencyGraphJson;
-	/** Why `isReady` above reads the way it does, from the same derivation. */
-	readiness: TaskReadiness;
-	documentation: string[];
-	subtasks: Array<{ id: string; title: string }>;
-	acceptanceCriteria: ChecklistItemJson[];
-	definitionOfDone: ChecklistItemJson[];
-	implementationPlan: string | null;
-	implementationNotes: string | null;
-	comments: TaskCommentJson[];
-	finalSummary: string | null;
-};
 
 type DocumentSummaryJson = {
 	id: string;
@@ -108,17 +30,9 @@ type DecisionSummaryJson = {
 };
 
 type SearchResultJson =
-	| { type: "task"; data: TaskSummaryJson }
+	| { type: "task"; data: ReturnType<typeof toSchemaTaskJson> }
 	| { type: "document"; data: DocumentSummaryJson }
 	| { type: "decision"; data: DecisionSummaryJson };
-
-function nullable(value: string | undefined): string | null {
-	return value ?? null;
-}
-
-function nullableDescription(value: string | undefined): string | null {
-	return value === undefined || value === "" ? null : value;
-}
 
 function normalizePublicDate(value: string | undefined): string | null {
 	if (!value) return null;
@@ -134,79 +48,10 @@ function normalizePublicDate(value: string | undefined): string | null {
 	return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function toCompactTaskJson(task: Task): CompactTaskJson {
-	const acceptanceCriteria = task.acceptanceCriteriaItems ?? [];
-	return {
-		id: task.id,
-		title: task.title,
-		status: task.status,
-		archived: task.source === "archived",
-		type: nullable(task.type),
-		priority: nullable(task.priority),
-		project: nullable(task.project),
-		customFields: task.customFields ?? {},
-		assignees: task.assignee ?? [],
-		reporter: nullable(task.reporter),
-		labels: task.labels ?? [],
-		milestone: nullable(task.milestone),
-		parentTaskId: nullable(task.parentTaskId),
-		acceptanceCriteriaCompleted: acceptanceCriteria.filter((criterion) => criterion.checked).length,
-		acceptanceCriteriaCount: acceptanceCriteria.length,
-		references: task.references ?? [],
-		modifiedFiles: task.modifiedFiles ?? [],
-		ordinal: task.ordinal ?? null,
-		createdAt: normalizePublicDate(task.createdDate),
-		updatedAt: normalizePublicDate(task.updatedDate),
-		dueDate: normalizePublicDate(task.dueDate),
-	};
-}
-
-function toTaskSummaryJson(task: TaskListItem): TaskSummaryJson {
-	return { ...toCompactTaskJson(task), isReady: task.isReady };
-}
-
 function toProjectRelativePath(projectRoot: string, filePath: string | undefined): string | null {
 	if (!filePath) return null;
 	const projectRelative = isAbsolute(filePath) ? relative(projectRoot, filePath) : filePath;
 	return projectRelative.replaceAll("\\", "/");
-}
-
-function toChecklistJson(items: Task["acceptanceCriteriaItems"]): ChecklistItemJson[] {
-	return (items ?? [])
-		.slice()
-		.sort((a, b) => a.index - b.index)
-		.map(({ index, text, checked }) => ({ index, text, checked }));
-}
-
-function toDependencyGraphJson(graph: DependencyGraph): DependencyGraphJson {
-	return { root: graph.rootId, nodes: graph.nodes, edges: graph.edges };
-}
-
-function toTaskDetailsJson(task: TaskDetail, projectRoot: string): TaskDetailsJson {
-	return {
-		...toTaskSummaryJson({ ...task, isReady: task.readiness.isReady }),
-		path: toProjectRelativePath(projectRoot, task.filePath),
-		description: nullableDescription(task.description),
-		dependencies: task.dependencies ?? [],
-		dependencyGraph: toDependencyGraphJson(task.dependencyGraph),
-		readiness: task.readiness,
-		documentation: task.documentation ?? [],
-		subtasks: sortByTaskId(task.subtaskSummaries ?? []),
-		acceptanceCriteria: toChecklistJson(task.acceptanceCriteriaItems),
-		definitionOfDone: toChecklistJson(task.definitionOfDoneItems),
-		implementationPlan: nullable(task.implementationPlan),
-		implementationNotes: nullable(task.implementationNotes),
-		comments: (task.comments ?? [])
-			.slice()
-			.sort((a, b) => a.index - b.index)
-			.map((comment) => ({
-				index: comment.index,
-				body: comment.body,
-				createdAt: normalizePublicDate(comment.createdDate),
-				author: nullable(comment.author),
-			})),
-		finalSummary: nullable(task.finalSummary),
-	};
 }
 
 function toDocumentSummaryJson(document: Document, projectRoot: string, docsDir: string): DocumentSummaryJson {
@@ -245,31 +90,53 @@ function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 	return { id: task.id, title: task.title, fields, unknownFields: task.unknownFields ?? {} };
 }
 
-export function taskListJson(tasks: TaskListItem[], page?: ListPage<unknown>, registry?: FieldRegistry) {
-	if (registry)
-		return {
-			schemaVersion: 2,
-			kind: "task-list" as const,
-			tasks: tasks.map((task) => toSchemaTaskJson(task, registry)),
-			...cutListJson(page),
-		};
-	return { schemaVersion: 1, kind: "task-list" as const, tasks: tasks.map(toTaskSummaryJson), ...cutListJson(page) };
-}
-
-export function draftListJson(drafts: Task[], page?: ListPage<unknown>) {
+export function taskListJson(
+	tasks: TaskListItem[],
+	page?: ListPage<unknown>,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+) {
 	return {
-		schemaVersion: 1,
-		kind: "draft-list" as const,
-		drafts: drafts.map(toCompactTaskJson),
+		schemaVersion: 2,
+		kind: "task-list" as const,
+		tasks: tasks.map((task) => toSchemaTaskJson(task, registry)),
 		...cutListJson(page),
 	};
 }
 
-export function taskViewJson(task: TaskDetail, projectRoot: string) {
+export function draftListJson(
+	drafts: Task[],
+	page?: ListPage<unknown>,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+) {
 	return {
-		schemaVersion: 1,
+		schemaVersion: 2,
+		kind: "draft-list" as const,
+		drafts: drafts.map((draft) => toSchemaTaskJson(draft, registry)),
+		...cutListJson(page),
+	};
+}
+
+export function taskViewJson(
+	task: TaskDetail,
+	projectRoot: string,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+) {
+	return {
+		schemaVersion: 2,
 		kind: "task-view" as const,
-		task: toTaskDetailsJson(task, projectRoot),
+		task: { ...toSchemaTaskJson(task, registry), path: toProjectRelativePath(projectRoot, task.filePath) },
+	};
+}
+
+export function draftViewJson(
+	draft: TaskDetail,
+	projectRoot: string,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+) {
+	return {
+		schemaVersion: 2,
+		kind: "draft-view" as const,
+		draft: { ...toSchemaTaskJson(draft, registry), path: toProjectRelativePath(projectRoot, draft.filePath) },
 	};
 }
 
@@ -301,11 +168,12 @@ export function searchJson(
 	projectRoot: string,
 	docsDir: string,
 	page?: ListPage<unknown>,
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
 ) {
 	const publicResults: SearchResultJson[] = [];
 	for (const result of results) {
 		if (result.type === "task") {
-			publicResults.push({ type: "task", data: toTaskSummaryJson(result.task) });
+			publicResults.push({ type: "task", data: toSchemaTaskJson(result.task, registry) });
 			continue;
 		}
 		if (result.type === "document") {
@@ -314,7 +182,7 @@ export function searchJson(
 		}
 		publicResults.push({ type: "decision", data: toDecisionSummaryJson(result.decision) });
 	}
-	return { schemaVersion: 1, kind: "search" as const, results: publicResults, ...cutListJson(page) };
+	return { schemaVersion: 2, kind: "search" as const, results: publicResults, ...cutListJson(page) };
 }
 
 export function formatJson(value: unknown): string {

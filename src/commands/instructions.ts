@@ -7,8 +7,8 @@ import {
 	type InstructionGuideKey,
 	type WorkflowGuideDefinition,
 } from "../mcp/workflow-guides.ts";
+import { loadTaskSchema } from "../schema/index.ts";
 import { resolveBacklogDirectory } from "../utils/backlog-directory.ts";
-import { loadCustomFieldSchema } from "../utils/custom-fields.ts";
 import { getProjectRoot } from "../utils/find-backlog-root.ts";
 import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
 import { addHelpSchema, choiceType, renderConfiguredTaskIds } from "./help-schema.ts";
@@ -95,8 +95,8 @@ export function registerInstructionsCommand(program: Command): void {
 				const root = await getProjectRoot((await resolveRuntimeCwd()).cwd);
 				if (root) {
 					const backlogDir = resolveBacklogDirectory(root).backlogPath ?? join(root, "backlog");
-					if (Object.keys(loadCustomFieldSchema(backlogDir).fields).length > 0) {
-						markdown += "\nCustom fields are configured. Run `backlog fields` before creating or editing tasks.\n";
+					if (Object.values(loadTaskSchema(backlogDir).fields).some((field) => !field.core)) {
+						markdown += "\nAdditional fields are configured. Run `backlog schema` before creating or editing tasks.\n";
 					}
 				}
 			}

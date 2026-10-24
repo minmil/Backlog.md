@@ -62,8 +62,6 @@ export function buildTaskUpdateInput(args: TaskEditArgs): TaskUpdateInput {
 	if (typeof args.project === "string") {
 		updateInput.project = args.project;
 	}
-	if (args.customFields) updateInput.customFields = args.customFields;
-	if (args.clearCustomFields) updateInput.clearCustomFields = args.clearCustomFields;
 
 	if (args.milestone === null) {
 		updateInput.milestone = null;

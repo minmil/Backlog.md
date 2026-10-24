@@ -10,12 +10,10 @@ const Settings: React.FC = () => {
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [showSuccess, setShowSuccess] = useState(false);
-	const [statuses, setStatuses] = useState<string[]>([]);
 	const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
 	useEffect(() => {
 		loadConfig();
-		loadStatuses();
 	}, []);
 
 	const loadConfig = async () => {
@@ -29,15 +27,6 @@ const Settings: React.FC = () => {
 			setError(err instanceof Error ? err.message : 'Failed to load configuration');
 		} finally {
 			setLoading(false);
-		}
-	};
-
-	const loadStatuses = async () => {
-		try {
-			const data = await apiClient.fetchStatuses();
-			setStatuses(data);
-		} catch (err) {
-			console.error('Failed to load statuses:', err);
 		}
 	};
 
@@ -56,11 +45,6 @@ const Settings: React.FC = () => {
 				[field]: ''
 			});
 		}
-	};
-
-	const normalizeDefinitionOfDone = (items: string[] | undefined): string[] | undefined => {
-		const normalized = (items ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
-		return normalized.length > 0 ? normalized : undefined;
 	};
 
 	const validateConfig = (): boolean => {
@@ -88,13 +72,8 @@ const Settings: React.FC = () => {
 
 		try {
 			setSaving(true);
-			const normalizedConfig = {
-				...config,
-				definitionOfDone: normalizeDefinitionOfDone(config.definitionOfDone),
-			};
-			await apiClient.updateConfig(normalizedConfig);
-			setConfig(normalizedConfig);
-			setOriginalConfig(normalizedConfig);
+			await apiClient.updateConfig(config);
+			setOriginalConfig(config);
 			setShowSuccess(true);
 			setTimeout(() => setShowSuccess(false), 3000);
 			setError(null);
@@ -234,25 +213,6 @@ const Settings: React.FC = () => {
 							</div>
 
 							<div>
-								<label htmlFor="defaultStatus" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-									Default Status
-								</label>
-								<select
-									id="defaultStatus"
-									value={config.defaultStatus}
-									onChange={(e) => handleInputChange('defaultStatus', e.target.value)}
-									className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-								>
-									{statuses.map(status => (
-										<option key={status} value={status}>{status}</option>
-									))}
-								</select>
-								<p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-									Default status for new tasks
-								</p>
-							</div>
-
-							<div>
 								<label htmlFor="defaultEditor" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
 									Default Editor
 								</label>
@@ -268,48 +228,6 @@ const Settings: React.FC = () => {
 									Editor command to use for editing tasks (overrides EDITOR environment variable)
 								</p>
 							</div>
-						</div>
-					</div>
-
-					{/* Definition of Done Defaults */}
-					<div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-						<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Definition of Done Defaults</h2>
-						<p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-							These checklist items are added to new tasks by default.
-						</p>
-						<div className="space-y-3">
-							{(config.definitionOfDone ?? []).map((item, index) => (
-								<div key={`definition-of-done-${index}`} className="flex items-center gap-2">
-									<input
-										type="text"
-										value={item}
-										onChange={(e) => {
-											const next = [...(config.definitionOfDone ?? [])];
-											next[index] = e.target.value;
-											handleInputChange('definitionOfDone', next);
-										}}
-										className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-										placeholder="Checklist item"
-									/>
-									<button
-										type="button"
-										onClick={() => {
-											const next = (config.definitionOfDone ?? []).filter((_, idx) => idx !== index);
-											handleInputChange('definitionOfDone', next);
-										}}
-										className="px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:underline"
-									>
-										Remove
-									</button>
-								</div>
-							))}
-							<button
-								type="button"
-								onClick={() => handleInputChange('definitionOfDone', [...(config.definitionOfDone ?? []), ""])}
-								className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
-							>
-								+ Add item
-							</button>
 						</div>
 					</div>
 

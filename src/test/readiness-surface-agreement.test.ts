@@ -249,8 +249,8 @@ describe("readiness agreement across surfaces", () => {
  * result's own record: joining verdicts back by ID lets one claimant's answer stand in for the
  * other's, and the fail-open direction of that is a task reported ready because its namesake is.
  */
-describe("search JSON readiness for a contested identity", () => {
-	it("keeps each claimant's own verdict", () => {
+describe("search JSON fields for a contested identity", () => {
+	it("keeps each claimant's own dependency field", () => {
 		const createdDate = new Date().toISOString().slice(0, 10);
 		const makeRecord = (id: string, title: string, dependencies: string[] = []) => ({
 			id,
@@ -279,9 +279,10 @@ describe("search JSON readiness for a contested identity", () => {
 			"/project",
 			"docs",
 		);
-		expect(payload.results.map((result) => (result.type === "task" ? result.data.isReady : null))).toEqual([
-			false,
-			true,
+		expect(payload.schemaVersion).toBe(2);
+		expect(payload.results.map((result) => (result.type === "task" ? result.data.fields.dependencies : null))).toEqual([
+			["TASK-1"],
+			[],
 		]);
 	});
 });

@@ -6,8 +6,6 @@ export interface TaskEditArgs {
 	priority?: string;
 	type?: string;
 	project?: string;
-	customFields?: Record<string, unknown>;
-	clearCustomFields?: string[];
 	milestone?: string | null;
 	labels?: string[];
 	addLabels?: string[];

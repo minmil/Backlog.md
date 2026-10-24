@@ -3,9 +3,9 @@ import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FileSystem } from "../file-system/operations.ts";
 import { parseDecision, parseDocument, parseTask } from "../markdown/parser.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
 import type { BacklogConfig, Decision, Document, Task, TaskListFilter } from "../types/index.ts";
 import { watchConfigFile } from "../utils/config-watcher.ts";
-import { matchesCustomFieldConditions } from "../utils/custom-fields.ts";
 import { documentIdKey, documentIdsEqual } from "../utils/document-id.ts";
 import { normalizeDocumentRelativePath } from "../utils/document-path.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
@@ -322,7 +322,8 @@ export class ContentStore {
 		}
 		if (filter?.where?.length) {
 			const conditions = filter.where;
-			tasks = tasks.filter((task) => matchesCustomFieldConditions(task, conditions));
+			const registry = new FieldRegistry(this.filesystem.taskSchema);
+			tasks = tasks.filter((task) => conditions.every((condition) => registry.matches(task, condition)));
 		}
 		if (filter?.assignee) {
 			const assignee = filter.assignee;

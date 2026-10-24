@@ -2202,8 +2202,6 @@ export class Core {
 		const project = await this.normalizeProject(input.project);
 		const taskSchema = this.fs.taskSchema;
 		const registry = new FieldRegistry(taskSchema);
-		if (input.customFields && Object.keys(input.customFields).length > 0)
-			throw new Error("customFields was removed; supply fieldValues using task-schema.yml field keys");
 		const fieldValues: Record<string, unknown> = {};
 		for (const key of Object.keys(input.fieldValues ?? {})) {
 			if (!taskSchema.fields[key] || taskSchema.fields[key].core) throw new Error(`Unknown custom task field "${key}"`);
@@ -2437,8 +2435,6 @@ export class Core {
 		statusResolver: (status: string) => Promise<string>,
 	): Promise<{ task: Task; mutated: boolean }> {
 		assertSectionInputsSafe(input);
-		if ((input.customFields && Object.keys(input.customFields).length > 0) || input.clearCustomFields?.length)
-			throw new Error("customFields was removed; use schemaFields or clearSchemaFields");
 		if (
 			input.acceptanceCriteria !== undefined ||
 			input.removeAcceptanceCriteria?.length ||
