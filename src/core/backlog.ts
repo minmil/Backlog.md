@@ -325,6 +325,8 @@ function buildUpdatedDateComparableTask(task: Task): Record<string, unknown> {
 		priority: task.priority,
 		type: task.type,
 		project: task.project,
+		fieldValues: task.fieldValues ?? {},
+		customFields: task.customFields ?? {},
 		onStatusChange: task.onStatusChange,
 	};
 }
@@ -2480,6 +2482,40 @@ export class Core {
 				if (!task.customFields) task.customFields = {};
 				task.customFields[name] = value;
 				mutated = true;
+			}
+		}
+		const taskSchema = this.fs.taskSchema;
+		if (taskSchema) {
+			const registry = new FieldRegistry(taskSchema);
+			const apply = (key: string, next: Task): void => {
+				const previous = registry.getField(task, key);
+				const replacement = registry.getField(next, key);
+				if (JSON.stringify(previous) !== JSON.stringify(replacement)) {
+					Object.assign(task, next);
+					mutated = true;
+				}
+			};
+			for (const key of input.clearSchemaFields ?? []) apply(key, registry.clearField(task, key));
+			for (const [key, value] of Object.entries(input.schemaFields ?? {}))
+				apply(key, registry.setField(task, key, value, { allowManaged: key === "ordinal" }));
+			for (const [operation, assignments] of [
+				["add", input.addSchemaFields],
+				["remove", input.removeSchemaFields],
+			] as const) {
+				for (const [key, value] of Object.entries(assignments ?? {})) {
+					const field = taskSchema.fields[key];
+					if (!field || !["multi-enum", "string-list", "user-list", "task-ref-list"].includes(field.type))
+						throw new Error(`Task field "${key}" is not a list field`);
+					const current = registry.getField(task, key);
+					const entries = registry.validateValue(key, value);
+					if (!Array.isArray(entries)) throw new Error(`Task field "${key}" is not a list field`);
+					const list = Array.isArray(current) ? current : [];
+					const changed =
+						operation === "add"
+							? [...list, ...entries.filter((entry) => !list.includes(entry))]
+							: list.filter((entry) => !entries.includes(entry));
+					apply(key, registry.setField(task, key, changed));
+				}
 			}
 		}
 

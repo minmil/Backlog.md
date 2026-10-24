@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Core } from "../core/backlog.ts";
@@ -168,5 +168,48 @@ describe("field registry", () => {
 			/allowed values/,
 		);
 		expect((await core.filesystem.listTasks()).map((entry) => entry.title)).toEqual(["First"]);
+	});
+
+	test("schema edits keep unrelated file lines and reject invalid writes", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "backlog-registry-edit-"));
+		temporaryDirectories.push(directory);
+		const backlogDir = join(directory, "backlog");
+		mkdirSync(backlogDir);
+		writeFileSync(join(backlogDir, "config.yml"), "project_name: Registry\ntask_prefix: task\nfilesystem_only: true\n");
+		writeFileSync(
+			join(backlogDir, "task-schema.yml"),
+			getDefaultTaskSchemaText().replace(
+				"\nsections:",
+				"\n  side: {type: enum, values: [Buyer, Seller]}\n  teams: {type: multi-enum, values: [Data, Infra]}\n\nsections:",
+			),
+		);
+		const core = new Core(directory);
+		const created = await core.createTaskFromInput({ title: "First", fieldValues: { side: "Buyer", teams: ["Data"] } });
+		if (!created.filePath) throw new Error("Created task has no file path");
+		const file = created.filePath;
+		const before = readFileSync(file, "utf8");
+		await core.updateTaskFromInput(created.task.id, { schemaFields: { status: "Done" } });
+		const statusOnly = readFileSync(file, "utf8");
+		const withoutVolatileLines = (source: string) =>
+			source.replace(/^status:.*\n/gm, "").replace(/^updated_date:.*\n/gm, "");
+		expect(withoutVolatileLines(statusOnly)).toBe(withoutVolatileLines(before));
+		expect(statusOnly).toContain("status: Done");
+		await core.updateTaskFromInput(created.task.id, {
+			schemaFields: { side: "Seller" },
+			addSchemaFields: { teams: ["Infra"] },
+			removeSchemaFields: { teams: ["Data"] },
+		});
+		const edited = await core.filesystem.loadTask(created.task.id);
+		expect(edited?.fieldValues).toMatchObject({ side: "Seller", teams: ["Infra"] });
+		const unchanged = readFileSync(file, "utf8");
+		await expect(core.updateTaskFromInput(created.task.id, { schemaFields: { side: "Other" } })).rejects.toThrow(
+			/allowed values/,
+		);
+		expect(readFileSync(file, "utf8")).toBe(unchanged);
+		const second = await core.createTaskFromInput({ title: "Second", fieldValues: { side: "Buyer" } });
+		if (!second.filePath) throw new Error("Created task has no file path");
+		expect(readFileSync(second.filePath, "utf8")).not.toContain("updated_date:");
+		await core.updateTaskFromInput(second.task.id, { schemaFields: { side: "Seller" } });
+		expect(readFileSync(second.filePath, "utf8")).toContain("updated_date:");
 	});
 });

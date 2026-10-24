@@ -635,6 +635,8 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 			options.project !== undefined ||
 			options.field !== undefined ||
 			options.clearField !== undefined ||
+			options.add !== undefined ||
+			options.remove !== undefined ||
 			options.ordinal !== undefined ||
 			options.milestone !== undefined ||
 			options.clearMilestone ||
@@ -3375,12 +3377,54 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
 	let customFieldChanges: ReturnType<typeof normalizeCustomFieldAssignments>;
+	const schemaFieldChanges: Pick<
+		TaskUpdateInput,
+		"schemaFields" | "clearSchemaFields" | "addSchemaFields" | "removeSchemaFields"
+	> = {};
 	try {
-		customFieldChanges = normalizeCustomFieldAssignments(
-			core.filesystem.customFieldSchema,
-			parseCustomFieldFlags(options.field),
-			toStringArray(options.clearField).map((value) => String(value).trim()),
-		);
+		const schema = core.filesystem.taskSchema;
+		if (schema) {
+			const registry = new FieldRegistry(schema);
+			customFieldChanges = { values: {}, clear: [] };
+			for (const [key, raw] of Object.entries(parseCustomFieldFlags(options.field))) {
+				const field = schema.fields[key];
+				if (field?.managed && key !== "ordinal") throw new Error(`Task field "${key}" is managed by Backlog`);
+				if (!schemaFieldChanges.schemaFields) schemaFieldChanges.schemaFields = {};
+				schemaFieldChanges.schemaFields[key] = registry.parseInput(key, raw);
+			}
+			for (const key of toStringArray(options.clearField).map((value) => String(value).trim())) {
+				const field = schema.fields[key];
+				if (!field) throw new Error(`Unknown task field "${key}"`);
+				if (field.managed || field.required) throw new Error(`Task field "${key}" cannot be cleared`);
+				if (!schemaFieldChanges.clearSchemaFields) schemaFieldChanges.clearSchemaFields = [];
+				schemaFieldChanges.clearSchemaFields.push(key);
+			}
+			for (const [option, target] of [
+				[options.add, "addSchemaFields"],
+				[options.remove, "removeSchemaFields"],
+			] as const) {
+				for (const entry of toStringArray(option)) {
+					const [key, raw] = Object.entries(parseCustomFieldFlags([entry]))[0] ?? [];
+					if (!key || raw === undefined) throw new Error(`Invalid field operation "${entry}"`);
+					const field = schema.fields[key];
+					if (!field || !["multi-enum", "string-list", "user-list", "task-ref-list"].includes(field.type))
+						throw new Error(`Task field "${key}" is not a list field`);
+					const values = registry.parseInput(key, raw);
+					if (!Array.isArray(values)) throw new Error(`Task field "${key}" is not a list field`);
+					if (!schemaFieldChanges[target]) schemaFieldChanges[target] = {};
+					const assignments = schemaFieldChanges[target];
+					assignments[key] = [...((assignments[key] as string[] | undefined) ?? []), ...values];
+				}
+			}
+		} else {
+			customFieldChanges = normalizeCustomFieldAssignments(
+				core.filesystem.customFieldSchema,
+				parseCustomFieldFlags(options.field),
+				toStringArray(options.clearField).map((value) => String(value).trim()),
+			);
+			if (options.add !== undefined || options.remove !== undefined)
+				throw new Error("--add and --remove require task-schema.yml");
+		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
@@ -3786,7 +3830,10 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (taskIds.length === 1) {
 		let updatedTask: Task;
 		try {
-			updatedTask = await target.update(core, existingTask, buildTaskUpdateInput(editArgs));
+			updatedTask = await target.update(core, existingTask, {
+				...buildTaskUpdateInput(editArgs),
+				...schemaFieldChanges,
+			});
 		} catch (error) {
 			console.error(formatTaskEditError(error, existingTask.id, target.label.toLowerCase()));
 			process.exitCode = 1;
@@ -3807,7 +3854,7 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	// rather than repeating a full task body for every ID.
 	for (const task of resolvedTasks) {
 		try {
-			const updated = await target.update(core, task, buildTaskUpdateInput(editArgs));
+			const updated = await target.update(core, task, { ...buildTaskUpdateInput(editArgs), ...schemaFieldChanges });
 			console.log(`Updated ${target.label.toLowerCase()} ${updated.id}`);
 		} catch (error) {
 			editFailures.push({ taskId: task.id, message: formatTaskEditError(error, task.id, target.label.toLowerCase()) });
@@ -3844,8 +3891,14 @@ function configureEditCommand(cmd: Command) {
 		.option("--priority <priority>", "set task priority (configured priorities)")
 		.option("--type <type>", "set task type (configured task types; pass an empty value to clear)")
 		.option("--project <project>", "set task project (configured projects; pass an empty value to clear)")
-		.option("--field <key=value>", "set a declared custom field (repeatable)", createMultiValueAccumulator())
-		.option("--clear-field <key>", "clear a declared custom field (repeatable)", createMultiValueAccumulator())
+		.option("--field <key=value>", "set a declared task field (repeatable)", createMultiValueAccumulator())
+		.option("--clear-field <key>", "clear a declared task field (repeatable)", createMultiValueAccumulator())
+		.option("--add <key=value>", "add values to a declared list field (repeatable)", createMultiValueAccumulator())
+		.option(
+			"--remove <key=value>",
+			"remove values from a declared list field (repeatable)",
+			createMultiValueAccumulator(),
+		)
 		.option("--due-date <date>", "set due date (YYYY-MM-DD)")
 		.option("--clear-due-date", "clear task due date")
 		.option("--ordinal <number>", "set task ordinal for custom ordering")

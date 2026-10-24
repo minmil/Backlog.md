@@ -161,6 +161,11 @@ export interface TaskCreateInput {
 }
 
 export interface TaskUpdateInput {
+	/** Schema field writes, including both core and declared custom keys. */
+	schemaFields?: Record<string, unknown>;
+	clearSchemaFields?: string[];
+	addSchemaFields?: Record<string, unknown>;
+	removeSchemaFields?: Record<string, unknown>;
 	title?: string;
 	dueDate?: string | null;
 	description?: string;
