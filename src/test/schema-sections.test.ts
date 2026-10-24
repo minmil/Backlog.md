@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
+import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
 import {
 	appendMarkdown,
@@ -13,6 +14,7 @@ import {
 	setMarkdown,
 } from "../markdown/sections.ts";
 import { getDefaultTaskSchema } from "../schema/index.ts";
+import { getTestCliPath } from "./test-cli.ts";
 import {
 	createUniqueTestDir,
 	initializeFilesystemTestProject,
@@ -132,5 +134,35 @@ describe("schema section engine", () => {
 		const reloaded = await core.filesystem.loadTask(created.task.id);
 		expect(reloaded?.sections?.description).toBe("Initial description\n\nSecond paragraph");
 		expect(reloaded?.other).toContain("Owner note with  spaces");
+	});
+
+	it("accepts generic CLI section edits and appends log entries", async () => {
+		const path = createUniqueTestDir("schema-sections-cli");
+		createdDirectories.push(path);
+		const core = new Core(path);
+		await initializeFilesystemTestProject(core, "Sections CLI");
+		await updateTestTaskSchema(core.filesystem, (value) => {
+			value.users = [{ handle: "@alice", name: "Alice", default: true }];
+		});
+		const cli = getTestCliPath();
+		const created =
+			await $`bun ${cli} task create "CLI sections" --section description=Hello --add-item acceptance=Ready`
+				.cwd(path)
+				.quiet();
+		expect(created.exitCode).toBe(0);
+		const edited =
+			await $`bun ${cli} task edit TASK-1 --append-section description=More --check acceptance:1 --comment "Called client"`
+				.cwd(path)
+				.quiet();
+		expect(edited.exitCode).toBe(0);
+		const logged = await $`bun ${cli} task log TASK-1 "Approved by client" --date 2026-10-23`.cwd(path).quiet();
+		expect(logged.exitCode).toBe(0);
+		const task = await core.filesystem.loadTask("TASK-1");
+		expect(task?.sections?.description).toBe("Hello\n\nMore");
+		expect(task?.sections?.acceptance).toEqual([{ index: 1, text: "Ready", checked: true }]);
+		expect(task?.sections?.log).toMatchObject([
+			{ author: "@alice", body: "Called client" },
+			{ author: "@alice", body: "Approved by client", date: "2026-10-23" },
+		]);
 	});
 });

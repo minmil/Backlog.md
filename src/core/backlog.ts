@@ -2256,6 +2256,9 @@ export class Core {
 			for (const [id, value] of Object.entries(input.sections ?? {})) {
 				setMarkdown(createdSections, id, value, taskSchema);
 			}
+			for (const [id, values] of Object.entries(input.sectionItems ?? {})) {
+				for (const value of values) checklistAdd(createdSections, id, value, taskSchema);
+			}
 			const task: Task = {
 				id,
 				title: input.title.trim(),
@@ -3069,7 +3072,8 @@ export class Core {
 				input.checkSectionItems ||
 				input.uncheckSectionItems ||
 				input.removeSectionItems ||
-				input.appendLog,
+				input.appendLog ||
+				input.appendLogs?.length,
 		);
 		if (sectionEditRequested) {
 			const parsed = parseSections(task.rawContent ?? "", taskSchema);
@@ -3090,12 +3094,11 @@ export class Core {
 			for (const [id, indices] of Object.entries(input.removeSectionItems ?? {})) {
 				for (const index of [...indices].sort((a, b) => b - a)) checklistRemove(parsed, id, index, taskSchema);
 			}
-			if (input.appendLog) {
+			for (const entry of [...(input.appendLog ? [input.appendLog] : []), ...(input.appendLogs ?? [])]) {
 				const logId =
-					input.appendLog.section ??
-					Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+					entry.section ?? Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
 				if (!logId) throw new Error("No log section is configured in task-schema.yml.");
-				logAppend(parsed, logId, input.appendLog, taskSchema);
+				logAppend(parsed, logId, entry, taskSchema);
 			}
 			if (JSON.stringify(parsed.sections) !== before) {
 				task.sections = parsed.sections;

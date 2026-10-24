@@ -135,6 +135,7 @@ export function isReadOnlyTask(task: Task): boolean {
 export interface TaskCreateInput {
 	title: string;
 	sections?: Record<string, string>;
+	sectionItems?: Record<string, string[]>;
 	reporter?: string;
 	onStatusChange?: string;
 	fieldValues?: Record<string, unknown>;
@@ -170,6 +171,7 @@ export interface TaskUpdateInput {
 	uncheckSectionItems?: Record<string, number[]>;
 	removeSectionItems?: Record<string, number[]>;
 	appendLog?: { section?: string; body: string; author?: string; date?: string };
+	appendLogs?: Array<{ section?: string; body: string; author?: string; date?: string }>;
 	/** Schema field writes, including both core and declared custom keys. */
 	schemaFields?: Record<string, unknown>;
 	clearSchemaFields?: string[];

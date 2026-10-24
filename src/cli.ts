@@ -574,6 +574,8 @@ function hasCreateFieldFlags(options: Record<string, unknown>): boolean {
 	return Boolean(
 		options.description !== undefined ||
 			options.desc !== undefined ||
+			options.section !== undefined ||
+			options.addItem !== undefined ||
 			options.assignee !== undefined ||
 			options.status !== undefined ||
 			options.reporter !== undefined ||
@@ -608,6 +610,12 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 		options.title !== undefined ||
 			options.description !== undefined ||
 			options.desc !== undefined ||
+			options.section !== undefined ||
+			options.appendSection !== undefined ||
+			options.addItem !== undefined ||
+			options.check !== undefined ||
+			options.uncheck !== undefined ||
+			options.removeItem !== undefined ||
 			options.assignee !== undefined ||
 			options.status !== undefined ||
 			options.reporter !== undefined ||
@@ -674,6 +682,62 @@ function parseCustomFieldFlags(raw: unknown): Record<string, string> {
 	return fields;
 }
 
+function parseSectionAssignments(raw: unknown, flag: string): Record<string, string[]> {
+	const sections: Record<string, string[]> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.indexOf("=");
+		if (separator <= 0) throw new Error(`Invalid ${flag} "${entry}". Use ${flag} id=text.`);
+		const id = entry.slice(0, separator).trim();
+		sections[id] ??= [];
+		sections[id].push(entry.slice(separator + 1));
+	}
+	return sections;
+}
+
+function parseSectionIndices(raw: unknown, flag: string): Record<string, number[]> {
+	const sections: Record<string, number[]> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.lastIndexOf(":");
+		const id = entry.slice(0, separator).trim();
+		const index = Number(entry.slice(separator + 1));
+		if (separator <= 0 || !Number.isInteger(index) || index < 1) {
+			throw new Error(`Invalid ${flag} "${entry}". Use ${flag} id:n with a 1-based index.`);
+		}
+		sections[id] ??= [];
+		sections[id].push(index);
+	}
+	return sections;
+}
+
+const REMOVED_SECTION_FLAGS: ReadonlyArray<[string, string]> = [
+	["ac", "--add-item acceptance=text"],
+	["acceptanceCriteria", "--add-item acceptance=text"],
+	["checkAc", "--check acceptance:n"],
+	["uncheckAc", "--uncheck acceptance:n"],
+	["removeAc", "--remove-item acceptance:n"],
+	["dod", "--add-item <section>=text"],
+	["checkDod", "--check <section>:n"],
+	["uncheckDod", "--uncheck <section>:n"],
+	["removeDod", "--remove-item <section>:n"],
+	["dodDefaults", "task-schema.yml sections"],
+	["plan", "--section <id>=text"],
+	["appendPlan", "--append-section <id>=text"],
+	["notes", "--section <id>=text"],
+	["appendNotes", "--append-section <id>=text"],
+	["finalSummary", "--section <id>=text"],
+	["appendFinalSummary", "--append-section <id>=text"],
+	["clearFinalSummary", "--section <id>="],
+];
+
+function rejectRemovedSectionFlags(options: OptionValues): void {
+	for (const [name, replacement] of REMOVED_SECTION_FLAGS) {
+		if (name === "dodDefaults" ? options[name] === false : options[name] !== undefined && options[name] !== false) {
+			const flag = `--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+			throw new Error(`${flag} was removed. Use ${replacement}.`);
+		}
+	}
+}
+
 /** Translate task field shortcuts into the same raw assignments accepted by --field. */
 function shortcutFieldAssignments(options: OptionValues): Record<string, string> {
 	const assignments: Record<string, string> = {};
@@ -714,6 +778,12 @@ const PER_TASK_ONLY_EDIT_FLAGS: ReadonlyArray<{ option: string; flag: string }> 
 	{ option: "title", flag: "--title" },
 	{ option: "description", flag: "--description" },
 	{ option: "desc", flag: "--desc" },
+	{ option: "section", flag: "--section" },
+	{ option: "appendSection", flag: "--append-section" },
+	{ option: "addItem", flag: "--add-item" },
+	{ option: "check", flag: "--check" },
+	{ option: "uncheck", flag: "--uncheck" },
+	{ option: "removeItem", flag: "--remove-item" },
 	{ option: "plan", flag: "--plan" },
 	{ option: "appendPlan", flag: "--append-plan" },
 	{ option: "notes", flag: "--notes" },
@@ -2097,6 +2167,8 @@ addHelpSchema(taskCmd.command("create [title]"), {
 })
 	.option("-d, --description <text>", "task description")
 	.option("--desc <text>", "alias for --description")
+	.option("--section <id=text>", "set a markdown section (repeatable)", createMultiValueAccumulator())
+	.option("--add-item <id=text>", "add a checklist item (repeatable)", createMultiValueAccumulator())
 	.option(
 		"-a, --assignee <assignees>",
 		'assign task to one or more @names (comma-separated or repeatable); pass "" to leave it unassigned',
@@ -2213,22 +2285,26 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		}
 
 		try {
-			const criteria = processAcceptanceCriteriaOptions(options);
+			rejectRemovedSectionFlags(options);
+			const sections = Object.fromEntries(
+				Object.entries(parseSectionAssignments(options.section, "--section")).map(([id, values]) => [
+					id,
+					values.at(-1) ?? "",
+				]),
+			);
+			if (options.description !== undefined || options.desc !== undefined) {
+				sections.description = String(options.description ?? options.desc);
+			}
 			const fieldAssignments = allFieldAssignments(options);
 			const schema = core.filesystem.taskSchema;
 			const createInput: TaskCreateInput = {
 				title: title ?? "",
-				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
+				sections,
+				sectionItems: parseSectionAssignments(options.addItem, "--add-item"),
 				status: createAsDraft ? "Draft" : undefined,
 				references: parseDelimitedStringList(options.ref),
 				documentation: parseDelimitedStringList(options.doc),
 				modifiedFiles: parseDelimitedStringList(options.modifiedFile),
-				implementationPlan: options.plan ? String(options.plan) : undefined,
-				implementationNotes: options.notes ? String(options.notes) : undefined,
-				finalSummary: options.finalSummary ? String(options.finalSummary) : undefined,
-				acceptanceCriteria: criteria.map((text) => ({ text, checked: false })),
-				definitionOfDoneAdd: toStringArray(options.dod),
-				disableDefinitionOfDoneDefaults: options.dodDefaults === false,
 			};
 			const preparedInput = applyCreateFieldAssignments(new FieldRegistry(schema), createInput, fieldAssignments);
 			const { task, filePath } = await core.createTaskFromInput(preparedInput);
@@ -3360,7 +3436,35 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 		TaskUpdateInput,
 		"schemaFields" | "clearSchemaFields" | "addSchemaFields" | "removeSchemaFields"
 	> = {};
+	const sectionChanges: TaskUpdateInput = {};
 	try {
+		rejectRemovedSectionFlags(options);
+		const sectionSets = parseSectionAssignments(options.section, "--section");
+		const setSections = Object.fromEntries(
+			Object.entries(sectionSets).map(([id, values]) => [id, values.at(-1) ?? ""]),
+		);
+		if (options.description !== undefined || options.desc !== undefined) {
+			setSections.description = String(options.description ?? options.desc);
+		}
+		if (Object.keys(setSections).length > 0) sectionChanges.setSections = setSections;
+		const appendSections = parseSectionAssignments(options.appendSection, "--append-section");
+		if (Object.keys(appendSections).length > 0) sectionChanges.appendSections = appendSections;
+		const addSectionItems = parseSectionAssignments(options.addItem, "--add-item");
+		if (Object.keys(addSectionItems).length > 0) sectionChanges.addSectionItems = addSectionItems;
+		const checkSectionItems = parseSectionIndices(options.check, "--check");
+		if (Object.keys(checkSectionItems).length > 0) sectionChanges.checkSectionItems = checkSectionItems;
+		const uncheckSectionItems = parseSectionIndices(options.uncheck, "--uncheck");
+		if (Object.keys(uncheckSectionItems).length > 0) sectionChanges.uncheckSectionItems = uncheckSectionItems;
+		const removeSectionItems = parseSectionIndices(options.removeItem, "--remove-item");
+		if (Object.keys(removeSectionItems).length > 0) sectionChanges.removeSectionItems = removeSectionItems;
+		const commentEntries = toStringArray(options.comment);
+		if (commentEntries.length > 0) {
+			sectionChanges.appendLogs = commentEntries.map((body) => ({
+				body,
+				...(options.author || options.commentAuthor ? { author: String(options.author ?? options.commentAuthor) } : {}),
+				...(options.date ? { date: String(options.date) } : {}),
+			}));
+		}
 		const schema = core.filesystem.taskSchema;
 		{
 			const registry = new FieldRegistry(schema);
@@ -3701,16 +3805,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 
 	const planAppendValues = toStringArray(options.appendPlan);
 	const notesAppendValues = toStringArray(options.appendNotes);
-	const commentsAppendValues = toStringArray(options.comment);
 	const finalSummaryAppendValues = toStringArray(options.appendFinalSummary);
 
 	const editArgs: TaskEditArgs = {};
 	if (options.title) {
 		editArgs.title = String(options.title);
-	}
-	const descriptionOption = options.description ?? options.desc;
-	if (descriptionOption !== undefined) {
-		editArgs.description = String(descriptionOption);
 	}
 	if (canonicalStatus) {
 		editArgs.status = canonicalStatus;
@@ -3791,12 +3890,6 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (notesAppendValues.length > 0) {
 		editArgs.notesAppend = notesAppendValues;
 	}
-	if (commentsAppendValues.length > 0) {
-		editArgs.commentsAppend = commentsAppendValues;
-	}
-	if (typeof options.commentAuthor === "string") {
-		editArgs.commentAuthor = String(options.commentAuthor);
-	}
 	if (typeof options.finalSummary === "string") {
 		editArgs.finalSummary = String(options.finalSummary);
 	}
@@ -3842,6 +3935,7 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 			updatedTask = await target.update(core, existingTask, {
 				...buildTaskUpdateInput(editArgs),
 				...schemaFieldChanges,
+				...sectionChanges,
 			});
 		} catch (error) {
 			console.error(formatTaskEditError(error, existingTask.id, target.label.toLowerCase()));
@@ -3867,7 +3961,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	// rather than repeating a full task body for every ID.
 	for (const task of resolvedTasks) {
 		try {
-			const updated = await target.update(core, task, { ...buildTaskUpdateInput(editArgs), ...schemaFieldChanges });
+			const updated = await target.update(core, task, {
+				...buildTaskUpdateInput(editArgs),
+				...schemaFieldChanges,
+				...sectionChanges,
+			});
 			console.log(`Updated ${target.label.toLowerCase()} ${updated.id}`);
 		} catch (error) {
 			editFailures.push({ taskId: task.id, message: formatTaskEditError(error, task.id, target.label.toLowerCase()) });
@@ -3890,6 +3988,14 @@ function configureEditCommand(cmd: Command) {
 		.option("-t, --title <title>")
 		.option("-d, --description <text>", "task description")
 		.option("--desc <text>", "alias for --description")
+		.option("--section <id=text>", "set a markdown section (repeatable)", createMultiValueAccumulator())
+		.option("--append-section <id=text>", "append to a markdown section (repeatable)", createMultiValueAccumulator())
+		.option("--add-item <id=text>", "add a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--check <id:n>", "check a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--uncheck <id:n>", "uncheck a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--remove-item <id:n>", "remove a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--author <handle>", "author for --comment, from schema users")
+		.option("--date <date>", "business date for --comment (YYYY-MM-DD)")
 		.option(
 			"-a, --assignee <assignees>",
 			'replace all task assignees with one or more @names (comma-separated or repeatable); pass "" to clear them',
@@ -4157,7 +4263,35 @@ configureEditCommand(taskEditCommand).action(async (taskIds: string[] | undefine
 	await runEditCommand(taskEditTarget, taskIds, options);
 });
 
-// Note: Implementation notes appending is handled via `task edit --append-notes` only.
+addHelpSchema(taskCmd.command("log <taskId> <text>"), {
+	reads: "The configured log section and schema users",
+	writes: "Appends one immutable log entry to the task",
+	required: [
+		{ name: "taskId", type: "Task ID", description: "Task receiving the entry" },
+		{ name: "text", type: "Markdown", description: "Log entry body" },
+	],
+	optional: [
+		{ name: "section", type: "Section ID", description: "Log section; defaults to the first configured log" },
+		{ name: "author", type: "User handle", description: "Schema user; defaults to the schema default user" },
+		{ name: "date", type: "YYYY-MM-DD", description: "Business date; defaults to the local day" },
+	],
+	output: "Updated task ID",
+	examples: ['backlog task log {{TASK_ID:1}} "Called client" --author @alice'],
+})
+	.option("--section <id>", "log section ID")
+	.option("--author <handle>", "author handle from schema users")
+	.option("--date <date>", "business date (YYYY-MM-DD)")
+	.action(async (taskId: string, body: string, options: { section?: string; author?: string; date?: string }) => {
+		try {
+			const cwd = await requireProjectRoot();
+			const core = new Core(cwd);
+			const updated = await core.updateTaskFromInput(taskId, { appendLog: { body, ...options } });
+			console.log(`Updated task ${updated.id}`);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exitCode = 1;
+		}
+	});
 
 addHelpSchema(taskCmd.command("view <taskId>"), {
 	reads: "Task metadata, description, plan, notes, comments, final summary, AC, and DoD",
