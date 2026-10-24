@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { Core } from "../core/backlog.ts";
 import { BranchTaskLoader } from "../core/task-loader.ts";
 import type { GitBranchTip, GitOperations } from "../git/operations.ts";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import type { BacklogConfig, Task } from "../types/index.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
 import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
@@ -565,21 +566,13 @@ describe("shared immutable branch task loading", () => {
 		expect(tipCalls).toBe(3);
 	});
 
-	it("returns statistics metadata from the same stable config generation as its tasks", async () => {
+	it("returns schema-backed statistics metadata after the task snapshot", async () => {
 		const core = new Core("/tmp/statistics-config-generation-test");
-		const oldConfig = {
-			...config,
-			checkActiveBranches: false,
-			statuses: ["Old", "Done"],
-			priorities: ["Low"],
-		};
-		const newConfig = {
-			...oldConfig,
-			statuses: ["Queued", "Done"],
-			priorities: ["Urgent"],
-		};
-		let configLoads = 0;
-		core.fs.loadConfig = async () => (configLoads++ === 0 ? oldConfig : newConfig);
+		const schema = structuredClone(getDefaultTaskSchema());
+		if (schema.fields.status) schema.fields.status.values = ["Queued", "Done"];
+		if (schema.fields.priority) schema.fields.priority.values = ["Urgent"];
+		Object.defineProperty(core.fs, "taskSchema", { configurable: true, get: () => schema });
+		core.fs.loadConfig = async () => ({ ...config, checkActiveBranches: false });
 		core.fs.listArchivedTasks = async () => [];
 		core.fs.listDrafts = async () => [];
 		core.listTasksWithMetadata = async () => [];

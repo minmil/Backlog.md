@@ -4754,8 +4754,9 @@ export class Core {
 		progressCallback?: (msg: string) => void,
 	): Promise<{ tasks: Task[]; drafts: Task[]; statuses: string[]; priorities: string[] }> {
 		const snapshot = await this.loadTaskCorpusSnapshot(progressCallback);
-		const statuses = (this.fs.taskSchema.fields.status?.values || DEFAULT_STATUSES) as string[];
-		const priorities = this.fs.taskSchema.fields.priority?.values ?? [];
+		const schema = this.fs.taskSchema;
+		const statuses = (schema.fields.status?.values || DEFAULT_STATUSES) as string[];
+		const priorities = schema.fields.priority?.values ?? [];
 		if (!snapshot.identityIndex) throw new Error("Task corpus identity index was not initialized");
 		const tasks = snapshot.identityIndex.getTasks(true);
 

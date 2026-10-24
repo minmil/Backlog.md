@@ -2214,15 +2214,14 @@ export class BacklogServer {
 		try {
 			const servicesWereReady = this.servicesInitialized;
 			const store = await this.getContentStoreInstance();
-			const currentConfig = await this.core.filesystem.loadConfig();
+			const schema = this.core.filesystem.taskSchema;
 			await store.ensureConfigWatcher();
 			if (servicesWereReady) await this.core.refreshTasksForTaskRead();
 			const corpus = store.getTaskCorpusSnapshot();
-			const corpusConfig = corpus.config ?? currentConfig;
 			const drafts = await this.core.filesystem.listDrafts();
-			const statuses = (corpusConfig?.statuses || DEFAULT_STATUSES) as string[];
+			const statuses = schema.fields.status?.values ?? Array.from(DEFAULT_STATUSES);
 			const tasks = corpus.identityIndex?.getTasks(true) ?? corpus.activeTasks;
-			const priorities = currentConfig?.priorities ?? corpusConfig?.priorities ?? [];
+			const priorities = schema.fields.priority?.values ?? [];
 
 			// Calculate statistics using the exact same function as CLI
 			const statistics = getTaskStatistics(tasks, drafts, statuses, priorities);
