@@ -4,20 +4,7 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-The stable full-suite run at `bdee6ca` had 36 active failures beyond the 19 baseline failures. Each entry below gives the owning task and the missing contract.
-
-### Task 4 — generic sections, log, and plain/JSON detail (10)
-
-- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > writes explicit UTC through CLI create, edit and comments on a non-UTC host` — Task 4: comments become log entries with a recorded UTC `created` timestamp.
-- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > preserves historical creation values on read and edit, including midnight and date-only values` — Task 4: the new log parser must preserve recorded creation timestamps.
-- `src/test/cli-timestamps.test.ts` — `stored UTC timestamps > keeps a comment before an unquoted timestamp outside the stored date value` — Task 4: comment metadata parsing moves to the generic log section.
-- `src/test/cli-json-output.test.ts` — `CLI JSON output > serializes an absent description as an empty section and preserves Markdown verbatim` — Task 4: task view needs the JSON v2 `sections` and `other` contract.
-- `src/test/cli-json-output.test.ts` — `CLI JSON output > returns complete, partial, and empty acceptance-criteria progress across task JSON surfaces` — Task 4: checklist progress moves to the generic section engine.
-- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with task view --plain` — Task 4: plain detail must render schema sections in order.
-- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with task <id> --plain shortcut` — Task 4: the shortcut uses the same new plain section renderer.
-- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with draft view --plain` — Task 4: draft detail needs the generic plain section renderer.
-- `src/test/cli-plain-output.test.ts` — `CLI plain output for AI agents > should output plain text with draft <id> --plain shortcut` — Task 4: the draft shortcut uses the same renderer.
-- `src/test/utc-date-display.test.ts` — `UTC date display > adds UTC labels to plain task and comment date fields` — Task 4: plain log output must format recorded UTC creation dates.
+The Task 4 full-suite run at `3a43a8b` had 26 active failures beyond the 19 baseline failures. Each entry below gives the owning task and the missing contract. All ten former Task 4 entries were cleared by the generic section engine and migrated tests.
 
 ### Task 5 — server schema/API and live-update paths (26)
 

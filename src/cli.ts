@@ -2144,26 +2144,16 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		{ name: "project", type: projectType, description: "Task project; case-insensitive" },
 		{ name: "field", type: "key=value", description: "Set any editable schema field; repeatable" },
 		{ name: "due-date", type: "date", description: "Optional due date (YYYY-MM-DD)" },
-		{ name: "acceptanceCriteria", type: "Markdown list item text", description: "Repeat --ac for multiple criteria" },
+		{ name: "section", type: "id=text", description: "Set a configured Markdown section; repeatable" },
+		{ name: "add-item", type: "id=text", description: "Add a configured checklist item; repeatable" },
+		{ name: "author", type: "User handle", description: "Acting user for automatic change log entries" },
 		{ name: "ordinal", type: "Integer", description: "Non-negative manual ordering value" },
 		{ name: "parent", type: "Task ID", description: "Existing parent task for subtasks; not a milestone ID" },
-		{
-			name: "plan",
-			type: "Markdown",
-			description:
-				"Only for already-started work created directly in a configured active status (for example, In Progress)",
-		},
-		{ name: "notes", type: "Markdown", description: "Same restriction as plan" },
-		{
-			name: "final-summary",
-			type: "Markdown",
-			description: "Only for finished, verified work created directly in a configured terminal status",
-		},
 	],
 	writes: "Creates a task or draft markdown file through Backlog.md",
 	output: "Created task details; use --plain for text output",
 	examples: [
-		'backlog task create "Add OAuth" --ac "Login succeeds"',
+		'backlog task create "Add OAuth" --add-item acceptance="Login succeeds"',
 		`backlog task create "Fix session expiry" --type ${TASK_TYPE_EXAMPLE}`,
 		'backlog task create -p {{TASK_ID:1}} "Add tests"',
 	],
@@ -2172,6 +2162,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--desc <text>", "alias for --description")
 	.option("--section <id=text>", "set a markdown section (repeatable)", createMultiValueAccumulator())
 	.option("--add-item <id=text>", "add a checklist item (repeatable)", createMultiValueAccumulator())
+	.option("--author <handle>", "acting user for automatic change log entries")
 	.option(
 		"-a, --assignee <assignees>",
 		'assign task to one or more @names (comma-separated or repeatable); pass "" to leave it unassigned',
@@ -2302,6 +2293,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			const schema = core.filesystem.taskSchema;
 			const createInput: TaskCreateInput = {
 				title: title ?? "",
+				...(options.author !== undefined && { actingUser: String(options.author) }),
 				sections,
 				sectionItems: parseSectionAssignments(options.addItem, "--add-item"),
 				status: createAsDraft ? "Draft" : undefined,
@@ -4259,7 +4251,7 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 	examples: [
 		'backlog task edit {{TASK_ID:1}} --status "<active status>" -a @sara',
 		`backlog task edit {{TASK_ID:1}} --type ${TASK_TYPE_EXAMPLE}`,
-		"backlog task edit {{TASK_ID:1}} --check-ac 1",
+		"backlog task edit {{TASK_ID:1}} --check acceptance:1",
 		'backlog task edit {{TASK_ID:1}} {{TASK_ID:2}} --status "<active status>"',
 	],
 }).description("edit an existing task");
@@ -4741,7 +4733,7 @@ const draftEditCommand = addHelpSchema(draftCmd.command("edit [taskId]"), {
 	],
 	writes: "Updates draft metadata and structured sections through Backlog.md",
 	output: "Updated draft details; use --plain for text output",
-	examples: ['backlog draft edit DRAFT-1 -t "Renamed draft"', "backlog draft edit DRAFT-1 --check-ac 1"],
+	examples: ['backlog draft edit DRAFT-1 -t "Renamed draft"', "backlog draft edit DRAFT-1 --check acceptance:1"],
 }).description("edit an existing draft");
 configureEditCommand(draftEditCommand).action(async (taskId: string | undefined, options) => {
 	await runEditCommand(draftEditTarget, taskId ? [taskId] : [], options);
@@ -6505,6 +6497,36 @@ registerInstructionsCommand(program);
 
 // MCP command group
 registerMcpCommand(program);
+
+// Keep removed options parseable only so the command can name their replacements.
+// They are no longer part of the advertised create/edit interface.
+const retiredSectionFlags = new Set([
+	"--ac",
+	"--acceptance-criteria",
+	"--clear-ac",
+	"--check-ac",
+	"--uncheck-ac",
+	"--remove-ac",
+	"--dod",
+	"--check-dod",
+	"--uncheck-dod",
+	"--remove-dod",
+	"--no-dod-defaults",
+	"--plan",
+	"--append-plan",
+	"--notes",
+	"--append-notes",
+	"--final-summary",
+	"--append-final-summary",
+	"--clear-final-summary",
+]);
+function hideRetiredSectionFlags(command: Command): void {
+	for (const option of command.options) {
+		if (option.long && retiredSectionFlags.has(option.long)) option.hideHelp();
+	}
+	for (const child of command.commands) hideRetiredSectionFlags(child);
+}
+hideRetiredSectionFlags(program);
 
 program
 	.parseAsync(process.argv)

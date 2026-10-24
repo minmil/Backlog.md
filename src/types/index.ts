@@ -134,6 +134,7 @@ export function isReadOnlyTask(task: Task): boolean {
 
 export interface TaskCreateInput {
 	title: string;
+	actingUser?: string;
 	sections?: Record<string, string>;
 	sectionItems?: Record<string, string[]>;
 	reporter?: string;

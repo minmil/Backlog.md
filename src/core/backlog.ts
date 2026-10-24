@@ -2296,6 +2296,19 @@ export class Core {
 				...(acceptanceCriteriaItems.length > 0 && { acceptanceCriteriaItems }),
 				...(definitionOfDoneItems && definitionOfDoneItems.length > 0 && { definitionOfDoneItems }),
 			};
+			const trackedLogId = Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+			if (trackedLogId) {
+				for (const [key, definition] of Object.entries(taskSchema.fields)) {
+					if (!definition.track_changes) continue;
+					const value = registry.getField(task, key);
+					if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
+						continue;
+					}
+					const label = definition.label ?? key;
+					const body = `${label}: ∅ → ${String(registry.format(key, value, "plain"))}`;
+					logAppend(createdSections, trackedLogId, { body, author: input.actingUser, auto: true }, taskSchema);
+				}
+			}
 
 			const targetPath = await this.fs.getTaskWritePath(task, isDraft);
 			const previousIndexEntries = autoCommitEnabled ? await this.git.getIndexEntries(targetPath) : undefined;

@@ -198,4 +198,24 @@ describe("schema section engine", () => {
 		expect(reloaded?.fieldValues?.side).toBe("Us");
 		expect(reloaded?.other).toContain("Side: ∅ → Client");
 	});
+
+	it("records tracked fields on create with the acting user", async () => {
+		const path = createUniqueTestDir("schema-sections-create-tracked");
+		createdDirectories.push(path);
+		const core = new Core(path);
+		await initializeFilesystemTestProject(core, "Tracked creation");
+		await updateTestTaskSchema(core.filesystem, (value) => {
+			value.users = [
+				{ handle: "@alice", name: "Alice", default: true },
+				{ handle: "@max", name: "Max" },
+			];
+			value.fields.side = { type: "enum", values: ["Client", "Us"], label: "Side", track_changes: true };
+		});
+		const created = await core.createTaskFromInput(
+			{ title: "Tracked task", fieldValues: { side: "Client" }, actingUser: "@max" },
+			false,
+		);
+		const reloaded = await core.filesystem.loadTask(created.task.id);
+		expect(reloaded?.sections?.log).toMatchObject([{ author: "@max", auto: true, body: "Side: ∅ → Client" }]);
+	});
 });
