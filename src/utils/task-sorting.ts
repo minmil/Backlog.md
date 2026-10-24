@@ -1,5 +1,5 @@
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
-import { getDefaultTaskSchema } from "../schema/index.ts";
 import type { Task } from "../types/index.ts";
 import { getPriorityRank } from "./priority-config.ts";
 

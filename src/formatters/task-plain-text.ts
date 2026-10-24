@@ -1,9 +1,10 @@
 import type { TaskDetail } from "../core/task-detail.ts";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
-import { getDefaultTaskSchema } from "../schema/index.ts";
 import type { Task } from "../types/index.ts";
 import type { ChecklistItem } from "../ui/checklist.ts";
 import { transformCodePathsPlain } from "../ui/code-path.ts";
+import { formatStatusWithIcon } from "../ui/status-icon.ts";
 import { sortByTaskId } from "../utils/task-sorting.ts";
 import { formatUtcDateForDisplay, type UtcDateDisplayOptions } from "../utils/utc-date-display.ts";
 import { formatDependencyGraphLines } from "./dependency-graph-text.ts";
@@ -91,9 +92,12 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 		const value = registry.getField(task, key);
 		if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) continue;
 		const label = definition.label ?? key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-		lines.push(`${label}: ${registry.format(key, value, "plain")}`);
+		const formatted =
+			key === "status" && typeof value === "string"
+				? `${formatStatusWithIcon(value)}${task.source === "archived" ? " (archived)" : ""}`
+				: registry.format(key, value, "plain");
+		lines.push(`${label}: ${formatted}`);
 	}
-	if (task.source === "archived") lines.push("Archived: yes");
 
 	const subtaskSummaries = task.subtaskSummaries ?? [];
 	const subtaskCount = subtaskSummaries.length > 0 ? subtaskSummaries.length : (task.subtasks?.length ?? 0);

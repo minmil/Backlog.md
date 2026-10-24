@@ -8,8 +8,8 @@
  */
 
 import Fuse, { type IFuseOptions } from "fuse.js";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { type FieldCondition, FieldRegistry } from "../schema/field-registry.ts";
-import { getDefaultTaskSchema } from "../schema/index.ts";
 import type { LabelMatchMode, Task } from "../types/index.ts";
 import { labelsToLower } from "./label-filter.ts";
 import {

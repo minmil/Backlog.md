@@ -3,7 +3,7 @@ import { join } from "node:path";
 import matter from "gray-matter";
 import { taskFrontmatter } from "../markdown/task-frontmatter.ts";
 import type { Task } from "../types/index.ts";
-import defaultSchemaText from "./default-task-schema.yml" with { type: "text" };
+import { getDefaultTaskSchema } from "./default-schema.ts";
 import {
 	FIELD_TYPES,
 	type FieldType,
@@ -15,6 +15,7 @@ import {
 	TaskSchemaError,
 } from "./types.ts";
 
+export { getDefaultTaskSchema, getDefaultTaskSchemaText } from "./default-schema.ts";
 export * from "./types.ts";
 
 const CORE_FIELD_TYPES: Record<string, FieldType> = {
@@ -386,13 +387,6 @@ export function parseTaskSchema(content: string, path?: string): TaskSchema {
 	const ui = validateUi(source.ui, fields, issues);
 	if (issues.length) throw new TaskSchemaError(issues, path);
 	return { users, fields, sections, ui };
-}
-
-export function getDefaultTaskSchemaText(): string {
-	return defaultSchemaText;
-}
-export function getDefaultTaskSchema(): TaskSchema {
-	return parseTaskSchema(defaultSchemaText, "default-task-schema.yml");
 }
 
 export function loadTaskSchema(backlogDir: string, configPath = join(backlogDir, "config.yml")): TaskSchema {

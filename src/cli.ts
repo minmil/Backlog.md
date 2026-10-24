@@ -3362,11 +3362,21 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 		const schema = core.filesystem.taskSchema;
 		{
 			const registry = new FieldRegistry(schema);
+			if (options.label !== undefined && (options.addLabel !== undefined || options.removeLabel !== undefined))
+				throw new Error(
+					"Cannot combine --label with --add-label or --remove-label. Use one labels operation per edit.",
+				);
 			for (const [key, raw] of Object.entries(allFieldAssignments(options))) {
 				const field = schema.fields[key];
 				if (field?.managed && key !== "ordinal") throw new Error(`Task field "${key}" is managed by Backlog`);
 				if (!schemaFieldChanges.schemaFields) schemaFieldChanges.schemaFields = {};
-				schemaFieldChanges.schemaFields[key] = registry.parseInput(key, raw);
+				if (target.label === "Draft" && key === "status") {
+					if (raw.trim().toLowerCase() !== "draft")
+						throw new Error(`Invalid status: ${raw}. Valid statuses are: Draft`);
+					schemaFieldChanges.schemaFields[key] = "Draft";
+				} else {
+					schemaFieldChanges.schemaFields[key] = registry.parseInput(key, raw);
+				}
 			}
 			for (const key of toStringArray(options.clearField).map((value) => String(value).trim())) {
 				const field = schema.fields[key];
