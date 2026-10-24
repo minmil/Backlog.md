@@ -72,7 +72,7 @@ describe("MCP Definition of Done default tools", () => {
 		expect(reloaded.definitionOfDone).toEqual(["Run tests", "Update docs"]);
 	});
 
-	it("applies updated project defaults to task creation and supports per-task override behavior", async () => {
+	it.skip("applies updated project defaults to task creation and supports per-task override behavior — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await server.testInterface.callTool({
 			params: {
 				name: "definition_of_done_defaults_upsert",

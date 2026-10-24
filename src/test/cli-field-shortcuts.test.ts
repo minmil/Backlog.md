@@ -33,22 +33,22 @@ function stableContent(content: string): string {
 }
 
 describe("task field shortcuts", () => {
-	test("each create shortcut writes the same task file as --field", async () => {
-		const cases: Array<{ flag: string[]; field: string; needsTask?: boolean }> = [
-			{ flag: ["-s", "Done"], field: "status=Done" },
-			{ flag: ["-a", "@tester"], field: "assignee=@tester" },
-			{ flag: ["--priority", "high"], field: "priority=high" },
-			{ flag: ["--type", "bug"], field: "type=bug" },
-			{ flag: ["--project", "Client"], field: "project=Client" },
-			{ flag: ["-l", "urgent,review"], field: "labels=urgent,review" },
-			{ flag: ["--milestone", "m-1"], field: "milestone=m-1" },
-			{ flag: ["-p", "task-1"], field: "parent_task_id=task-1", needsTask: true },
-			{ flag: ["--dep", "task-1"], field: "dependencies=task-1", needsTask: true },
-			{ flag: ["--due-date", "2026-11-01"], field: "due_date=2026-11-01" },
-			{ flag: ["--reporter", "@tester"], field: "reporter=@tester" },
-			{ flag: ["--ordinal", "42"], field: "ordinal=42" },
-		];
-		for (const entry of cases) {
+	const cases: Array<{ flag: string[]; field: string; needsTask?: boolean }> = [
+		{ flag: ["-s", "Done"], field: "status=Done" },
+		{ flag: ["-a", "@tester"], field: "assignee=@tester" },
+		{ flag: ["--priority", "high"], field: "priority=high" },
+		{ flag: ["--type", "bug"], field: "type=bug" },
+		{ flag: ["--project", "Client"], field: "project=Client" },
+		{ flag: ["-l", "urgent,review"], field: "labels=urgent,review" },
+		{ flag: ["--milestone", "m-1"], field: "milestone=m-1" },
+		{ flag: ["-p", "task-1"], field: "parent_task_id=task-1", needsTask: true },
+		{ flag: ["--dep", "task-1"], field: "dependencies=task-1", needsTask: true },
+		{ flag: ["--due-date", "2026-11-01"], field: "due_date=2026-11-01" },
+		{ flag: ["--reporter", "@tester"], field: "reporter=@tester" },
+		{ flag: ["--ordinal", "42"], field: "ordinal=42" },
+	];
+	for (const entry of cases) {
+		test(`${entry.flag[0]} create writes the same task file as --field ${entry.field}`, async () => {
 			const directory = mkdtempSync(join(tmpdir(), "backlog-shortcut-"));
 			directories.push(directory);
 			const core = new Core(directory);
@@ -68,8 +68,8 @@ describe("task field shortcuts", () => {
 			const fieldPath = createdFile(run(directory, ["task", "create", "Equivalent", "--field", entry.field]));
 			expect(fieldPath).toBe(aliasPath);
 			expect(stableContent(readFileSync(fieldPath, "utf8")), entry.flag.join(" ")).toBe(stableContent(aliasContent));
-		}
-	});
+		});
+	}
 
 	test("--clear-due-date writes the same file as --clear-field due_date", async () => {
 		const directory = mkdtempSync(join(tmpdir(), "backlog-shortcut-clear-"));

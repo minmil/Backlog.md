@@ -21,7 +21,7 @@ const parentTask: Task = {
 	createdDate: "2026-08-10",
 	labels: ["local"],
 	dependencies: [],
-	description: "Contains the distinctive local-search-token.",
+	sections: { description: "Contains the distinctive local-search-token." },
 };
 
 function installCrossBranchTripwires(coreUnderTest: Core) {
@@ -72,13 +72,13 @@ describe("local task command performance boundaries", () => {
 			id: "TASK-1.1",
 			title: "Local child",
 			parentTaskId: parentTask.id,
-			description: "Child content",
+			sections: { description: "Child content" },
 		});
 		await core.filesystem.saveTask({
 			...parentTask,
 			id: "TASK-2",
 			title: "Unrelated local task",
-			description: "No matching search content",
+			sections: { description: "No matching search content" },
 		});
 	});
 
@@ -93,7 +93,7 @@ describe("local task command performance boundaries", () => {
 			...parentTask,
 			id: "TASK-0007.0024",
 			title: "Padded task identity",
-			description: "No matching search content",
+			sections: { description: "No matching search content" },
 		});
 		const tripwires = installCrossBranchTripwires(core);
 		try {

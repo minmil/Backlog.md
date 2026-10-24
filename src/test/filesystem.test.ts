@@ -127,7 +127,7 @@ describe("FileSystem", () => {
 			labels: ["test"],
 			milestone: "v1.0",
 			dependencies: [],
-			description: "This is a test task",
+			sections: { description: "This is a test task" },
 		};
 
 		it("should save and load a task", async () => {
@@ -137,7 +137,7 @@ describe("FileSystem", () => {
 			expect(loadedTask?.id).toBe("TASK-1"); // IDs are normalized to uppercase
 			expect(loadedTask?.title).toBe(sampleTask.title);
 			expect(loadedTask?.status).toBe(sampleTask.status);
-			expect(loadedTask?.description).toBe(sampleTask.description);
+			expect(loadedTask?.sections?.description).toBe(sampleTask.sections?.description);
 		});
 
 		it("should return null for non-existent task", async () => {

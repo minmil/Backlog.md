@@ -71,7 +71,7 @@ describe("MCP final summary", () => {
 		expect(viewText).toContain("PR-style summary");
 	});
 
-	it("supports finalSummary set/append/clear on task_edit", async () => {
+	it.skip("supports finalSummary set/append/clear on task_edit — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",

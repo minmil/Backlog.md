@@ -22,7 +22,7 @@ const baseTask: Task = {
 	updatedDate: "2025-09-20 10:00",
 	labels: ["search"],
 	dependencies: [],
-	description: "Alpha token appears here",
+	sections: { description: "Alpha token appears here" },
 	priority: "high",
 	modifiedFiles: ["src/server/index.ts", "src/core/search-service.ts"],
 };
@@ -57,7 +57,7 @@ const dependentTask: Task = {
 	updatedDate: "2025-09-20 10:30",
 	labels: ["search"],
 	dependencies: [baseTask.id],
-	description: "Depends on task-0007 for completion",
+	sections: { description: "Depends on task-0007 for completion" },
 	priority: "medium",
 	modifiedFiles: ["src/ui/task-viewer-with-search.ts"],
 };
@@ -72,7 +72,7 @@ const customPriorityTask: Task = {
 	updatedDate: "2025-09-20 11:00",
 	labels: ["search"],
 	dependencies: [],
-	description: "Custom priority lookup target",
+	sections: { description: "Custom priority lookup target" },
 	priority: "very high",
 	modifiedFiles: ["src/server/index.ts"],
 };

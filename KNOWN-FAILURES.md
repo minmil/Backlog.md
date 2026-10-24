@@ -4,9 +4,9 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-The Task 4 full-suite run at `3a43a8b` had 26 active failures beyond the 19 baseline failures. Each entry below gives the owning task and the missing contract. All ten former Task 4 entries were cleared by the generic section engine and migrated tests.
+The Task 4 diagnostic full-suite run at `3aefddf` exposed fixture migrations and two additional server API contracts. The active ledger below assigns those contracts to Task 5. All ten former Task 4 entries were cleared by the generic section engine and migrated tests.
 
-### Task 5 — server schema/API and live-update paths (26)
+### Task 5 — server schema/API and live-update paths (28)
 
 - `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > filters search results by a single project` — Task 5: server search must read project values from the schema.
 - `src/test/server-search-project-filter.test.ts` — `BacklogServer search endpoint project filtering > applies OR semantics for repeated project params` — Task 5: server project filters need schema-backed OR matching.
@@ -31,6 +31,8 @@ The Task 4 full-suite run at `3a43a8b` had 26 active failures beyond the 19 base
 - `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > uses configured custom priorities for task and search filters` — Task 5: server task/search priority values must come from schema.
 - `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > persists configured task types through create, edit, and clear` — Task 5: server writes must use registry type validation.
 - `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > rejects unsupported task types from the Web task API` — Task 5: API validation must reject types outside the schema.
+- `src/test/server-search-endpoint.test.ts` — `BacklogServer search endpoint > appends comments through the task update API and indexes comment text` — Task 5: replace the legacy comment request with the schema log operation and index its content.
+- `src/test/server-acceptance-criteria.test.ts` — `browser acceptance criteria replacement > honors explicit true and false instead of inheriting matching checks` — Task 5: replace the legacy checklist request with the schema checklist operation.
 - `src/test/config-watcher.test.ts` — `config watcher > retains the cached defaultAssignee while an inline edit is not a usable assignee value` — Task 5: default user moved to the schema's `users` block.
 - `src/test/config-watcher.test.ts` — `config watcher > publishes root config resolution from the same accepted content` — Task 5: watcher acceptance must track schema and config together.
 - `src/test/config-watcher.test.ts` — `config watcher > keeps accepting the sparse config shape supported by the parser` — Task 5: watcher validation must accept config without moved schema keys.
@@ -75,3 +77,11 @@ TUI/MCP not upgraded – owner decision 2026-10-24. These previously failing tes
   - `filter wiring across surfaces > filters by project identically through Core, the search service, MCP, and both CLI entry points`
 - `src/test/mcp-final-summary.test.ts`
   - `MCP final summary > supports finalSummary on task_create and task_view output`
+  - `MCP final summary > supports finalSummary set/append/clear on task_edit`
+- `src/test/mcp-definition-of-done-defaults.test.ts`
+  - `MCP Definition of Done default tools > applies updated project defaults to task creation and supports per-task override behavior`
+- `src/test/mcp-tasks.test.ts`
+  - `MCP task tools (MVP) > restores an archived task to the board under the same rules as the CLI`
+  - `MCP task tools (MVP) > rejects reserved comment markers through task_edit`
+- `src/test/linked-record-commit.test.ts`
+  - `auto-commit of record files reached through a symbolic link > still commits the file a link points to when a task is edited through MCP`

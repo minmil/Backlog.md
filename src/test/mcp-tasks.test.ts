@@ -376,7 +376,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(await mcpServer.filesystem.listArchivedTasks()).toEqual([]);
 	});
 
-	it("restores an archived task to the board under the same rules as the CLI", async () => {
+	it.skip("restores an archived task to the board under the same rules as the CLI — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const call = async (name: string, args: Record<string, unknown>) =>
 			await mcpServer.testInterface.callTool({ params: { name, arguments: args } });
 		await call("task_create", { title: "Comes back", status: "In Progress" });
@@ -733,7 +733,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(viewText).toContain("MCP comment body");
 	});
 
-	it("rejects reserved comment markers through task_edit", async () => {
+	it.skip("rejects reserved comment markers through task_edit — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",

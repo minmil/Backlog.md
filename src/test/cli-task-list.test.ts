@@ -175,12 +175,13 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					rawContent: "Task with acceptance criteria",
-					acceptanceCriteriaItems: [
-						{ index: 1, text: "First criterion", checked: true },
-						{ index: 2, text: "Second criterion", checked: false },
-						{ index: 3, text: "Third criterion", checked: false },
-					],
+					sections: {
+						acceptance: [
+							{ index: 1, text: "First criterion", checked: true },
+							{ index: 2, text: "Second criterion", checked: false },
+							{ index: 3, text: "Third criterion", checked: false },
+						],
+					},
 				},
 				false,
 			);
@@ -400,7 +401,7 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					description: "Handle invoice payment callbacks.",
+					sections: { description: "Handle invoice payment callbacks." },
 				},
 				false,
 			);
@@ -413,7 +414,7 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					description: "Update account preferences.",
+					sections: { description: "Update account preferences." },
 				},
 				false,
 			);

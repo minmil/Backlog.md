@@ -30,7 +30,7 @@ describe("SearchService", () => {
 		updatedDate: "2025-09-19 09:10",
 		labels: ["search"],
 		dependencies: [],
-		rawContent: "## Description\nImplements Fuse based service",
+		sections: { description: "Implements Fuse based service" },
 		priority: "high",
 		modifiedFiles: ["src/core/search-service.ts", "src/utils/task-search.ts"],
 	};
@@ -266,7 +266,7 @@ describe("SearchService", () => {
 
 		await filesystem.saveTask({
 			...baseTask,
-			rawContent: "## Description\nReindexed to new term",
+			sections: { description: "Reindexed to new term" },
 			title: "Centralized service updated",
 		});
 
