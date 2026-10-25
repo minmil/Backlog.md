@@ -1,6 +1,6 @@
 import type React from "react";
 import type { FieldValue as RegistryFieldValue } from "../../../schema/field-registry.ts";
-import type { Task } from "../../../types/index.ts";
+import type { Milestone, Task } from "../../../types/index.ts";
 import ChipInput from "../ChipInput.tsx";
 import DependencyInput from "../DependencyInput.tsx";
 import FieldValue from "./FieldValue.tsx";
@@ -12,11 +12,12 @@ interface Props {
 	onChange: (value: RegistryFieldValue | null) => void;
 	error?: string;
 	availableTasks?: Task[];
+	milestones?: Milestone[];
 }
 
 const INPUT_CLASS = "w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200";
 
-export default function FieldInput({ fieldKey, value, onChange, error, availableTasks }: Props): React.ReactElement | null {
+export default function FieldInput({ fieldKey, value, onChange, error, availableTasks, milestones }: Props): React.ReactElement | null {
 	const { schema } = useSchema();
 	const field = schema.fields[fieldKey];
 	if (!field || field.hidden) return null;
@@ -31,6 +32,12 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 		control = (
 			<input id={inputId} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" />
 		);
+	} else if (field.type === "milestone-ref" && milestones) {
+		control = <select id={inputId} className={INPUT_CLASS} value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
+			<option value="">No milestone</option>
+			{current && !milestones.some((milestone) => milestone.id === current) ? <option value={String(current)}>{String(current)}</option> : null}
+			{milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}
+		</select>;
 	} else if (field.type === "enum" || (field.type === "user" && schema.users.length > 0)) {
 		const options = field.type === "user" ? schema.users.map((user) => user.handle) : field.values ?? [];
 		control = (

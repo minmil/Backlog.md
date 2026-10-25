@@ -1,21 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isReadOnlyTask, isWorkingCopyTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
+import { isReadOnlyTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
 import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/task-detail";
 import Modal from "./Modal";
-import { apiClient, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
+import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
+import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
+import type { SectionValue } from "../../markdown/sections.ts";
+import { useSchema } from "./schema/SchemaProvider.tsx";
+import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import { useTheme } from "../contexts/ThemeContext";
 import MDEditor from "@uiw/react-md-editor";
 import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
 import MermaidMarkdown from './MermaidMarkdown';
-import ChipInput from "./ChipInput";
-import DependencyInput from "./DependencyInput";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import StoredDate from "./StoredDate";
-import { getPriorityOptions } from "../../utils/priority-config";
-import { getProjectValues, resolveProjectValue } from "../../utils/project-config";
-import { getTaskTypeValues, resolveTaskTypeValue } from "../../utils/task-type-config";
 import { formatReadinessBlockers } from "../../utils/readiness";
-import { buildTaskIdIndex, resolveTaskReference } from "../utils/task-id-links";
 import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "../../utils/task-subtasks.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
@@ -92,6 +90,33 @@ const EMPTY_TASKS: Task[] = [];
 const containsCommentDelimiterLine = (value: string): boolean => /^\s*---\s*$/m.test(value.replace(/\r\n/g, "\n"));
 
 const areJsonEqual = (first: unknown, second: unknown): boolean => JSON.stringify(first) === JSON.stringify(second);
+
+type SchemaTask = Task & {
+  fields?: Record<string, RegistryFieldValue>;
+  sections?: Record<string, SectionValue>;
+  other?: string;
+};
+
+function readSchemaFieldValues(
+  task: Task | TaskDetail | undefined,
+  registry: ReturnType<typeof useSchema>["registry"],
+  isDraftMode: boolean | undefined,
+): Record<string, RegistryFieldValue | null> {
+  const values: Record<string, RegistryFieldValue | null> = {};
+  const supplied = (task as SchemaTask | undefined)?.fields;
+  for (const [key, definition] of Object.entries(registry.schema.fields)) {
+    const stored = supplied?.[key] ?? (task ? registry.getField(task, key) : undefined);
+    if (stored !== undefined) values[key] = stored;
+    else if (!task && definition.default !== undefined) values[key] = definition.default as RegistryFieldValue;
+  }
+  if (!task) {
+    const defaultUser = registry.schema.users.find((user) => user.default)?.handle;
+    if (defaultUser && values.assignee === undefined) values.assignee = [defaultUser];
+    if (defaultUser && values.reporter === undefined) values.reporter = defaultUser;
+    if (isDraftMode) values.status = "Draft";
+  }
+  return values;
+}
 
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean =>
   target instanceof Element &&
@@ -186,19 +211,19 @@ export const TaskDetailsModal: React.FC<Props> = ({
   availableStatuses = EMPTY_STATUSES,
   availableTasks = EMPTY_TASKS,
   onNavigateToTask,
-  availableMilestones: _availableMilestones,
-  availablePriorities,
-  availableTypes,
-  availableProjects,
   milestoneEntities,
-  archivedMilestoneEntities,
   isDraftMode,
   definitionOfDoneDefaults,
   defaultAssignee,
   dateFormat,
 }) => {
   const { theme } = useTheme();
+  const { schema, registry } = useSchema();
   const isCreateMode = !task;
+  const schemaFieldBaseline = useMemo(() => readSchemaFieldValues(task, registry, isDraftMode), [task, registry, isDraftMode]);
+  const [schemaFields, setSchemaFields] = useState<Record<string, RegistryFieldValue | null>>(schemaFieldBaseline);
+  const schemaFieldBaselineRef = useRef(schemaFieldBaseline);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
   const isReadOnly = task ? isReadOnlyTask(task) : false;
   // Promoting a draft replaces it with a new task ID, which the Drafts page does through its own
@@ -244,143 +269,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
   );
   const initialDefinitionOfDone = task?.definitionOfDoneItems ?? (isCreateMode ? defaultDefinitionOfDone : []);
   const [definitionOfDone, setDefinitionOfDone] = useState<AcceptanceCriterion[]>(initialDefinitionOfDone);
-  const priorityOptions = useMemo(() => getPriorityOptions(availablePriorities), [availablePriorities]);
-  const typeOptions = useMemo(() => getTaskTypeValues(availableTypes), [availableTypes]);
-  const projectOptions = useMemo(() => getProjectValues(availableProjects), [availableProjects]);
-  const resolveMilestoneToId = useCallback((value?: string | null): string => {
-    const normalized = (value ?? "").trim();
-    if (!normalized) return "";
-    const key = normalized.toLowerCase();
-    const aliasKeys = new Set<string>([key]);
-    const looksLikeMilestoneId = /^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized);
-    const canonicalInputId = looksLikeMilestoneId
-      ? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
-      : null;
-    if (/^\d+$/.test(normalized)) {
-      const numericAlias = String(Number.parseInt(normalized, 10));
-      aliasKeys.add(numericAlias);
-      aliasKeys.add(`m-${numericAlias}`);
-    } else {
-      const idMatch = normalized.match(/^m-(\d+)$/i);
-      if (idMatch?.[1]) {
-        const numericAlias = String(Number.parseInt(idMatch[1], 10));
-        aliasKeys.add(numericAlias);
-        aliasKeys.add(`m-${numericAlias}`);
-      }
-    }
-    const idMatchesAlias = (milestoneId: string): boolean => {
-      const milestoneKey = milestoneId.trim().toLowerCase();
-      if (aliasKeys.has(milestoneKey)) {
-        return true;
-      }
-      const idMatch = milestoneId.trim().match(/^m-(\d+)$/i);
-      if (!idMatch?.[1]) {
-        return false;
-      }
-      const numericAlias = String(Number.parseInt(idMatch[1], 10));
-      return aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`);
-    };
-    const findIdMatch = (milestones: Milestone[]): Milestone | undefined => {
-      const rawExactMatch = milestones.find((milestone) => milestone.id.trim().toLowerCase() === key);
-      if (rawExactMatch) {
-        return rawExactMatch;
-      }
-      if (canonicalInputId) {
-        const canonicalRawMatch = milestones.find(
-          (milestone) => milestone.id.trim().toLowerCase() === canonicalInputId,
-        );
-        if (canonicalRawMatch) {
-          return canonicalRawMatch;
-        }
-      }
-      return milestones.find((milestone) => idMatchesAlias(milestone.id));
-    };
-    const activeMilestones = milestoneEntities ?? [];
-    const archivedMilestones = archivedMilestoneEntities ?? [];
-    const activeIdMatch = findIdMatch(activeMilestones);
-    if (activeIdMatch) {
-      return activeIdMatch.id;
-    }
-    if (looksLikeMilestoneId) {
-      const archivedIdMatch = findIdMatch(archivedMilestones);
-      if (archivedIdMatch) {
-        return archivedIdMatch.id;
-      }
-    }
-    const activeTitleMatches = activeMilestones.filter((milestone) => milestone.title.trim().toLowerCase() === key);
-    if (activeTitleMatches.length === 1) {
-      return activeTitleMatches[0]?.id ?? normalized;
-    }
-    if (activeTitleMatches.length > 1) {
-      return normalized;
-    }
-    const archivedIdMatch = findIdMatch(archivedMilestones);
-    if (archivedIdMatch) {
-      return archivedIdMatch.id;
-    }
-    const archivedTitleMatches = archivedMilestones.filter((milestone) => milestone.title.trim().toLowerCase() === key);
-    if (archivedTitleMatches.length === 1) {
-      return archivedTitleMatches[0]?.id ?? normalized;
-    }
-    return normalized;
-  }, [milestoneEntities, archivedMilestoneEntities]);
-  const resolveMilestoneLabel = useCallback((value?: string | null): string => {
-    const normalized = (value ?? "").trim();
-    if (!normalized) return "";
-    const key = normalized.toLowerCase();
-    const aliasKeys = new Set<string>([key]);
-    const canonicalInputId =
-      /^\d+$/.test(normalized) || /^m-\d+$/i.test(normalized)
-        ? `m-${String(Number.parseInt(normalized.replace(/^m-/i, ""), 10))}`
-        : null;
-    if (/^\d+$/.test(normalized)) {
-      const numericAlias = String(Number.parseInt(normalized, 10));
-      aliasKeys.add(numericAlias);
-      aliasKeys.add(`m-${numericAlias}`);
-    } else {
-      const idMatch = normalized.match(/^m-(\d+)$/i);
-      if (idMatch?.[1]) {
-        const numericAlias = String(Number.parseInt(idMatch[1], 10));
-        aliasKeys.add(numericAlias);
-        aliasKeys.add(`m-${numericAlias}`);
-      }
-    }
-    const idMatchesAlias = (milestoneId: string): boolean => {
-      const milestoneKey = milestoneId.trim().toLowerCase();
-      if (aliasKeys.has(milestoneKey)) {
-        return true;
-      }
-      const idMatch = milestoneId.trim().match(/^m-(\d+)$/i);
-      if (!idMatch?.[1]) {
-        return false;
-      }
-      const numericAlias = String(Number.parseInt(idMatch[1], 10));
-      return aliasKeys.has(numericAlias) || aliasKeys.has(`m-${numericAlias}`);
-    };
-    const findIdMatch = (milestones: Milestone[]): Milestone | undefined => {
-      const rawExactMatch = milestones.find((milestone) => milestone.id.trim().toLowerCase() === key);
-      if (rawExactMatch) {
-        return rawExactMatch;
-      }
-      if (canonicalInputId) {
-        const canonicalRawMatch = milestones.find(
-          (milestone) => milestone.id.trim().toLowerCase() === canonicalInputId,
-        );
-        if (canonicalRawMatch) {
-          return canonicalRawMatch;
-        }
-      }
-      return milestones.find((milestone) => idMatchesAlias(milestone.id));
-    };
-    const allMilestones = [...(milestoneEntities ?? []), ...(archivedMilestoneEntities ?? [])];
-    const idMatch = findIdMatch(allMilestones);
-    if (idMatch) {
-      return idMatch.title;
-    }
-    const titleMatches = allMilestones.filter((milestone) => milestone.title.trim().toLowerCase() === key);
-    return titleMatches.length === 1 ? (titleMatches[0]?.title ?? normalized) : normalized;
-  }, [milestoneEntities, archivedMilestoneEntities]);
-
   // Sidebar metadata (inline edit)
   const [status, setStatus] = useState(isDraftMode ? "Draft" : (task?.status || (availableStatuses?.[0] || "To Do")));
   const [assignee, setAssignee] = useState<string[]>(task?.assignee || createModeAssignee);
@@ -388,21 +276,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [priority, setPriority] = useState<string>(task?.priority || "");
   const [taskType, setTaskType] = useState<string>(task?.type || "");
   const [project, setProject] = useState<string>(task?.project || "");
-  const [typeUpdateError, setTypeUpdateError] = useState<string | null>(null);
-  const [isTypeUpdating, setIsTypeUpdating] = useState(false);
-  const typeUpdateInFlightRef = useRef(false);
-  const typeUpdateRequestRef = useRef(0);
   const [dependencies, setDependencies] = useState<string[]>(task?.dependencies || []);
   const [references, setReferences] = useState<string[]>(task?.references || []);
   const [modifiedFiles, setModifiedFiles] = useState<string[]>(task?.modifiedFiles || []);
   const [milestone, setMilestone] = useState<string>(task?.milestone || "");
   const [dueDate, setDueDate] = useState<string>(task?.dueDate || "");
-  const canonicalTypeSelection = resolveTaskTypeValue(taskType, typeOptions);
-  const typeSelectionValue = canonicalTypeSelection ?? taskType;
-  const canonicalProjectSelection = resolveProjectValue(project, projectOptions);
-  const projectSelectionValue = canonicalProjectSelection ?? project;
-  const milestoneSelectionValue = resolveMilestoneToId(milestone);
-  const hasMilestoneSelection = (milestoneEntities ?? []).some((milestoneEntity) => milestoneEntity.id === milestoneSelectionValue);
 
   // Both derived at read time and delivered with the task itself, so there is nothing to resolve
   // or fetch here: the verdict the modal shows is the one every other surface shows.
@@ -420,16 +298,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
     status === (task?.status ?? "")
       ? readiness
       : null;
-
-  // Dependency validation stays local-only (see BACK-623), so the picker must only suggest what a
-  // save can accept: a cross-branch task is rejected, and so is a canonically ambiguous ID that more
-  // than one local file claims. The index drops those collisions already, so a task survives only
-  // when it is the one its own canonical ID resolves to.
-  const localAvailableTasks = useMemo(() => {
-    const local = availableTasks.filter(isWorkingCopyTask);
-    const index = buildTaskIdIndex(local);
-    return local.filter((candidate) => resolveTaskReference(index, candidate.id) === candidate);
-  }, [availableTasks]);
 
   // Hierarchy is derived from the shared corpus rather than the task payload: the single-task
   // API does not carry parent/subtask fields, while the list the modal already receives does.
@@ -468,10 +336,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
       notes !== baseline.notes ||
       finalSummary !== baseline.finalSummary ||
       dueDate !== baseline.dueDate ||
+      !areJsonEqual(schemaFields, schemaFieldBaseline) ||
       JSON.stringify(criteria) !== baseline.criteria ||
       JSON.stringify(definitionOfDone) !== baseline.definitionOfDone
     );
-  }, [title, description, plan, notes, finalSummary, dueDate, criteria, definitionOfDone, baseline]);
+  }, [title, description, plan, notes, finalSummary, dueDate, criteria, definitionOfDone, baseline, schemaFields, schemaFieldBaseline]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -518,13 +387,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
   // Reset local state when task changes or modal opens
   useEffect(() => {
     const nextTaskId = task?.id ?? "";
-    const modalIdentityChanged = previousTaskId.current !== nextTaskId || previousIsOpen.current !== isOpen;
-    if (modalIdentityChanged) {
-      typeUpdateRequestRef.current += 1;
-      typeUpdateInFlightRef.current = false;
-      setIsTypeUpdating(false);
-      setTypeUpdateError(null);
-    }
     const nextFormState = buildTaskDetailsFormState({
       task,
       isCreateMode,
@@ -542,6 +404,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
       (modeRef.current === "edit" || preserveEditModeAfterCommentRefresh.current);
 
     if (sameOpenModalRefresh && previousFormState) {
+      setSchemaFields((current) => preserveDirtyRefreshValue(current, schemaFieldBaselineRef.current, schemaFieldBaseline, areJsonEqual));
+      schemaFieldBaselineRef.current = schemaFieldBaseline;
       setTitle((current) => preserveDirtyRefreshValue(current, previousFormState.title, nextFormState.title));
       setDescription((current) =>
         preserveDirtyRefreshValue(current, previousFormState.description, nextFormState.description),
@@ -603,6 +467,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
 
     setTitle(nextFormState.title);
+    setSchemaFields(schemaFieldBaseline);
+    schemaFieldBaselineRef.current = schemaFieldBaseline;
+    setFieldErrors({});
     setDescription(nextFormState.description);
     setPlan(nextFormState.plan);
     setNotes(nextFormState.notes);
@@ -631,7 +498,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     previousIsOpen.current = isOpen;
     formBaselineRef.current = nextFormState;
     setError(null);
-  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone, createModeAssignee]);
+  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone, createModeAssignee, schemaFieldBaseline]);
 
   const refreshAfterCommentChange = useCallback(() => {
     if (!commentsChanged) return;
@@ -686,6 +553,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
       onClose();
     } else {
       setTitle(task?.title || "");
+      setSchemaFields(schemaFieldBaseline);
+      setFieldErrors({});
       setDescription(task?.description || "");
       setPlan(task?.implementationPlan || "");
       setNotes(task?.implementationNotes || "");
@@ -798,6 +667,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (demoting) return;
     setSaving(true);
     setError(null);
+    setFieldErrors({});
 
     // Validation for create mode
     if (isCreateMode && !title.trim()) {
@@ -843,14 +713,28 @@ export const TaskDetailsModal: React.FC<Props> = ({
         // Only close if successful (no error thrown)
         onClose();
       } else if (task) {
-        Object.assign(taskData, buildDefinitionOfDoneEditPayload());
-        // Update existing task
-        await apiClient.updateTask(task.id, taskData);
+        const fieldChanges = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
+          !schema.fields[key]?.managed && !areJsonEqual(value, schemaFieldBaseline[key]),
+        ));
+        const legacyBodyChanged = description !== baseline.description || plan !== baseline.plan || notes !== baseline.notes ||
+          finalSummary !== baseline.finalSummary || JSON.stringify(criteria) !== baseline.criteria ||
+          JSON.stringify(definitionOfDone) !== baseline.definitionOfDone;
+        if (legacyBodyChanged) {
+          Object.assign(taskData, buildDefinitionOfDoneEditPayload());
+          await apiClient.updateTask(task.id, taskData);
+        }
+        if (Object.keys(fieldChanges).length > 0) {
+          await apiClient.patchSchemaTask(task.id, { fields: fieldChanges });
+        }
         setMode("preview");
         if (onSaved) await onSaved();
         setCommentsChanged(false);
       }
     } catch (err) {
+      if (err instanceof ApiError && err.status === 422 && typeof err.data === "object" && err.data !== null && "errors" in err.data) {
+        const issues = (err.data as { errors?: Array<{ key: string; message: string }> }).errors ?? [];
+        setFieldErrors(Object.fromEntries(issues.filter((issue) => issue.key.startsWith("fields.")).map((issue) => [issue.key.slice(7), issue.message])));
+      }
       // Extract and display the error message from API response
       let errorMessage = 'Failed to save task';
 
@@ -930,47 +814,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
       } catch (err) {
         console.error("Failed to update task metadata", err);
         setError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
-  const handleTaskTypeChange = async (nextType: string) => {
-    if (demoting) return;
-    if (isReadOnly) return;
-    if (!task) {
-      setTaskType(nextType);
-      setTypeUpdateError(null);
-      return;
-    }
-    if (typeUpdateInFlightRef.current) return;
-
-    const previousType = taskType;
-    const requestId = typeUpdateRequestRef.current + 1;
-    typeUpdateRequestRef.current = requestId;
-    typeUpdateInFlightRef.current = true;
-    setIsTypeUpdating(true);
-    setTypeUpdateError(null);
-    setTaskType(nextType);
-
-    try {
-      const updatedTask = await apiClient.updateTask(task.id, { type: nextType });
-      if (typeUpdateRequestRef.current !== requestId) return;
-      setTaskType(updatedTask.type ?? "");
-      if (onSaved) {
-        try {
-          await onSaved();
-        } catch (refreshError) {
-          console.error("Task type was saved, but refreshing task data failed", refreshError);
-        }
-      }
-    } catch (updateError) {
-      if (typeUpdateRequestRef.current !== requestId) return;
-      setTaskType(previousType);
-      setTypeUpdateError(updateError instanceof Error ? updateError.message : String(updateError));
-    } finally {
-      if (typeUpdateRequestRef.current === requestId) {
-        typeUpdateInFlightRef.current = false;
-        setIsTypeUpdating(false);
       }
     }
   };
@@ -1706,208 +1549,26 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
         {/* Sidebar */}
         <div className="md:col-span-1 space-y-4">
-          {/* Dates */}
-	          {task && (
-	            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-xs text-gray-600 dark:text-gray-300 space-y-1">
-	              <div><span className="font-semibold text-gray-800 dark:text-gray-100">Created:</span> <StoredDate value={task.createdDate} dateFormat={dateFormat} className="text-gray-700 dark:text-gray-200" /></div>
-	              {task.updatedDate && (
-	                <div><span className="font-semibold text-gray-800 dark:text-gray-100">Updated:</span> <StoredDate value={task.updatedDate} dateFormat={dateFormat} className="text-gray-700 dark:text-gray-200" /></div>
-	              )}
-	              {task.dueDate && mode === "preview" && (
-	                <div><span className="font-semibold text-gray-800 dark:text-gray-100">Due:</span> <StoredDate value={task.dueDate} dateFormat={dateFormat} className="text-gray-700 dark:text-gray-200" /></div>
-	              )}
-	            </div>
-	          )}
-          {mode !== "preview" && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-              <SectionHeader title="Due" />
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(event) => setDueDate(event.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
-              />
+          <SchemaSidebar
+            values={schemaFields}
+            onChange={(key, value) => {
+              setSchemaFields((current) => ({ ...current, [key]: value }));
+              setFieldErrors((current) => ({ ...current, [key]: "" }));
+            }}
+            mode={mode === "preview" ? "view" : mode}
+            readOnly={isReadOnly}
+            draft={isOpenDraft}
+            errors={fieldErrors}
+            availableTasks={availableTasks}
+            milestones={milestoneEntities}
+            dateFormat={dateFormat}
+          />
+          {shownReadiness && (
+            <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${shownReadiness.isReady ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
+              <span aria-hidden="true">{shownReadiness.isReady ? '✓' : '⏳'}</span>
+              <span>{shownReadiness.isReady ? 'Ready to start' : formatReadinessBlockers(shownReadiness)}</span>
             </div>
           )}
-          {/* Title (editable for existing tasks) */}
-          {task && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-              <SectionHeader title="Title" />
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                }}
-                onBlur={() => {
-                  if (title.trim() && title !== task.title) {
-                    void handleInlineMetaUpdate({ title: title.trim() });
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.currentTarget.blur();
-                  }
-                }}
-                disabled={isReadOnly}
-                className={`w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-              />
-            </div>
-          )}
-
-          {/* Status */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Status" />
-            <StatusSelect current={status} onChange={(val) => handleInlineMetaUpdate({ status: val })} disabled={isReadOnly || isOpenDraft} />
-          </div>
-
-          {/* Type */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Type" />
-            <select
-              aria-label="Task type"
-              aria-invalid={typeUpdateError ? true : undefined}
-              aria-describedby={typeUpdateError ? "task-type-update-error" : undefined}
-              className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isReadOnly || isTypeUpdating ? 'opacity-60 cursor-not-allowed' : ''}`}
-              value={typeSelectionValue}
-              onChange={(event) => void handleTaskTypeChange(event.target.value)}
-              disabled={isReadOnly || isTypeUpdating}
-            >
-              <option value="">No type</option>
-              {!canonicalTypeSelection && taskType.trim() ? (
-                <option value={taskType}>{taskType} (not configured)</option>
-              ) : null}
-              {typeOptions.map((typeOption) => (
-                <option key={typeOption} value={typeOption}>
-                  {typeOption}
-                </option>
-              ))}
-            </select>
-            {typeUpdateError ? (
-              <p id="task-type-update-error" role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
-                {typeUpdateError}
-              </p>
-            ) : null}
-          </div>
-
-          {/* Assignee */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Assignee" />
-            <ChipInput
-              name="assignee"
-              label=""
-              value={assignee}
-              onChange={(value) => handleInlineMetaUpdate({ assignee: value })}
-              placeholder="Type name and press Enter"
-              disabled={isReadOnly}
-            />
-          </div>
-
-          {/* Labels */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Labels" />
-            <ChipInput
-              name="labels"
-              label=""
-              value={labels}
-              onChange={(value) => handleInlineMetaUpdate({ labels: value })}
-              placeholder="Type label and press Enter or comma"
-              disabled={isReadOnly}
-            />
-          </div>
-
-          {/* Priority */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Priority" />
-            <select
-              className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-              value={priority}
-              onChange={(e) => handleInlineMetaUpdate({ priority: e.target.value as any })}
-              disabled={isReadOnly}
-            >
-              <option value="">No Priority</option>
-              {priorityOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Project */}
-          {projectOptions.length > 0 && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-              <SectionHeader title="Project" />
-              <select
-                className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-                aria-label="Task project"
-                value={projectSelectionValue}
-                onChange={(e) => handleInlineMetaUpdate({ project: e.target.value })}
-                disabled={isReadOnly}
-              >
-                <option value="">No Project</option>
-                {!canonicalProjectSelection && project.trim() ? (
-                  <option value={project}>{project} (not configured)</option>
-                ) : null}
-                {projectOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Milestone */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Milestone" />
-            <select
-              className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${isReadOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
-              value={milestoneSelectionValue}
-				onChange={(e) => {
-					const value = e.target.value;
-					setMilestone(value);
-					handleInlineMetaUpdate({ milestone: value.trim().length > 0 ? value : null });
-				}}
-              disabled={isReadOnly}
-            >
-              <option value="">No milestone</option>
-              {!hasMilestoneSelection && milestoneSelectionValue ? (
-                <option value={milestoneSelectionValue}>{resolveMilestoneLabel(milestoneSelectionValue)}</option>
-              ) : null}
-              {(milestoneEntities ?? []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Dependencies */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-            <SectionHeader title="Dependencies" />
-            <DependencyInput
-              value={dependencies}
-              onChange={(value) => handleInlineMetaUpdate({ dependencies: value })}
-              availableTasks={availableTasks}
-              suggestableTasks={localAvailableTasks}
-              currentTaskId={task?.id}
-              label=""
-              disabled={isReadOnly}
-            />
-            {shownReadiness && (
-              <div
-                className={`mt-2 flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${
-                  shownReadiness.isReady
-                    ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300'
-                    : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
-                }`}
-              >
-                <span aria-hidden="true">{shownReadiness.isReady ? '✓' : '⏳'}</span>
-                <span>{shownReadiness.isReady ? 'Ready to start' : formatReadinessBlockers(shownReadiness)}</span>
-              </div>
-            )}
-          </div>
 
           {/* Archive button at bottom of sidebar */}
 		          {task && onArchive && !isReadOnly && (
@@ -1929,28 +1590,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
 	      </div>
 		</fieldset>
     </Modal>
-  );
-};
-
-const StatusSelect: React.FC<{ current: string; onChange: (v: string) => void; disabled?: boolean }> = ({ current, onChange, disabled }) => {
-  const [statuses, setStatuses] = useState<string[]>([]);
-  useEffect(() => {
-    apiClient.fetchStatuses().then(setStatuses).catch(() => setStatuses(["To Do", "In Progress", "Done"]));
-  }, []);
-  // A draft is on status Draft, and an archived record can hold a historical status, neither of
-  // which is configured. Showing the value the record actually has beats showing the first option.
-  const options = !current || statuses.includes(current) ? statuses : [current, ...statuses];
-  return (
-    <select
-      className={`w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-      value={current}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-    >
-      {options.map((s) => (
-        <option key={s} value={s}>{s}</option>
-      ))}
-    </select>
   );
 };
 
