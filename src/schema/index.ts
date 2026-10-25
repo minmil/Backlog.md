@@ -55,7 +55,7 @@ const FILTERABLE_TYPES = new Set<FieldType>([
 	"string-list",
 	"milestone-ref",
 ]);
-const MOVED_CONFIG_KEYS: Record<string, string> = {
+export const MOVED_CONFIG_KEYS: Record<string, string> = {
 	statuses: "fields.status.values",
 	default_status: "fields.status.default",
 	labels: "fields.labels",

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Core } from "../core/backlog.ts";
+import type { ContentStore } from "../core/content-store.ts";
 import { BacklogServer } from "../server/index.ts";
 import {
 	createUniqueTestDir,
 	initializeFilesystemTestProject,
+	retry,
 	safeCleanup,
 	updateTestTaskSchema,
 } from "./test-utils.ts";
@@ -65,6 +67,14 @@ describe("schema task API", () => {
 		const view = await (await fetch(`${baseUrl}/api/tasks/${created.id}`)).json();
 		expect(view.fields.side).toBe("Buyer");
 		expect(view.sections.description).toBe("Schema description");
+		const search = await (await fetch(`${baseUrl}/api/search?types=task&query=Schema%20task`)).json();
+		expect(search.find((result: { type: string }) => result.type === "task").task.fields.side).toBe("Buyer");
+		await core.createTaskFromInput({ title: "Schema draft", status: "Draft" });
+		const drafts = await (await fetch(`${baseUrl}/api/drafts`)).json();
+		expect(drafts[0].fields.status).toBe("Draft");
+		expect(drafts[0].sections).toBeDefined();
+		const settings = await (await fetch(`${baseUrl}/api/config`)).json();
+		expect(settings.schema.fields.side.values).toEqual(["Buyer", "Seller"]);
 	});
 
 	it("PATCH validates mixed fields and section operations before writing", async () => {
@@ -92,5 +102,31 @@ describe("schema task API", () => {
 		expect(invalid.status).toBe(422);
 		expect(await invalid.json()).toMatchObject({ errors: [{ key: "fields.side" }] });
 		expect((await core.filesystem.loadTask(task.id))?.fieldValues?.side).toBe("Seller");
+	});
+
+	it("publishes a live update when task-schema.yml changes", async () => {
+		await fetch(`${baseUrl}/api/tasks`);
+		const internals = server as unknown as { getContentStoreInstance(): Promise<ContentStore> };
+		const store = await internals.getContentStoreInstance();
+		let updates = 0;
+		const unsubscribe = store.subscribe((event) => {
+			if (event.type === "ready") updates += 1;
+		});
+		try {
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				if (schema.fields.side) schema.fields.side.values = ["Buyer", "Seller", "Partner"];
+			});
+			await retry(
+				async () => {
+					expect(updates).toBeGreaterThan(1);
+				},
+				20,
+				100,
+			);
+			const schema = await (await fetch(`${baseUrl}/api/schema`)).json();
+			expect(schema.fields.side.values).toEqual(["Buyer", "Seller", "Partner"]);
+		} finally {
+			unsubscribe();
+		}
 	});
 });

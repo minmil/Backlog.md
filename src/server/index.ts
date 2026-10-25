@@ -1082,7 +1082,12 @@ export class BacklogServer {
 			}
 
 			const results = searchService.search({ query, limit, types, filters });
-			return Response.json(results);
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			return Response.json(
+				results.map((result) =>
+					result.type === "task" ? { ...result, task: this.taskResponse(result.task, registry) } : result,
+				),
+			);
 		} catch (error) {
 			console.error("Error performing search:", error);
 			return Response.json({ error: "Search failed" }, { status: 500 });
@@ -1742,7 +1747,7 @@ export class BacklogServer {
 			if (!config) {
 				return Response.json({ error: "Configuration not found" }, { status: 404 });
 			}
-			return Response.json(config);
+			return Response.json({ ...config, schema: this.core.filesystem.taskSchema });
 		} catch (error) {
 			console.error("Error loading config:", error);
 			return Response.json({ error: "Failed to load configuration" }, { status: 500 });
@@ -1786,7 +1791,8 @@ export class BacklogServer {
 	private async handleListDrafts(): Promise<Response> {
 		try {
 			const drafts = await this.core.filesystem.listDrafts();
-			return Response.json(drafts);
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			return Response.json(drafts.map((draft) => this.taskResponse(draft, registry)));
 		} catch (error) {
 			console.error("Error listing drafts:", error);
 			return Response.json([]);

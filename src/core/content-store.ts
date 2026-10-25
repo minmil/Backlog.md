@@ -793,6 +793,7 @@ export class ContentStore {
 			created.push(await this.createTaskWatcher(epoch));
 			created.push(this.createDecisionWatcher(epoch));
 			created.push(await this.createDocumentWatcher(epoch));
+			created.push(this.createSchemaWatcher(epoch));
 			if (!this.isRootWatcherCurrent(epoch)) {
 				for (const watcher of created) watcher.stop();
 				return;
@@ -807,6 +808,49 @@ export class ContentStore {
 			}
 			throw error;
 		}
+	}
+
+	private createSchemaWatcher(epoch: number): WatchHandle {
+		const schemaPath = join(this.filesystem.backlogDir, "task-schema.yml");
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let lastPublishedContent: string | null = null;
+		const watcher = watch(this.filesystem.backlogDir, { recursive: false }, (_event, filename) => {
+			if (filename && String(filename) !== "task-schema.yml") return;
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(() => {
+				timer = null;
+				void (async () => {
+					if (!this.isRootWatcherCurrent(epoch)) return;
+					const content = await Bun.file(schemaPath)
+						.text()
+						.catch(() => "");
+					if (content === lastPublishedContent) return;
+					try {
+						this.filesystem.taskSchema;
+						await this.enqueue(async () => {
+							if (!this.isRootWatcherCurrent(epoch)) return;
+							const loaded = await this.loadCurrentContent(epoch, (snapshot) => {
+								this.installTaskCorpus(snapshot.taskCorpus ?? this.asTaskCorpus(snapshot.tasks));
+								this.replaceDocuments(snapshot.documents);
+								this.replaceDecisions(snapshot.decisions);
+							});
+							if (!loaded) return;
+							lastPublishedContent = content;
+							this.notify("ready");
+						});
+					} catch {
+						// Keep the last published snapshot until the schema becomes valid.
+					}
+				})().catch(() => {});
+			}, 50);
+		});
+		this.attachWatcherErrorHandler(watcher, "task schema");
+		return {
+			stop: () => {
+				if (timer) clearTimeout(timer);
+				watcher.close();
+			},
+		};
 	}
 
 	private stopRootWatchers(): void {

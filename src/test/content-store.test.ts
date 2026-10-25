@@ -2873,7 +2873,7 @@ describe("ContentStore", () => {
 		};
 		expect(watcherState.rootWatchersInitialized).toBe(true);
 		expect(watcherState.boundBacklogDir && resolve(watcherState.boundBacklogDir)).toBe(resolve(rootA.backlogDir));
-		expect(watcherState.rootWatchers).toHaveLength(3);
+		expect(watcherState.rootWatchers).toHaveLength(4);
 	});
 
 	it("keeps watcher binding best-effort and retries after initialization", async () => {
@@ -3193,7 +3193,7 @@ describe("ContentStore", () => {
 			expect(restartedWatcherState.boundBacklogDir && resolve(restartedWatcherState.boundBacklogDir)).toBe(
 				resolve(fixtureA.backlogDir),
 			);
-			expect(restartedWatcherState.rootWatchers).toHaveLength(3);
+			expect(restartedWatcherState.rootWatchers).toHaveLength(4);
 		} finally {
 			for (const gate of gates) gate.release();
 			unsubscribe();
@@ -3334,8 +3334,6 @@ function rootConfig(projectName: string, backlogDirectory: string): string {
 	return [
 		`project_name: "${projectName}"`,
 		`backlog_directory: "${backlogDirectory}"`,
-		'statuses: ["To Do", "Done"]',
-		"labels: []",
 		"date_format: YYYY-MM-DD",
 		"check_active_branches: false",
 		'task_prefix: "TASK"',
@@ -3358,7 +3356,7 @@ function makeTask(idSuffix: string, title: string): Task {
 		createdDate: "2025-09-19 10:00",
 		labels: [],
 		dependencies: [],
-		rawContent: `## Description\n${title}`,
+		sections: { description: title },
 	};
 }
 

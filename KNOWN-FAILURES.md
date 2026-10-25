@@ -4,18 +4,7 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-The Task 4 diagnostic full-suite run at `3aefddf` exposed fixture migrations and two additional server API contracts. The active ledger below assigns those contracts to Task 5. All ten former Task 4 entries were cleared by the generic section engine and migrated tests.
-
-### Task 5 — server schema/API and live-update paths (8)
-
-- `src/test/content-store.test.ts` — `ContentStore > reconciles stopped current-root watchers after a root transition is superseded` — Task 5: content-store root watchers must include schema state.
-- `src/test/content-store.test.ts` — `ContentStore > retries public root reconciliation when content loading fails after watchers bind` — Task 5: schema-aware root reconciliation must recover after load failure.
-- `src/test/content-store.test.ts` — `ContentStore > publishes coherent A to B to A snapshots and rebinds every root watcher` — Task 5: snapshots and watchers must carry each root's schema.
-- `src/test/content-store.test.ts` — `ContentStore > rebinds both config and content watchers when browser initialization selects a custom root` — Task 5: browser root selection must bind its schema watcher too.
-- `src/test/server-tasks-spa-fallback.test.ts` — `BacklogServer task SPA fallback > keeps config and duplicate-task reads fail-closed while a watched config is unusable` — Task 5: server watcher validation must handle config and schema separately.
-- `src/test/config-watcher.test.ts` — `config watcher > retains the cached defaultAssignee while an inline edit is not a usable assignee value` — Task 5: default user moved to the schema's `users` block.
-- `src/test/config-watcher.test.ts` — `config watcher > publishes root config resolution from the same accepted content` — Task 5: watcher acceptance must track schema and config together.
-- `src/test/config-watcher.test.ts` — `config watcher > keeps accepting the sparse config shape supported by the parser` — Task 5: watcher validation must accept config without moved schema keys.
+The Task 5 watcher and fixture migration cleared the remaining eight Task 5 entries in focused tests. The Task 5 full-suite gate will confirm that there are no new active failures.
 
 ## TUI/MCP exclusions
 

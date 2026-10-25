@@ -6,7 +6,7 @@ import { Core } from "../core/backlog.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import type { BacklogConfig } from "../types/index.ts";
 import { watchConfig, watchConfigFile } from "../utils/config-watcher.ts";
-import { createUniqueTestDir, getPlatformTimeout, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, getPlatformTimeout, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let testDir: string;
 let core: Core;
@@ -71,27 +71,17 @@ describe("config watcher", () => {
 			.replace("check_active_branches: true", "check_active_branches: false");
 		const unusableContents = [
 			[
-				'project_name: "Partial"',
-				"statuses: [",
-				"labels: []",
+				'project_name "Partial"',
 				"date_format: YYYY-MM-DD",
 				"check_active_branches: false",
 				'task_prefix: "BACK"',
 				"",
 			].join("\n"),
-			[
-				'project_name: ""',
-				'statuses: ["To Do", "Done"]',
-				'labels: ["web"]',
-				"date_format: YYYY-MM-DD",
-				"check_active_branches: false",
-				'task_prefix: "BACK"',
-				"",
-			].join("\n"),
+			['project_name: ""', "date_format: YYYY-MM-DD", "check_active_branches: false", 'task_prefix: "BACK"', ""].join(
+				"\n",
+			),
 			[
 				'project_name: "Malformed boolean"',
-				'statuses: ["To Do", "Done"]',
-				'labels: ["web"]',
 				"date_format: YYYY-MM-DD",
 				"check_active_branches: fals",
 				'task_prefix: "BACK"',
@@ -99,8 +89,6 @@ describe("config watcher", () => {
 			].join("\n"),
 			[
 				'project_name: "Malformed active days"',
-				'statuses: ["To Do", "Done"]',
-				'labels: ["web"]',
 				"date_format: YYYY-MM-DD",
 				"check_active_branches: true",
 				"active_branch_days: nope",
@@ -109,8 +97,6 @@ describe("config watcher", () => {
 			].join("\n"),
 			[
 				'project_name: "Malformed task prefix"',
-				'statuses: ["To Do", "Done"]',
-				'labels: ["web"]',
 				"date_format: YYYY-MM-DD",
 				"check_active_branches: true",
 				"active_branch_days: 30",
@@ -136,7 +122,7 @@ describe("config watcher", () => {
 					unusableAttemptResolvers.get(content)?.();
 				}
 			}
-			// Counted before parsing: a rejected list value throws instead of returning.
+			// Count attempts before parsing so malformed edits can be observed.
 			return originalParseConfig(content);
 		};
 
@@ -164,7 +150,6 @@ describe("config watcher", () => {
 				expect(cachedConfigs).toHaveLength(20);
 				for (const cachedConfig of cachedConfigs) {
 					expect(cachedConfig?.projectName).toBe(initialConfig.projectName);
-					expect(cachedConfig?.statuses).toEqual(initialConfig.statuses);
 					expect(cachedConfig?.checkActiveBranches).toBe(true);
 					expect(cachedConfig?.prefixes?.task).toBe("BACK");
 				}
@@ -185,85 +170,26 @@ describe("config watcher", () => {
 		}
 	});
 
-	it("retains the cached defaultAssignee while an inline edit is not a usable assignee value", async () => {
-		await core.filesystem.saveConfig({ ...initialConfig, defaultAssignee: ["@alice"] });
-		const baseLines = [
-			'project_name: "Config watcher"',
-			'statuses: ["To Do", "Done"]',
-			'labels: ["web"]',
-			"date_format: YYYY-MM-DD",
-			"check_active_branches: true",
-			'task_prefix: "BACK"',
-		];
-		const withAssignee = (line: string) => [baseLines[0], line, ...baseLines.slice(1), ""].join("\n");
-		// Truncated mid-edit and an unbalanced quote that still opens and closes with brackets, then two
-		// values YAML reads but the key cannot hold. default_assignee is the key that proves the shared
-		// parser rejects wrong types: the other list keys are also screened by the inline-array check,
-		// but this one accepts scalars and block sequences, so only the parser can judge it.
-		const invalidContents = [
-			withAssignee('default_assignee: ["@alice'),
-			withAssignee('default_assignee: ["@alice]'),
-			withAssignee('default_assignee: {name: "@alice"}'),
-			withAssignee("default_assignee: 42"),
-		];
-		const scalarContent = withAssignee('default_assignee: "@carol"');
-		const inlineArrayContent = withAssignee('default_assignee: ["@alice", "@bob"]');
-
-		const originalParseConfig = core.filesystem.parseConfig.bind(core.filesystem);
-		const invalidAttempts = new Map(invalidContents.map((content) => [content, 0]));
-		const invalidResolvers = new Map<string, () => void>();
-		const invalidExhausted = new Map(
-			invalidContents.map((content) => [
-				content,
-				new Promise<void>((resolve) => invalidResolvers.set(content, resolve)),
-			]),
-		);
-		core.filesystem.parseConfig = (content) => {
-			const attempts = invalidAttempts.get(content);
-			if (attempts !== undefined) {
-				const nextAttempts = attempts + 1;
-				invalidAttempts.set(content, nextAttempts);
-				// Accepted content is parsed once and published; a re-read means the watcher rejected it.
-				if (nextAttempts >= 3) invalidResolvers.get(content)?.();
-			}
-			return originalParseConfig(content);
-		};
-
-		const published: BacklogConfig[] = [];
-		let resolveNextPublished: (config: BacklogConfig) => void = () => {};
-		const nextPublished = () =>
-			new Promise<BacklogConfig>((resolve) => {
-				resolveNextPublished = resolve;
-			});
+	it("keeps schema default users separate from watched config changes", async () => {
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		});
+		expect(core.filesystem.taskSchema.users.find((user) => user.default)?.handle).toBe("@alice");
+		let callbacks = 0;
 		const configWatcher = watchConfigFile(core.filesystem, {
-			onConfigChanged: (config) => {
-				if (!config) return;
-				published.push(config);
-				resolveNextPublished(config);
+			onConfigChanged: () => {
+				callbacks += 1;
 			},
 		});
-
 		try {
-			// Neither malformed edit may publish an undefined default over the cached one.
-			for (const invalidContent of invalidContents) {
-				await replaceConfigFile(invalidContent);
-				const exhausted = invalidExhausted.get(invalidContent);
-				if (!exhausted) throw new Error("Missing invalid config attempt signal");
-				await withTimeout(exhausted, "invalid default_assignee read attempts");
-				expect(published).toHaveLength(0);
-				expect((await core.filesystem.loadConfig())?.defaultAssignee).toEqual(["@alice"]);
-			}
-
-			const scalarPublished = nextPublished();
-			await replaceConfigFile(scalarContent);
-			expect((await withTimeout(scalarPublished, "scalar callback")).defaultAssignee).toEqual(["@carol"]);
-
-			const inlinePublished = nextPublished();
-			await replaceConfigFile(inlineArrayContent);
-			expect((await withTimeout(inlinePublished, "inline array callback")).defaultAssignee).toEqual(["@alice", "@bob"]);
+			await replaceConfigFile('project_name: "Moved key"\ndefault_assignee: "@bob"\n');
+			await Bun.sleep(getPlatformTimeout(700));
+			expect(callbacks).toBe(0);
+			expect((await core.filesystem.loadConfig())?.projectName).toBe("Config watcher");
+			await replaceConfigFile('project_name: "Config watcher"\ndate_format: YYYY-MM-DD\n');
+			expect(core.filesystem.taskSchema.users.find((user) => user.default)?.handle).toBe("@alice");
 		} finally {
 			configWatcher.stop();
-			core.filesystem.parseConfig = originalParseConfig;
 		}
 	});
 
@@ -273,8 +199,6 @@ describe("config watcher", () => {
 		const candidateContent = [
 			'project_name: "Candidate"',
 			'backlog_directory: "custom/a"',
-			'statuses: ["To Do", "Done"]',
-			"labels: []",
 			"date_format: YYYY-MM-DD",
 			"check_active_branches: true",
 			"",
@@ -285,10 +209,9 @@ describe("config watcher", () => {
 			"check_active_branches: false",
 			"",
 		].join("\n");
-		const sparseRootContent = [
+		const unusableRootContent = [
 			'project_name: "Sparse root"',
-			'statuses: ["To Do", "Done"]',
-			"labels: []",
+			'date_format: ""',
 			"date_format: YYYY-MM-DD",
 			"check_active_branches: true",
 			"",
@@ -296,8 +219,6 @@ describe("config watcher", () => {
 		const invalidPointerContent = [
 			'project_name: "Broken pointer"',
 			'backlog_directory: "../escape"',
-			'statuses: ["To Do", "Done"]',
-			"labels: []",
 			"date_format: YYYY-MM-DD",
 			"check_active_branches: true",
 			"",
@@ -305,8 +226,6 @@ describe("config watcher", () => {
 		const malformedPointerContent = [
 			'project_name: "Malformed pointer"',
 			'backlog_directory "backlog"',
-			'statuses: ["To Do", "Done"]',
-			"labels: []",
 			"date_format: YYYY-MM-DD",
 			"check_active_branches: false",
 			"",
@@ -342,7 +261,7 @@ describe("config watcher", () => {
 				injectedInterveningContent = true;
 				writeFileSync(rootConfigPath, interveningInvalidContent);
 			}
-			if (content === sparseRootContent) {
+			if (content === unusableRootContent) {
 				sparseRootAttempts += 1;
 				if (sparseRootAttempts >= 8) resolveSparseRootAttempts();
 			}
@@ -393,7 +312,7 @@ describe("config watcher", () => {
 			expect((await rootFilesystem.loadConfig())?.projectName).toBe("Candidate");
 			expect(rootFilesystem.backlogDirName).toBe("custom/a");
 
-			await Bun.write(replacementPath, sparseRootContent);
+			await Bun.write(replacementPath, unusableRootContent);
 			await rename(replacementPath, rootConfigPath);
 			await withTimeout(sparseRootAttemptsExhausted, "sparse root config attempts");
 			expect(callbackCount).toBe(1);
@@ -476,7 +395,7 @@ describe("config watcher", () => {
 			const config = await withTimeout(publishedConfig, "sparse config callback");
 			expect(config.projectName).toBe("Sparse config");
 			expect(config.prefixes?.task).toBe("SPARSE");
-			expect(config.statuses.length).toBeGreaterThan(0);
+			expect(core.filesystem.taskSchema.fields.status?.values?.length).toBeGreaterThan(0);
 			expect(config.labels).toEqual([]);
 			expect(config.dateFormat).toBe("yyyy-mm-dd");
 		} finally {
