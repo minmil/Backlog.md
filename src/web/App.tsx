@@ -829,10 +829,12 @@ function AppContent() {
 		setLoadingMessage(null);
 		applyLoadError(new Error(loadingState.message));
       } else if (event.data === "tasks-updated") {
+        window.dispatchEvent(new window.Event('backlog-data-updated'));
         void refreshData();
       } else if (event.data === "milestones-updated") {
         void refreshMilestoneData();
       } else if (event.data === "config-updated") {
+        window.dispatchEvent(new window.Event('backlog-data-updated'));
         // Reload statuses when config changes
         loadAllData();
       }

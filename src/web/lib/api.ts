@@ -1,6 +1,7 @@
 import type { DuplicateRepairPlan, DuplicateRepairResult } from "../../core/duplicate-task-repair.ts";
 import type { TaskStatistics } from "../../core/statistics.ts";
 import type { TaskDetail } from "../../core/task-detail.ts";
+import type { TaskSchema } from "../../schema/types.ts";
 import type {
 	BacklogConfig,
 	Decision,
@@ -431,6 +432,12 @@ export class ApiClient {
 		if (!response.ok) {
 			throw new Error("Failed to fetch config");
 		}
+		return response.json();
+	}
+
+	async fetchSchema(): Promise<TaskSchema> {
+		const response = await fetch(`${API_BASE}/schema`);
+		if (!response.ok) throw new Error("Failed to fetch task schema");
 		return response.json();
 	}
 
