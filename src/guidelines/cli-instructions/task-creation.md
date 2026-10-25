@@ -2,7 +2,7 @@
 
 ### Custom fields
 
-Run `backlog schema` to inspect all task fields. Pass `--field key=value` once for each value, and copy enum values exactly as listed. Use the CLI rather than editing frontmatter.
+Run `backlog schema --json` to inspect task fields, sections, enum values, and user handles. Pass `--field key=value` once for each value, and copy enum values and handles exactly as listed. Use `--section` and `--add-item` for body sections; make writes through the CLI.
 
 Use this guide when `backlog instructions` or the user indicates that new Backlog tasks are needed.
 

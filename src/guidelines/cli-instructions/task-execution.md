@@ -2,7 +2,7 @@
 
 ### Task fields
 
-Run `backlog schema` to inspect allowed fields and values. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, and `--sort key[:asc|:desc]` for declared fields. Never hand-edit frontmatter.
+Run `backlog schema --json` to inspect field keys, exact values, user handles, and sections. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, `--sort key[:asc|:desc]`, and `--show-fields key1,key2` for declared fields. Copy enum values and user handles exactly. Make writes through the CLI.
 
 Use this guide when you are working on an existing Backlog task.
 

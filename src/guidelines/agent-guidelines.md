@@ -4,7 +4,7 @@ Use the Backlog.md CLI to create, read, and update task, document, and decision 
 
 ## Find the active schema
 
-Run `backlog schema` before using an unfamiliar field or section. `task-schema.yml` defines valid field values, users, sections, and display order. Use `--field key=value` to set a declared field, `--clear-field key` to clear one, `task list --where 'key=value'` to filter, and `--sort key[:asc|:desc]` to order results. Shortcut flags such as `-s`, `-a`, and `--priority` use the same field validation.
+Run `backlog schema --json` first in a project. `task-schema.yml` defines field keys, exact enum values, user handles, sections, and display order. Use `--field key=value` to set a declared field, `--clear-field key` to clear one, `task list --where 'key=value'` to filter, `--sort key[:asc|:desc]` to order, and `--show-fields key1,key2` to add fields to plain list rows. Copy enum values and handles exactly. Shortcut flags such as `-s`, `-a`, and `--priority` use the same field validation.
 
 Use `--plain` for readable task context. Use `--json` for structured data; task JSON is schema version 2 with `fields` and `unknownFields`, and task view also includes `sections` and `other`.
 
