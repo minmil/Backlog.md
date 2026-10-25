@@ -53,7 +53,7 @@ const setupDom = () => {
 	globalThis.localStorage = dom.window.localStorage as unknown as Storage;
 };
 
-const renderTaskList = (customSchema = getDefaultTaskSchema()): HTMLElement => {
+const renderTaskList = (customSchema = getDefaultTaskSchema(), customTasks?: Task[]): HTMLElement => {
 	setupDom();
 	const container = document.getElementById("root");
 	expect(container).toBeTruthy();
@@ -63,7 +63,7 @@ const renderTaskList = (customSchema = getDefaultTaskSchema()): HTMLElement => {
 			<MemoryRouter>
 				<SchemaProvider initialSchema={customSchema}>
 				<TaskList
-					tasks={[
+					tasks={customTasks ?? [
 						createTask({
 							id: "task-101",
 							title: "Fit the task table",
@@ -167,5 +167,27 @@ describe("TaskList table width budget", () => {
 		const headers = Array.from(container.querySelectorAll("thead th")).map((th) => th.textContent?.replace(/[↕▲▼]/g, "").trim());
 		expect(headers).toEqual(["ID", "Title", "Effort", "Status"]);
 		expect(Array.from(container.querySelectorAll("tbody tr td")).map((cell) => cell.textContent?.trim())).toEqual(["task-101", expect.stringContaining("Fit the task table"), "3", "To Do"]);
+	});
+
+	it("sorts and filters configured custom fields", () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.effort = { type: "number", label: "Effort" };
+		schema.fields.phase = { type: "enum", label: "Phase", values: ["Ready", "Review"] };
+		schema.ui.task_list.columns = ["effort", "phase"];
+		schema.ui.task_list.filters = ["phase"];
+		const container = renderTaskList(schema, [
+			createTask({ id: "task-1", title: "Review task", fieldValues: { effort: 5, phase: "Review" } }),
+			createTask({ id: "task-2", title: "Ready task", fieldValues: { effort: 2, phase: "Ready" } }),
+		]);
+		const effortHeader = Array.from(container.querySelectorAll("th button")).find((button) => button.textContent?.includes("Effort"));
+		act(() => effortHeader?.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+		expect(Array.from(container.querySelectorAll("tbody tr td:first-child")).map((cell) => cell.textContent)).toEqual(["task-2", "task-1"]);
+		const phaseFilter = container.querySelector("select[aria-label='Filter board by phase']") as HTMLSelectElement;
+		expect(phaseFilter).toBeTruthy();
+		act(() => {
+			phaseFilter.value = "Review";
+			phaseFilter.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		expect(Array.from(container.querySelectorAll("tbody tr td:first-child")).map((cell) => cell.textContent)).toEqual(["task-1"]);
 	});
 });

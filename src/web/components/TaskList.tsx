@@ -18,6 +18,7 @@ import {
 } from "../../utils/priority-config.ts";
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
 import FieldValue from "./schema/FieldValue.tsx";
+import FieldFilter from "./schema/FieldFilter.tsx";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
@@ -123,6 +124,8 @@ const TaskList: React.FC<TaskListProps> = ({
 }) => {
 	const { schema, registry } = useSchema();
 	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const filterKeys = schema.ui.task_list.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const customFilterKeys = filterKeys.filter((key) => !["status", "priority", "milestone", "labels"].includes(key));
 	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
 	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
 	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
@@ -130,9 +133,10 @@ const TaskList: React.FC<TaskListProps> = ({
 		return supplied?.[key] ?? registry.getField(task, key);
 	};
 	const [searchParams, setSearchParams] = useSearchParams();
+	const priorityOrder = availablePriorities?.length ? availablePriorities : (schema.fields.priority?.values ?? []);
 	const statusOptions = useMemo(
-		() => (availableStatuses.length > 0 ? availableStatuses : [...DEFAULT_STATUSES]),
-		[availableStatuses],
+		() => (availableStatuses.length > 0 ? availableStatuses : schema.fields.status?.values ?? [...DEFAULT_STATUSES]),
+		[availableStatuses, schema],
 	);
 	const [statusFilter, setStatusFilter] = useState<string[]>(() =>
 		normalizeStatusFilters(getStatusFilters(searchParams), statusOptions),
@@ -145,7 +149,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	}, []);
 	const [excludedStatusFilter, setExcludedStatusFilter] = useState<string[]>(initialExcludeStatusParams);
 	const [priorityFilter, setPriorityFilter] = useState<string>(() =>
-		isLoading ? "" : (resolvePriorityValue(searchParams.get("priority"), availablePriorities) ?? ""),
+		isLoading ? "" : (resolvePriorityValue(searchParams.get("priority"), priorityOrder) ?? ""),
 	);
 	const [milestoneFilter, setMilestoneFilter] = useState(() => searchParams.get("milestone") ?? "");
 	const initialLabelParams = useMemo(() => {
@@ -162,8 +166,8 @@ const TaskList: React.FC<TaskListProps> = ({
 	const [sortColumn, setSortColumn] = useState<TaskSortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 	const priorityOptions = useMemo(
-		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(availablePriorities)],
-		[availablePriorities],
+		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(priorityOrder)],
+		[priorityOrder],
 	);
 	const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
 	const tableBodyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -311,12 +315,22 @@ const TaskList: React.FC<TaskListProps> = ({
 		const uniqueMilestones = Array.from(new Set([...availableMilestones.map((m) => m.trim()).filter(Boolean)]));
 		return uniqueMilestones;
 	}, [availableMilestones]);
+	const customFilters = Object.fromEntries(customFilterKeys.map((key) => {
+		const raw = searchParams.get(key);
+		const definition = schema.fields[key];
+		if (!raw) return [key, null];
+		if (definition?.type === "multi-enum" || definition?.type === "string-list" || definition?.type === "user-list") return [key, raw.split(",").map((value) => value.trim()).filter(Boolean)];
+		if (definition?.type === "enum") return [key, definition.values?.find((value) => value.toLowerCase() === raw.toLowerCase()) ?? null];
+		if (definition?.type === "number") return [key, Number(raw)];
+		if (definition?.type === "bool") return [key, raw === "true" ? true : raw === "false" ? false : null];
+		return [key, raw];
+	})) as Record<string, RegistryFieldValue | null>;
 	const hasActiveFilters = Boolean(
 		statusFilter.length > 0 ||
 			excludedStatusFilter.length > 0 ||
 			priorityFilter ||
 			labelFilter.length > 0 ||
-			milestoneFilter,
+			milestoneFilter || Object.values(customFilters).some((value) => value !== null && value !== "" && (!Array.isArray(value) || value.length > 0)),
 	);
 	const totalTasks = sortedBaseTasks.length;
 
@@ -331,7 +345,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			.map((status) => status.trim())
 			.filter((status) => status.length > 0);
 		const rawParamPriority = searchParams.get("priority") ?? "";
-		const paramPriority = resolvePriorityValue(rawParamPriority, availablePriorities) ?? "";
+		const paramPriority = resolvePriorityValue(rawParamPriority, priorityOrder) ?? "";
 		const paramMilestone = searchParams.get("milestone") ?? "";
 		const paramLabels = [...searchParams.getAll("label"), ...searchParams.getAll("labels")];
 		const labelsCsv = searchParams.get("labels");
@@ -368,7 +382,26 @@ const TaskList: React.FC<TaskListProps> = ({
 		if (!areEqualStringArrays(normalizedLabels, labelFilter)) {
 			setLabelFilter(normalizedLabels);
 		}
-	}, [availablePriorities, isLoading, searchParams, setSearchParams, statusOptions]);
+	}, [isLoading, priorityOrder, searchParams, setSearchParams, statusOptions]);
+	useEffect(() => {
+		if (isLoading) return;
+		const corrections = customFilterKeys.flatMap((key) => {
+			const field = schema.fields[key];
+			if (field?.type !== "enum") return [];
+			const raw = searchParams.get(key);
+			if (!raw) return [];
+			const canonical = field.values?.find((value) => value.toLowerCase() === raw.toLowerCase());
+			return canonical === raw ? [] : [{ key, canonical }];
+		});
+		if (!corrections.length) return;
+		setSearchParams((params) => {
+			for (const { key, canonical } of corrections) {
+				if (canonical) params.set(key, canonical);
+				else params.delete(key);
+			}
+			return params;
+		}, { replace: true });
+	}, [isLoading, schema, searchParams, setSearchParams]);
 
 	useEffect(() => {
 		if (!hasActiveFilters) {
@@ -459,7 +492,8 @@ const TaskList: React.FC<TaskListProps> = ({
 		nextLabels: string[],
 		nextMilestone: string,
 	) => {
-		const params = new URLSearchParams();
+		const params = new URLSearchParams(searchParams);
+		for (const key of ["status", "excludeStatus", "excludeStatuses", "priority", "label", "labels", "milestone"]) params.delete(key);
 		for (const status of nextStatuses) {
 			if (status.trim()) {
 				params.append("status", status.trim());
@@ -518,9 +552,19 @@ const TaskList: React.FC<TaskListProps> = ({
 		setPriorityFilter("");
 		setLabelFilter([]);
 		setMilestoneFilter("");
-		syncUrl([], [], "", [], "");
+		setSearchParams((params) => {
+			for (const key of [...filterKeys, "excludeStatus", "excludeStatuses", "label", "labels"]) params.delete(key);
+			return params;
+		}, { replace: true });
 		setDisplayTasks(sortedBaseTasks);
 		setError(null);
+	};
+	const handleCustomFilterChange = (key: string, value: RegistryFieldValue | null) => {
+		setSearchParams((params) => {
+			params.delete(key);
+			if (value !== null && value !== "" && (!Array.isArray(value) || value.length > 0)) params.set(key, Array.isArray(value) ? value.join(",") : String(value));
+			return params;
+		}, { replace: true });
 	};
 
 	const handleCleanupSuccess = async (message: string) => {
@@ -625,16 +669,16 @@ const TaskList: React.FC<TaskListProps> = ({
 			if (sortColumn === "ordinal" && (left === undefined || right === undefined)) {
 				if (left !== right) return left === undefined ? 1 : -1;
 			}
-			const result = registry.compare(sortColumn, left, right, sortColumn === "priority" ? availablePriorities : undefined);
+			const result = registry.compare(sortColumn, left, right, sortColumn === "priority" ? priorityOrder : undefined);
 			if (result !== 0) return sortDirection === "asc" ? result : -result;
 			if (sortColumn === "ordinal") return compareTaskIdsAscending(a, b);
 			return compareTaskIdsDescending(a.id, b.id);
 		});
-	}, [availablePriorities, displayTasks, registry, sortColumn, sortDirection]);
+	}, [displayTasks, priorityOrder, registry, sortColumn, sortDirection]);
 	const renderFieldCell = (task: Task, key: string) => {
 		const value = fieldValue(task, key);
 		if (key === "status") return <td key={key} className="px-3 py-2.5"><span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(String(value ?? ""))}`}>{value}</span></td>;
-		if (key === "priority") return <td key={key} className="px-3 py-2.5">{value ? <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(String(value))}`}>{formatPriorityLabel(String(value), availablePriorities)}</span> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "priority") return <td key={key} className="px-3 py-2.5">{value ? <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(String(value))}`}>{formatPriorityLabel(String(value), priorityOrder)}</span> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
 		if (key === "ordinal") return <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{value ?? <span className="text-gray-300 dark:text-gray-600">—</span>}</td>;
 		if (key === "labels" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1 min-w-0">{value.slice(0, 2).map((label) => <span key={label} className="inline-flex max-w-[7rem] truncate rounded-circle bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200" title={label}>{label}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
 		if (key === "assignee" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1.5">{value.slice(0, 2).map((assignee) => <span key={assignee} title={assignee} className="inline-flex h-6 w-6 items-center justify-center rounded-circle bg-blue-100 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/50 dark:text-blue-200">{getAssigneeInitials(assignee)}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
@@ -644,11 +688,20 @@ const TaskList: React.FC<TaskListProps> = ({
 		}
 		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} /></td>;
 	};
+	const visibleTasks = sortedDisplayTasks.filter((task) => customFilterKeys.every((key) => {
+		const wanted = customFilters[key];
+		if (wanted === null || wanted === undefined || wanted === "" || (Array.isArray(wanted) && !wanted.length)) return true;
+		const actual = fieldValue(task, key);
+		if (wanted === "__unassigned__") return !Array.isArray(actual) || actual.length === 0;
+		if (Array.isArray(wanted)) return Array.isArray(actual) && wanted.some((item) => actual.some((entry) => entry.toLowerCase() === item.toLowerCase()));
+		if (Array.isArray(actual)) return actual.some((item) => item.toLowerCase() === String(wanted).toLowerCase());
+		return String(actual ?? "").toLowerCase() === String(wanted).toLowerCase();
+	}));
 
-	const currentCount = sortedDisplayTasks.length;
+	const currentCount = visibleTasks.length;
 	// Share a slot sized for the largest visible count. Keep the existing 3rem through 99/99;
 	// each extra digit needs space in both checked and total, using the counter's tabular font.
-	const progressSlotDigits = sortedDisplayTasks.reduce((digits, task) => {
+	const progressSlotDigits = visibleTasks.reduce((digits, task) => {
 		const progress = getAcceptanceCriteriaProgressCounts(task);
 		return progress ? Math.max(digits, String(progress.total).length) : digits;
 	}, 0);
@@ -678,6 +731,16 @@ const TaskList: React.FC<TaskListProps> = ({
 			bodyEl.removeEventListener("scroll", handleBodyScroll);
 		};
 	}, [currentCount]);
+	const renderSchemaFilter = (key: string) => {
+		if (key === "status") return <React.Fragment key={key}>
+			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={statusFilter} onChange={handleStatusChange} menuId="task-list-status-menu" label="Status" emptyLabel="All" noOptionsLabel="No statuses" clearLabel="Clear status filter" className="min-w-[180px]" />
+			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={excludedStatusFilter} onChange={handleExcludeStatusChange} menuId="task-list-exclude-status-menu" label="Exclude status" emptyLabel="None" noOptionsLabel="No statuses" clearLabel="Clear excluded statuses" className="min-w-[210px]" />
+		</React.Fragment>;
+		if (key === "priority") return <select key={key} aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)} className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200">{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select>;
+		if (key === "milestone") return <select key={key} aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)} className="min-w-[160px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</select>;
+		if (key === "labels") return <LabelFilterDropdown key={key} availableLabels={mergedAvailableLabels} selectedLabels={labelFilter} onChange={handleLabelChange} menuId="task-list-labels-menu" />;
+		return <FieldFilter key={key} fieldKey={key} value={customFilters[key]} onChange={(value) => handleCustomFilterChange(key, value)} />;
+	};
 
 	return (
 		<div className="page-shell transition-colors duration-200">
@@ -693,94 +756,13 @@ const TaskList: React.FC<TaskListProps> = ({
 				</div>
 
 				<div className="flex flex-wrap items-center gap-3 justify-between">
-						<div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
-							<LabelFilterDropdown
-								availableLabels={statusOptions}
-								selectedLabels={statusFilter}
-								onChange={handleStatusChange}
-								menuId="task-list-status-menu"
-								label="Status"
-								emptyLabel="All"
-								noOptionsLabel="No statuses"
-								clearLabel="Clear status filter"
-								className="min-w-[180px]"
-							/>
-
-							<LabelFilterDropdown
-								availableLabels={statusOptions}
-								selectedLabels={excludedStatusFilter}
-								onChange={handleExcludeStatusChange}
-								menuId="task-list-exclude-status-menu"
-								label="Exclude status"
-								emptyLabel="None"
-							noOptionsLabel="No statuses"
-							clearLabel="Clear excluded statuses"
-							className="min-w-[210px]"
-						/>
-
-						<select
-							value={priorityFilter}
-							onChange={(event) => handlePriorityChange(event.target.value)}
-							className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-						>
-							{priorityOptions.map((option) => (
-								<option key={option.value || "all"} value={option.value}>
-									{option.label}
-								</option>
-							))}
-						</select>
-
-						<select
-							value={milestoneFilter}
-							onChange={(event) => handleMilestoneChange(event.target.value)}
-							className="min-w-[160px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-						>
-							<option value="">All milestones</option>
-							<option value="__none">No milestone</option>
-							{milestoneOptions.map((milestone) => (
-								<option key={milestone} value={milestone}>
-									{getMilestoneLabel(milestone, milestoneEntities)}
-								</option>
-							))}
-						</select>
-
-						<LabelFilterDropdown
-							availableLabels={mergedAvailableLabels}
-							selectedLabels={labelFilter}
-							onChange={handleLabelChange}
-							menuId="task-list-labels-menu"
-						/>
-
+					<div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+						{filterKeys.map(renderSchemaFilter)}
 					</div>
-
 					<div className="flex items-center gap-3 flex-shrink-0">
-						{isFilteringTerminalStatus && currentCount > 0 && (
-								<button
-									type="button"
-									onClick={() => setShowCleanupModal(true)}
-									className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 flex items-center gap-2 whitespace-nowrap"
-									title="Clean up old completed tasks"
-								>
-									<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-								</svg>
-								Clean Up
-							</button>
-						)}
-
-							{hasActiveFilters && (
-								<button
-									type="button"
-									onClick={handleClearFilters}
-									className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg whitespace-nowrap transition-colors duration-200 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700"
-								>
-									Clear filters
-								</button>
-							)}
-
-						<div className="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap text-right min-w-[170px]">
-							Showing {currentCount} of {totalTasks} tasks
-						</div>
+						{isFilteringTerminalStatus && currentCount > 0 && <button type="button" onClick={() => setShowCleanupModal(true)} className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 flex items-center gap-2 whitespace-nowrap" title="Clean up old completed tasks"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>Clean Up</button>}
+						{hasActiveFilters && <button type="button" onClick={handleClearFilters} className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg whitespace-nowrap transition-colors duration-200 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700">Clear filters</button>}
+						<div className="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap text-right min-w-[170px]">Showing {currentCount} of {totalTasks} tasks</div>
 					</div>
 				</div>
 
@@ -825,7 +807,7 @@ const TaskList: React.FC<TaskListProps> = ({
 						<table className="w-full table-fixed border-collapse" style={{ minWidth: `${tableMinWidth}rem` }}>
 							{renderColumnGroup()}
 							<tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-								{sortedDisplayTasks.map((task) => {
+								{visibleTasks.map((task) => {
 									const isFromOtherBranch = Boolean(task.branch);
 
 									return (
