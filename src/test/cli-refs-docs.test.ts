@@ -125,8 +125,10 @@ await import(${JSON.stringify(pathToFileURL(cliPath).href)});
 					.quiet();
 
 			expect(result.exitCode).toBe(0);
-			const out = result.stdout.toString();
-			expect(out).toContain("Modified files: src/api.ts, src/ui.ts");
+			expect((await new Core(TEST_DIR).filesystem.loadTask("TASK-1"))?.modifiedFiles).toEqual([
+				"src/api.ts",
+				"src/ui.ts",
+			]);
 		});
 	});
 
@@ -228,8 +230,10 @@ await import(${JSON.stringify(pathToFileURL(cliPath).href)});
 				.quiet();
 
 			expect(result.exitCode).toBe(0);
-			const out = result.stdout.toString();
-			expect(out).toContain("Modified files: src/api.ts, src/ui.ts");
+			expect((await new Core(TEST_DIR).filesystem.loadTask("TASK-1"))?.modifiedFiles).toEqual([
+				"src/api.ts",
+				"src/ui.ts",
+			]);
 		});
 	});
 
@@ -596,10 +600,11 @@ await import(${JSON.stringify(pathToFileURL(cliPath).href)});
 						[["--doc", "", flag, "seed:a"], replacementError],
 					];
 					for (const [args, error] of invalidEdits) {
-						const result = await $`bun ${cliPath} ${target} edit ${id} --notes "Must not be saved" ${args}`
-							.cwd(TEST_DIR)
-							.quiet()
-							.nothrow();
+						const result =
+							await $`bun ${cliPath} ${target} edit ${id} --section description="Must not be saved" ${args}`
+								.cwd(TEST_DIR)
+								.quiet()
+								.nothrow();
 						expect(result.exitCode).toBe(1);
 						expect(result.stderr.toString()).toContain(error);
 						expect(result.stderr.toString().split("No changes were applied.")).toHaveLength(2);

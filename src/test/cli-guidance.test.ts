@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
+import { FileSystem } from "../file-system/operations.ts";
 import { CLI_AGENT_NUDGE } from "../index.ts";
 import { BACKLOG_CWD_ENV } from "../utils/runtime-cwd.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 const normalizeCliOutput = (output: string) => output.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
@@ -125,7 +126,7 @@ describe("CLI Integration", () => {
 			expect(taskCreation).toContain(
 				"Repeat `--exclude-status` or pass comma-separated configured statuses to exclude multiple states.",
 			);
-			expect(taskCreation).toContain("omitting it applies the project's configured `defaultAssignee` when one is set");
+			expect(taskCreation).toContain("omitting it applies the default user from `task-schema.yml` when one is set");
 			expect(taskCreation).not.toContain('backlog task list --status "In Progress" --plain');
 			expect(taskCreation).toContain(
 				"Do not pass milestone IDs such as `m-0` to `--parent`; assign a task to a milestone with `--milestone`/`-m`.",
@@ -148,9 +149,9 @@ describe("CLI Integration", () => {
 				"Research the current system, including relevant code, tests, conventions, and recent changes",
 			);
 			expect(taskExecution).toContain("Record the current plan in the task before implementation");
-			expect(taskExecution).toContain("or more repeatable `--append-plan` values");
+			expect(taskExecution).toContain("repeat `--append-section id=text` to extend it");
 			expect(taskExecution).toContain(
-				'backlog task edit BACK-123 --plan "1. Revised approach" --append-plan "2. Verify it"',
+				'backlog task edit BACK-123 --section description="Revised approach" --append-section description="Verify it"',
 			);
 			expect(taskExecution).toContain(
 				"If the plan contains a material product, architecture, or workflow decision, or the project or user requires plan",
@@ -172,7 +173,7 @@ describe("CLI Integration", () => {
 			expect(conditionalReviewIndex).toBeGreaterThan(planIndex);
 			expect(implementIndex).toBeGreaterThan(conditionalReviewIndex);
 			expect(taskExecution).toContain(
-				"Do not check acceptance criteria, write the final summary, or move the task to the terminal status from this guide alone.",
+				"Do not check acceptance criteria or move the task to the terminal status from this guide alone.",
 			);
 			expect(taskExecution).toContain("verify each acceptance criterion with objective evidence before checking it");
 			expect(taskFinalization).toContain("configured final status");
@@ -201,14 +202,7 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Prefix Project"',
-					'statuses: ["To Do", "In Progress", "Done"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					'task_prefix: "feat"',
-					"",
-				].join("\n"),
+				['project_name: "Prefix Project"', "date_format: yyyy-mm-dd", 'task_prefix: "feat"', ""].join("\n"),
 			);
 
 			const overview = await $`bun ${CLI_PATH} instructions overview`.cwd(TEST_DIR).text();
@@ -234,15 +228,12 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Runtime Cwd Schema Project"',
-					'statuses: ["Ready", "Review", "Closed"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					'task_prefix: "feat"',
-					"",
-				].join("\n"),
+				['project_name: "Runtime Cwd Schema Project"', "date_format: yyyy-mm-dd", 'task_prefix: "feat"', ""].join("\n"),
 			);
+			await updateTestTaskSchema(new FileSystem(TEST_DIR), (schema) => {
+				schema.fields.status!.values = ["Ready", "Review", "Closed"];
+				schema.fields.status!.default = "Ready";
+			});
 			const outsideDir = join(TEST_DIR, "outside");
 			await mkdir(outsideDir, { recursive: true });
 			const env = { ...process.env, [BACKLOG_CWD_ENV]: TEST_DIR };
@@ -327,10 +318,10 @@ describe("CLI Integration", () => {
 			expect(createHelp).toContain("title: String");
 			expect(createHelp).toContain("description: Markdown");
 			expect(createHelp).toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(createHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(createHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(createHelp).toContain("ordinal: Integer");
 			expect(createHelpCompact).toContain(
-				"assignee: Comma-separated strings - Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the configured defaultAssignee",
+				"assignee: Comma-separated strings - Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the schema default user",
 			);
 			expect(createHelpCompact).toContain(
 				'assign task to one or more @names (comma-separated or repeatable); pass "" to leave it unassigned',
@@ -338,15 +329,12 @@ describe("CLI Integration", () => {
 			expect(editHelpCompact).toContain(
 				'replace all task assignees with one or more @names (comma-separated or repeatable); pass "" to clear them',
 			);
-			expect(createHelpCompact).toContain(
-				"--plan <text> add a plan only for already-started work created directly in an active status (for example, In Progress)",
-			);
-			expect(createHelp).toContain(
-				"plan: Markdown - Only for already-started work created directly in a configured active status (for example, In Progress)",
-			);
+			expect(createHelp).toContain("section: id=text");
+			expect(createHelp).toContain("add-item: id=text");
+			expect(createHelp).not.toContain("--plan <text>");
 			expect(listHelp).toContain("status: one or more of configured statuses: To Do, In Progress, Done");
 			expect(listHelp).not.toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(listHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(listHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(listHelp).toContain("labels: Comma-separated strings");
 			expect(listHelp).toContain("search: String");
 			expect(listHelp).toContain("limit: Positive integer");
@@ -375,7 +363,10 @@ describe("CLI Integration", () => {
 			expect(editHelpCompact).toContain("add task labels without replacing existing labels");
 			expect(editHelpCompact).toContain("remove task labels without replacing others");
 			expect(editHelpCompact).toContain("remove all task labels");
-			expect(editHelp).toContain("plan: Markdown");
+			expect(editHelp).toContain("section: id=text");
+			expect(editHelp).toContain("append-section: id=text");
+			expect(editHelp).toContain("check: id:n");
+			expect(editHelp).not.toContain("--plan <text>");
 			expect(editHelp).toContain("Writes:");
 			expect(archiveHelp).toContain("move a task off the board into the archive, keeping its ID and links");
 			expect(archiveHelp).toContain("taskId: Task ID - Task to archive, in any status");
@@ -419,25 +410,12 @@ describe("CLI Integration", () => {
 				expect(help).toContain("Multi-line values need real newlines; a literal \\n is stored as text");
 				expect(help).toContain("Example (bash/zsh): --description $'First line\\nSecond line'");
 			}
-			for (const field of ["description", "plan", "notes", "final-summary"]) {
-				expect(createHelp).toContain(`${field}: Markdown`);
-			}
-			// final-summary states its own lifecycle rule; it does not borrow plan's "already-started" restriction.
-			expect(createHelp).toContain(
-				"final-summary: Markdown - Only for finished, verified work created directly in a configured terminal status",
-			);
-			for (const field of [
-				"description",
-				"plan",
-				"append-plan",
-				"notes",
-				"append-notes",
-				"comment",
-				"final-summary",
-				"append-final-summary",
-			]) {
-				expect(editHelp).toContain(`${field}: Markdown`);
-			}
+			expect(createHelp).toContain("description: Markdown");
+			expect(createHelp).toContain("section: id=text");
+			expect(editHelp).toContain("description: Markdown");
+			expect(editHelp).toContain("comment: Markdown");
+			expect(editHelp).toContain("section: id=text");
+			expect(editHelp).toContain("append-section: id=text");
 
 			// The shared note replaces the per-option copy instead of repeating it.
 			expect(createHelp).not.toContain("multi-line: include real newlines");
@@ -458,14 +436,12 @@ describe("CLI Integration", () => {
 			await mkdir(join(TEST_DIR, "backlog"), { recursive: true });
 			await Bun.write(
 				join(TEST_DIR, "backlog", "config.yml"),
-				[
-					'project_name: "Schema Project"',
-					'statuses: ["Ready", "Review", "Closed"]',
-					"labels: []",
-					"date_format: yyyy-mm-dd",
-					"",
-				].join("\n"),
+				['project_name: "Schema Project"', "date_format: yyyy-mm-dd", ""].join("\n"),
 			);
+			await updateTestTaskSchema(new FileSystem(TEST_DIR), (schema) => {
+				schema.fields.status!.values = ["Ready", "Review", "Closed"];
+				schema.fields.status!.default = "Ready";
+			});
 
 			const createHelp = await $`bun ${CLI_PATH} task create --help`.cwd(TEST_DIR).text();
 			const listHelp = await $`bun ${CLI_PATH} task list --help`.cwd(TEST_DIR).text();
@@ -490,12 +466,14 @@ describe("CLI Integration", () => {
 			expect(docHelp).toContain("content: Markdown");
 			expect(docHelp).toContain("path: Docs-relative path");
 			expect(docHelp).toContain("type: one of: readme, guide, specification, other");
-			expect(configHelp).toContain("key: one of: defaultEditor, projectName, defaultAssignee, defaultStatus");
+			expect(configHelp).toContain("key: one of: defaultEditor, projectName, dateFormat");
+			expect(configHelp).not.toContain("defaultAssignee");
+			expect(configHelp).not.toContain("defaultStatus");
 			expect(configHelp).toContain("value: String");
 			expect(searchHelp).toContain("type: one or more of: task, document, decision");
 			expect(searchHelp).toContain("status: one or more of configured statuses: To Do, In Progress, Done");
 			expect(searchHelp).not.toContain("status: one of configured statuses: Draft, To Do, In Progress, Done");
-			expect(searchHelp).toContain("priority: one of configured priorities: High, Medium, Low");
+			expect(searchHelp).toContain("priority: one of configured priorities: high, medium, low");
 			expect(searchHelp).toContain("modified-file: Project-root-relative path");
 			expect(cleanupHelp).toContain("Writes:");
 		});
@@ -536,7 +514,7 @@ describe("CLI Integration", () => {
 			const docPathOutput = docPath.stdout.toString() + docPath.stderr.toString();
 
 			expect(priority.exitCode).not.toBe(0);
-			expect(priorityOutput).toContain("Invalid priority: urgent. Valid values are: High, Medium, Low");
+			expect(priorityOutput).toContain('Invalid task field "priority": allowed values: high, medium, low');
 			expect(priorityOutput).not.toContain("Error:");
 			expect(docPath.exitCode).not.toBe(0);
 			expect(docPathOutput).toContain("Document path cannot include traversal segments.");

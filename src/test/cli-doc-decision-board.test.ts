@@ -313,8 +313,7 @@ describe("CLI Integration", () => {
 			const tasks = await core.filesystem.listTasks();
 			expect(tasks).toHaveLength(3);
 
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 			expect(statuses).toEqual(["To Do", "In Progress", "Done"]);
 
 			// Test the kanban board generation
@@ -348,8 +347,7 @@ describe("CLI Integration", () => {
 			const tasks = await core.filesystem.listTasks();
 			expect(tasks).toHaveLength(0);
 
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 
 			const { generateKanbanBoardWithMetadata } = await import("../board.ts");
 			const board = generateKanbanBoardWithMetadata(tasks, statuses, "Test Project");
@@ -378,8 +376,7 @@ describe("CLI Integration", () => {
 			);
 
 			const tasks = await core.filesystem.listTasks();
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 
 			const { generateKanbanBoardWithMetadata } = await import("../board.ts");
 			const board = generateKanbanBoardWithMetadata(tasks, statuses, "Test Project");
@@ -409,8 +406,7 @@ describe("CLI Integration", () => {
 			);
 
 			const tasks = await core.filesystem.listTasks();
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 
 			// Test that --vertical flag produces vertical layout
 			const { generateKanbanBoardWithMetadata } = await import("../board.ts");
@@ -458,8 +454,7 @@ describe("CLI Integration", () => {
 
 			await core.gitOps.fetch();
 			const branches = await core.gitOps.listRemoteBranches();
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 
 			const localTasks = await core.filesystem.listTasks();
 			const tasksById = new Map(localTasks.map((t) => [t.id, t]));
@@ -527,8 +522,7 @@ describe("CLI Integration", () => {
 			const { exportKanbanBoardToFile } = await import("../index.ts");
 			const outputPath = join(TEST_DIR, "test-export.md");
 			const tasks = await core.filesystem.listTasks();
-			const config = await core.filesystem.loadConfig();
-			const statuses = config?.statuses || [];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [];
 
 			await exportKanbanBoardToFile(tasks, statuses, outputPath, "TestProject");
 

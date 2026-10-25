@@ -3,10 +3,13 @@ import { JSDOM } from "jsdom";
 import { StrictMode, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { DuplicateRepairPlan } from "../core/duplicate-task-repair.ts";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import type { SearchResult, Task } from "../types/index.ts";
 import { buildDependencyGraph } from "../utils/dependency-graph.ts";
 import { isValidTaskId, resolveTaskById } from "../utils/task-id.ts";
 import App from "../web/App.tsx";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
+import { apiClient } from "../web/lib/api.ts";
 import { HealthCheckProvider } from "../web/contexts/HealthCheckContext.tsx";
 import { setNativeInputValue } from "./react-dom-input.ts";
 
@@ -76,6 +79,7 @@ const defaultConfig = {
 let activeRoot: Root | null = null;
 let activeDom: JSDOM | null = null;
 const originalFetch = globalThis.fetch;
+const originalFetchSchema = apiClient.fetchSchema;
 const originalWebSocket = globalThis.WebSocket;
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalEvent = globalThis.Event;
@@ -499,12 +503,17 @@ const renderApp = async (
 	const container = document.getElementById("root");
 	expect(container).toBeTruthy();
 	activeRoot = createRoot(container as HTMLElement);
+	const schema = structuredClone(getDefaultTaskSchema());
+	schema.fields.type!.values = defaultConfig.types;
+	apiClient.fetchSchema = async () => schema;
 	await act(async () => {
 		activeRoot?.render(
 			<StrictMode>
+				<SchemaProvider initialSchema={schema}>
 				<HealthCheckProvider>
 					<App />
 				</HealthCheckProvider>
+				</SchemaProvider>
 			</StrictMode>,
 		);
 		await Promise.resolve();
@@ -630,6 +639,7 @@ const waitForIndicatorExit = () =>
 	});
 
 afterEach(async () => {
+	apiClient.fetchSchema = originalFetchSchema;
 	const fetchErrors: Error[] = [];
 	controlledTimerCleanup?.();
 	for (const cleanup of historyWaitCleanups) cleanup();

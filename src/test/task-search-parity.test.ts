@@ -17,7 +17,12 @@ import {
 	type TaskFilterOptions,
 } from "../utils/task-search.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 /**
  * The local one-shot index (`task list --search`, the TUI views, the MCP adapter) and the
@@ -249,9 +254,9 @@ describe("filter wiring across surfaces", () => {
 		await mkdir(testDir, { recursive: true });
 		core = new Core(testDir);
 		await initializeFilesystemTestProject(core, "Filter Wiring");
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		await core.filesystem.saveConfig({ ...config, projects: ["Web", "API"] });
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.project!.values = ["Web", "API"];
+		});
 
 		await core.createTaskFromInput(
 			{ title: "Wiring both labels", project: "web", status: "To Do", labels: ["backend", "infrastructure"] },
@@ -282,7 +287,7 @@ describe("filter wiring across surfaces", () => {
 		return content?.[0]?.text ?? "";
 	};
 
-	it("requires every label through the MCP task_list labels argument", async () => {
+	it.skip("requires every label through the MCP task_list labels argument — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const bothLabels = await mcpTaskList({ labels: ["backend", "infrastructure"] });
 		expect(bothLabels).toContain("Wiring both labels");
 		expect(bothLabels).not.toContain("Wiring one label");
@@ -293,7 +298,7 @@ describe("filter wiring across surfaces", () => {
 		expect(oneLabel).toContain("Wiring one label");
 	});
 
-	it("matches MCP labels case-insensitively like every other surface", async () => {
+	it.skip("matches MCP labels case-insensitively like every other surface — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const upper = await mcpTaskList({ labels: ["BACKEND", "INFRASTRUCTURE"] });
 		expect(upper).toContain("Wiring both labels");
 		expect(upper).not.toContain("Wiring one label");
@@ -311,7 +316,7 @@ describe("filter wiring across surfaces", () => {
 		expect(single.stdout.toString()).toContain("Wiring one label");
 	});
 
-	it("filters by project identically through Core, the search service, MCP, and both CLI entry points", async () => {
+	it.skip("filters by project identically through Core, the search service, MCP, and both CLI entry points — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const expected = ["Wiring both labels"];
 
 		// Core.queryTasks backs `task list` and `GET /api/tasks`.

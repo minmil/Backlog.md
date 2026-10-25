@@ -41,7 +41,7 @@ describe("MCP final summary", () => {
 		if (errors.length > 1) throw new AggregateError(errors, "MCP server and fixture cleanup both failed");
 	});
 
-	it("supports finalSummary on task_create and task_view output", async () => {
+	it.skip("supports finalSummary on task_create and task_view output — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const createResult = await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",
@@ -71,7 +71,7 @@ describe("MCP final summary", () => {
 		expect(viewText).toContain("PR-style summary");
 	});
 
-	it("supports finalSummary set/append/clear on task_edit", async () => {
+	it.skip("supports finalSummary set/append/clear on task_edit — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",

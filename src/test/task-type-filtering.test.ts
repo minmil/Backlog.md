@@ -5,7 +5,12 @@ import { Core } from "../core/backlog.ts";
 import { ContentStore } from "../core/content-store.ts";
 import { createTaskSearchIndex } from "../utils/task-search.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 let testDir: string;
 let core: Core;
@@ -19,9 +24,9 @@ describe("task type filtering", () => {
 		core = new Core(testDir);
 
 		await initializeFilesystemTestProject(core, "Task Type Filtering");
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		await core.filesystem.saveConfig({ ...config, types: ["Bug", "Feature", "Spike"] });
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.type!.values = ["Bug", "Feature", "Spike"];
+		});
 
 		await core.createTaskFromInput(
 			{
@@ -146,17 +151,17 @@ describe("task type filtering", () => {
 	it("rejects invalid configured task types clearly", async () => {
 		const list = await $`bun ${cliPath} task list --type chore --plain`.cwd(testDir).nothrow().quiet();
 		expect(list.exitCode).toBe(1);
-		expect(list.stderr.toString()).toContain("Invalid type: chore. Valid types are: Bug, Feature, Spike");
+		expect(list.stderr.toString()).toContain('Invalid task field "type": allowed values: Bug, Feature, Spike');
 
 		const search = await $`bun ${cliPath} search --task-type chore --plain`.cwd(testDir).nothrow().quiet();
 		expect(search.exitCode).toBe(1);
-		expect(search.stderr.toString()).toContain("Invalid task-type: chore. Valid types are: Bug, Feature, Spike");
+		expect(search.stderr.toString()).toContain('Invalid task field "type": allowed values: Bug, Feature, Spike');
 	});
 
 	it("documents configured task-type filters without changing search result-type semantics", async () => {
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		await core.filesystem.saveConfig({ ...config, types: ["Bug", "Epic"] });
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.type!.values = ["Bug", "Epic"];
+		});
 
 		const listHelp = await $`bun ${cliPath} task list --help`.cwd(testDir).text();
 		const searchHelp = await $`bun ${cliPath} search --help`.cwd(testDir).text();

@@ -100,8 +100,9 @@ describe("task and draft unknown frontmatter", () => {
 			expect(parseTask(saved).updatedDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/);
 		}
 		const output = await $`bun ${CLI_PATH} task view TASK-1 --json`.cwd(root).text();
-		expect(output).not.toContain("example-capture");
-		expect(output).not.toContain("external_copy");
+		const viewed = JSON.parse(output).task;
+		expect(viewed.unknownFields.approval.origin.app).toBe("example-capture");
+		expect(viewed.unknownFields.external_copy).toEqual(viewed.unknownFields.external);
 	});
 
 	it("keeps opaque metadata while clearing owned fields and skips unchanged task and draft edits", async () => {
@@ -112,7 +113,7 @@ describe("task and draft unknown frontmatter", () => {
 				METADATA,
 				"due_date: 2026-02-01\nreferences: [old]\ndocumentation: [old]\nmodified_files: []\ntype: bug\nproject: app\nreporter: ''\nparent_task_id: ''\nsubtasks: []\npriority: ''\nonStatusChange: ''\n",
 			);
-			await $`bun ${CLI_PATH} ${command} edit ${id} --clear-due-date --clear-refs --clear-docs --type ${""} --project ${""} --label changed`
+			await $`bun ${CLI_PATH} ${command} edit ${id} --clear-due-date --clear-refs --clear-docs --clear-field type --clear-field project --label changed`
 				.cwd(root)
 				.quiet();
 			const saved = await expectMetadata(path);
@@ -141,7 +142,7 @@ describe("task and draft unknown frontmatter", () => {
 
 	it("keeps metadata through draft renames, dedicated promotion/demotion, archive and restore", async () => {
 		const originalPath = await writeRecord("DRAFT-1");
-		await $`bun ${CLI_PATH} draft edit DRAFT-1 --title Renamed --ac "Keep checks"`.cwd(root).quiet();
+		await $`bun ${CLI_PATH} draft edit DRAFT-1 --title Renamed --add-item acceptance="Keep checks"`.cwd(root).quiet();
 		const renamedPath = join(await filesystem.getDraftsDir(), "draft-1 - Renamed.md");
 		expect(await Bun.file(originalPath).exists()).toBe(false);
 		await expectMetadata(renamedPath);
@@ -149,7 +150,7 @@ describe("task and draft unknown frontmatter", () => {
 		const taskPath = join(filesystem.tasksDir, "task-1 - Renamed.md");
 		await expectMetadata(taskPath);
 		expect(await Bun.file(renamedPath).exists()).toBe(false);
-		await $`bun ${CLI_PATH} task edit TASK-1 --check-ac 1`.cwd(root).quiet();
+		await $`bun ${CLI_PATH} task edit TASK-1 --check acceptance:1`.cwd(root).quiet();
 		const beforeArchive = await expectMetadata(taskPath);
 		await $`bun ${CLI_PATH} task archive TASK-1`.cwd(root).quiet();
 		const archived = (await filesystem.listArchivedTasks())[0];
@@ -161,7 +162,9 @@ describe("task and draft unknown frontmatter", () => {
 		const demoted = (await filesystem.listDrafts())[0];
 		if (!demoted?.filePath) throw new Error("Missing demoted draft");
 		const beforeDraftArchive = await expectMetadata(demoted.filePath);
-		expect(parseTask(beforeDraftArchive).acceptanceCriteriaItems?.[0]?.checked).toBe(true);
+		expect((parseTask(beforeDraftArchive).sections?.acceptance as Array<{ checked: boolean }>)?.[0]?.checked).toBe(
+			true,
+		);
 		await $`bun ${CLI_PATH} draft archive ${demoted.id}`.cwd(root).quiet();
 		const archivedDrafts = join(filesystem.backlogDir, "archive/drafts");
 		const filename = (await readdir(archivedDrafts))[0];

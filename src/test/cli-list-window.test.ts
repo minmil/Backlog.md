@@ -104,7 +104,7 @@ describe("CLI list windows", () => {
 					id: `task-${index}`,
 					title: `Window task ${index}`,
 					// Searching for `--skip` finds tasks with an option value that reads like the skip option.
-					description: "Read in windows with --skip.",
+					sections: { description: "Read in windows with --skip." },
 					status: index === 2 ? "In Progress" : "To Do",
 				}),
 				false,

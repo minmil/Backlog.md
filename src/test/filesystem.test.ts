@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { FileSystem } from "../file-system/operations.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import type { BacklogConfig, Decision, Document, Task } from "../types/index.ts";
-import { createUniqueTestDir, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -127,7 +127,7 @@ describe("FileSystem", () => {
 			labels: ["test"],
 			milestone: "v1.0",
 			dependencies: [],
-			description: "This is a test task",
+			sections: { description: "This is a test task" },
 		};
 
 		it("should save and load a task", async () => {
@@ -137,7 +137,7 @@ describe("FileSystem", () => {
 			expect(loadedTask?.id).toBe("TASK-1"); // IDs are normalized to uppercase
 			expect(loadedTask?.title).toBe(sampleTask.title);
 			expect(loadedTask?.status).toBe(sampleTask.status);
-			expect(loadedTask?.description).toBe(sampleTask.description);
+			expect(loadedTask?.sections?.description).toBe(sampleTask.sections?.description);
 		});
 
 		it("should return null for non-existent task", async () => {
@@ -357,15 +357,10 @@ Invalid content`,
 		});
 
 		it("should promote a draft to the configured default status", async () => {
-			const customConfig: BacklogConfig = {
-				projectName: "Custom Default Status Project",
-				defaultStatus: "Ready",
-				statuses: ["Ready", "In Progress", "Done"],
-				labels: [],
-				milestones: [],
-				dateFormat: "yyyy-MM-dd",
-			};
-			await filesystem.saveConfig(customConfig);
+			await updateTestTaskSchema(filesystem, (schema) => {
+				schema.fields.status!.values = ["Ready", "In Progress", "Done"];
+				schema.fields.status!.default = "Ready";
+			});
 			await filesystem.saveDraft(sampleDraft);
 
 			const promoted = await filesystem.promoteDraft("draft-1");

@@ -6,7 +6,6 @@ import { MemoryRouter } from "react-router-dom";
 import { type TaskDetail, toTaskDetail } from "../core/task-detail.ts";
 import type { Task } from "../types/index.ts";
 import { TaskDetailsModal } from "../web/components/TaskDetailsModal";
-import { apiClient } from "../web/lib/api.ts";
 import { TaskIdIndexProvider } from "../web/contexts/TaskIdIndexContext.tsx";
 import { ThemeProvider } from "../web/contexts/ThemeContext";
 
@@ -113,28 +112,17 @@ describe("task readiness badge against an optimistic edit", () => {
 		});
 		expect(container.textContent).toContain("Blocked by BACK-1");
 
-		// The save is left in flight, which is also what a failed one leaves behind: the shown status
-		// stays ahead of the record the verdict was read for.
-		const originalUpdateTask = apiClient.updateTask.bind(apiClient);
-		apiClient.updateTask = () => new Promise(() => {});
-		try {
-			const select = Array.from(container.querySelectorAll("select")).find((element) =>
-				Array.from(element.options).some((option) => option.value === "Done"),
-			);
-			expect(select).toBeTruthy();
-			await act(async () => {
-				const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set;
-				valueSetter?.call(select, "Done");
-				select?.dispatchEvent(new window.Event("change", { bubbles: true }));
-				await Promise.resolve();
-			});
-
-			// A finished task is neither ready nor blocked, so the carried verdict must not stand.
-			expect(container.textContent).not.toContain("Blocked by BACK-1");
-			expect(container.textContent).not.toContain("Ready to start");
-		} finally {
-			apiClient.updateTask = originalUpdateTask;
-		}
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const select = container.querySelector<HTMLSelectElement>("#schema-field-status");
+		expect(select).toBeTruthy();
+		await act(async () => {
+			const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set;
+			valueSetter?.call(select, "Done");
+			select?.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		// The unsaved status is ahead of the record from which readiness was computed.
+		expect(container.textContent).not.toContain("Blocked by BACK-1");
+		expect(container.textContent).not.toContain("Ready to start");
 	});
 
 });

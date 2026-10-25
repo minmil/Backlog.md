@@ -33,6 +33,7 @@ import { isConfigValueError } from "./file-system/operations.ts";
 import {
 	decisionListJson,
 	draftListJson,
+	draftViewJson,
 	formatJson,
 	printJson,
 	type SearchResultInput,
@@ -40,7 +41,7 @@ import {
 	taskListJson,
 	taskViewJson,
 } from "./formatters/json-output.ts";
-import { formatTaskPlainText } from "./formatters/task-plain-text.ts";
+import { formatPlainTaskListFields, formatTaskPlainText } from "./formatters/task-plain-text.ts";
 import {
 	type AgentInstructionFile,
 	addAgentInstructions,
@@ -55,6 +56,10 @@ import {
 } from "./index.ts";
 import { MilestoneHandlers, type MilestoneRemoveArgs } from "./mcp/tools/milestones/handlers.ts";
 import type { CallToolResult } from "./mcp/types.ts";
+import { applyCreateFieldAssignments } from "./schema/create-input.ts";
+import { FieldRegistry } from "./schema/field-registry.ts";
+import { getDefaultTaskSchema, loadTaskSchema } from "./schema/index.ts";
+import { validateTaskFiles } from "./schema/validate-tasks.ts";
 import {
 	type BacklogConfig,
 	type ContentRecordKind,
@@ -68,6 +73,7 @@ import {
 	type SearchResult,
 	type SearchResultType,
 	type Task,
+	type TaskCreateInput,
 	type TaskListFilter,
 	type TaskSearchResult,
 	type TaskUpdateInput,
@@ -120,13 +126,6 @@ import {
 	isReservedTaskPrefix,
 	normalizeId,
 } from "./utils/prefix-config.ts";
-import { formatValidPriorityValues, getPriorityOptions, resolvePriorityValue } from "./utils/priority-config.ts";
-import {
-	formatValidProjectValues,
-	getProjectValues,
-	noProjectsConfiguredMessage,
-	resolveProjectValues,
-} from "./utils/project-config.ts";
 import { type ReadOutputMode, type ReadOutputOptions, resolveReadOutputMode } from "./utils/read-output-mode.ts";
 import { resolveRuntimeCwd } from "./utils/runtime-cwd.ts";
 import { formatValidStatuses, getCanonicalStatus, getCanonicalStatuses, getValidStatuses } from "./utils/status.ts";
@@ -149,7 +148,6 @@ import {
 	taskNotFoundMessage,
 } from "./utils/task-path.ts";
 import { sectionTasks, sortTasks, TASK_SORT_FIELDS } from "./utils/task-sorting.ts";
-import { formatValidTaskTypeValues, getTaskTypeValues, resolveTaskTypeValues } from "./utils/task-type-config.ts";
 import { getTerminalStatus } from "./utils/terminal-status.ts";
 import { formatUtcDateForDisplay } from "./utils/utc-date-display.ts";
 import { formatUtcTimestamp } from "./utils/utc-timestamp.ts";
@@ -160,15 +158,7 @@ type IntegrationMode = "mcp" | "cli" | "none";
 const CONFIG_GET_KEYS = [
 	"defaultEditor",
 	"projectName",
-	"defaultAssignee",
-	"defaultStatus",
-	"statuses",
-	"labels",
-	"priorities",
-	"types",
-	"projects",
 	"milestones",
-	"definitionOfDone",
 	"dateFormat",
 	"maxColumnWidth",
 	"defaultPort",
@@ -185,8 +175,6 @@ const CONFIG_GET_KEYS = [
 const CONFIG_SET_KEYS = [
 	"defaultEditor",
 	"projectName",
-	"defaultAssignee",
-	"defaultStatus",
 	"dateFormat",
 	"maxColumnWidth",
 	"autoOpenBrowser",
@@ -312,6 +300,9 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	if (message.startsWith("Invalid index:")) {
 		return `${message} Try 'backlog ${commandKind} edit ${taskId} --help' for index options.`;
 	}
+	if (/^Section '[^']+' has no item #\d+\.$/.test(message)) {
+		return `${message}\nRun 'backlog ${commandKind} view ${taskId} --plain' to inspect indexes, or 'backlog ${commandKind} edit ${taskId} --help' for edit options.`;
+	}
 	if (
 		message.includes(" not found") &&
 		(message.startsWith("Acceptance criterion ") || message.startsWith("Definition of Done item "))
@@ -321,13 +312,22 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 	return message;
 }
 
-function formatPlainTaskListRow(task: Task, options: { includeStatus?: boolean } = {}): string {
-	const priorityIndicator = task.priority ? `[${task.priority.toUpperCase()}] ` : "";
-	const typeIndicator = task.type ? `[${task.type}] ` : "";
-	const statusIndicator = options.includeStatus && task.status ? ` (${task.status})` : "";
+function formatPlainTaskListRow(
+	task: Task,
+	options: { includeStatus?: boolean; showFields?: string[]; registry?: FieldRegistry } = {},
+): string {
+	const registry = options.registry ?? new FieldRegistry(getDefaultTaskSchema());
+	const priority = registry.getField(task, "priority");
+	const type = registry.getField(task, "type");
+	const status = registry.getField(task, "status");
+	const due = registry.getField(task, "due_date");
+	const priorityIndicator = typeof priority === "string" ? `[${priority.toUpperCase()}] ` : "";
+	const typeIndicator = typeof type === "string" ? `[${type}] ` : "";
+	const statusIndicator = options.includeStatus && status ? ` (${status})` : "";
 	const acceptanceCriteria = formatAcceptanceCriteriaSummarySuffix(task);
-	const dueDate = task.dueDate ? ` (due ${formatUtcDateForDisplay(task.dueDate)})` : "";
-	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}`;
+	const dueDate = typeof due === "string" ? ` (due ${formatUtcDateForDisplay(due)})` : "";
+	const fields = options.showFields?.length ? ` ${formatPlainTaskListFields(task, options.showFields, registry)}` : "";
+	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
 }
 
 async function normalizeCliStatusList(core: Core, values: string[], optionName: string): Promise<string[] | null> {
@@ -343,45 +343,35 @@ async function normalizeCliStatusList(core: Core, values: string[], optionName: 
 }
 
 async function normalizeCliPriority(core: Core, value: string): Promise<string | null> {
-	const config = await core.filesystem.loadConfig();
-	const normalized = resolvePriorityValue(value, config);
-	if (!normalized) {
-		console.error(`Invalid priority: ${value}. Valid values are: ${formatValidPriorityValues(config)}`);
+	try {
+		return new FieldRegistry(core.filesystem.taskSchema).parseInput("priority", value) as string;
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
 		return null;
 	}
-	return normalized;
 }
 
-async function normalizeCliTaskTypes(core: Core, values: string[], optionName: string): Promise<string[] | null> {
-	const config = await core.filesystem.loadConfig();
-	const { values: canonicalTypes, invalid } = resolveTaskTypeValues(values, config);
-	if (invalid.length > 0) {
-		console.error(
-			`Invalid ${optionName}: ${invalid.join(", ")}. Valid types are: ${formatValidTaskTypeValues(config)}`,
-		);
+async function normalizeCliTaskTypes(core: Core, values: string[], _optionName: string): Promise<string[] | null> {
+	try {
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		return values.map((value) => registry.parseInput("type", value) as string);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
 		return null;
 	}
-	return canonicalTypes;
 }
 
-async function normalizeCliProjects(core: Core, values: string[], optionName: string): Promise<string[] | null> {
-	const config = await core.filesystem.loadConfig();
-	if (getProjectValues(config).length === 0) {
-		console.error(noProjectsConfiguredMessage(core.filesystem.configFilePath));
+async function normalizeCliProjects(core: Core, values: string[], _optionName: string): Promise<string[] | null> {
+	try {
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		return values.map((value) => registry.parseInput("project", value) as string);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
 		return null;
 	}
-	const { values: canonicalProjects, invalid } = resolveProjectValues(values, config);
-	if (invalid.length > 0) {
-		console.error(
-			`Invalid ${optionName}: ${invalid.join(", ")}. Valid projects are: ${formatValidProjectValues(config)}`,
-		);
-		process.exitCode = 1;
-		return null;
-	}
-	return canonicalProjects;
 }
 
 function formatToolResultText(result: CallToolResult): string {
@@ -587,12 +577,16 @@ function hasCreateFieldFlags(options: Record<string, unknown>): boolean {
 	return Boolean(
 		options.description !== undefined ||
 			options.desc !== undefined ||
+			options.section !== undefined ||
+			options.addItem !== undefined ||
 			options.assignee !== undefined ||
 			options.status !== undefined ||
+			options.reporter !== undefined ||
 			options.labels !== undefined ||
 			options.priority !== undefined ||
 			options.type !== undefined ||
 			options.project !== undefined ||
+			options.field !== undefined ||
 			options.ordinal !== undefined ||
 			options.milestone !== undefined ||
 			options.dueDate !== undefined ||
@@ -619,12 +613,23 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 		options.title !== undefined ||
 			options.description !== undefined ||
 			options.desc !== undefined ||
+			options.section !== undefined ||
+			options.appendSection !== undefined ||
+			options.addItem !== undefined ||
+			options.check !== undefined ||
+			options.uncheck !== undefined ||
+			options.removeItem !== undefined ||
 			options.assignee !== undefined ||
 			options.status !== undefined ||
+			options.reporter !== undefined ||
 			options.label !== undefined ||
 			options.priority !== undefined ||
 			options.type !== undefined ||
 			options.project !== undefined ||
+			options.field !== undefined ||
+			options.clearField !== undefined ||
+			options.add !== undefined ||
+			options.remove !== undefined ||
 			options.ordinal !== undefined ||
 			options.milestone !== undefined ||
 			options.clearMilestone ||
@@ -668,6 +673,106 @@ function hasEditFieldFlags(options: Record<string, unknown>): boolean {
 	);
 }
 
+function parseCustomFieldFlags(raw: unknown): Record<string, string> {
+	const fields: Record<string, string> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.indexOf("=");
+		if (separator <= 0) throw new Error(`Invalid --field "${entry}". Use --field key=value.`);
+		const name = entry.slice(0, separator).trim();
+		if (!name) throw new Error(`Invalid --field "${entry}". Use --field key=value.`);
+		fields[name] = entry.slice(separator + 1);
+	}
+	return fields;
+}
+
+function parseSectionAssignments(raw: unknown, flag: string): Record<string, string[]> {
+	const sections: Record<string, string[]> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.indexOf("=");
+		if (separator <= 0) throw new Error(`Invalid ${flag} "${entry}". Use ${flag} id=text.`);
+		const id = entry.slice(0, separator).trim();
+		sections[id] ??= [];
+		sections[id].push(entry.slice(separator + 1));
+	}
+	return sections;
+}
+
+function parseSectionIndices(raw: unknown, flag: string): Record<string, number[]> {
+	const sections: Record<string, number[]> = {};
+	for (const entry of toStringArray(raw)) {
+		const separator = entry.lastIndexOf(":");
+		const id = entry.slice(0, separator).trim();
+		const index = Number(entry.slice(separator + 1));
+		if (separator <= 0 || !Number.isInteger(index) || index < 1) {
+			throw new Error(`Invalid ${flag} "${entry}". Use ${flag} id:n with a 1-based index.`);
+		}
+		sections[id] ??= [];
+		sections[id].push(index);
+	}
+	return sections;
+}
+
+const REMOVED_SECTION_FLAGS: ReadonlyArray<[string, string]> = [
+	["ac", "--add-item acceptance=text"],
+	["acceptanceCriteria", "--add-item acceptance=text"],
+	["clearAc", "--remove-item acceptance:n for each item"],
+	["checkAc", "--check acceptance:n"],
+	["uncheckAc", "--uncheck acceptance:n"],
+	["removeAc", "--remove-item acceptance:n"],
+	["dod", "--add-item <section>=text"],
+	["checkDod", "--check <section>:n"],
+	["uncheckDod", "--uncheck <section>:n"],
+	["removeDod", "--remove-item <section>:n"],
+	["dodDefaults", "task-schema.yml sections"],
+	["plan", "--section <id>=text"],
+	["appendPlan", "--append-section <id>=text"],
+	["notes", "--section <id>=text"],
+	["appendNotes", "--append-section <id>=text"],
+	["finalSummary", "--section <id>=text"],
+	["appendFinalSummary", "--append-section <id>=text"],
+	["clearFinalSummary", "--section <id>="],
+];
+
+function rejectRemovedSectionFlags(options: OptionValues): void {
+	for (const [name, replacement] of REMOVED_SECTION_FLAGS) {
+		if (name === "dodDefaults" ? options[name] === false : options[name] !== undefined && options[name] !== false) {
+			const flag = `--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+			throw new Error(`${flag} was removed. Use ${replacement}.`);
+		}
+	}
+}
+
+/** Translate task field shortcuts into the same raw assignments accepted by --field. */
+function shortcutFieldAssignments(options: OptionValues): Record<string, string> {
+	const assignments: Record<string, string> = {};
+	const scalar: Array<[string, unknown]> = [
+		["status", options.status],
+		["priority", options.priority],
+		["type", options.type],
+		["project", options.project],
+		["milestone", options.milestone],
+		["parent_task_id", options.parent],
+		["due_date", options.dueDate],
+		["reporter", options.reporter],
+		["ordinal", options.ordinal],
+	];
+	for (const [key, value] of scalar) if (value !== undefined) assignments[key] = String(value);
+	const lists: Array<[string, unknown]> = [
+		["assignee", options.assignee],
+		["labels", options.labels ?? options.label],
+		["dependencies", [...toStringArray(options.dependsOn), ...toStringArray(options.dep)]],
+	];
+	for (const [key, value] of lists) {
+		if (value === undefined || (key === "dependencies" && (value as string[]).length === 0)) continue;
+		assignments[key] = toStringArray(value).join(",");
+	}
+	return assignments;
+}
+
+function allFieldAssignments(options: OptionValues): Record<string, string> {
+	return { ...shortcutFieldAssignments(options), ...parseCustomFieldFlags(options.field) };
+}
+
 /**
  * Flags whose value cannot mean the same thing across a batch. A title, a body section, or a
  * 1-based checklist index belongs to one task, so `task edit` rejects them once the user passes
@@ -677,6 +782,12 @@ const PER_TASK_ONLY_EDIT_FLAGS: ReadonlyArray<{ option: string; flag: string }> 
 	{ option: "title", flag: "--title" },
 	{ option: "description", flag: "--description" },
 	{ option: "desc", flag: "--desc" },
+	{ option: "section", flag: "--section" },
+	{ option: "appendSection", flag: "--append-section" },
+	{ option: "addItem", flag: "--add-item" },
+	{ option: "check", flag: "--check" },
+	{ option: "uncheck", flag: "--uncheck" },
+	{ option: "removeItem", flag: "--remove-item" },
 	{ option: "plan", flag: "--plan" },
 	{ option: "appendPlan", flag: "--append-plan" },
 	{ option: "notes", flag: "--notes" },
@@ -686,7 +797,6 @@ const PER_TASK_ONLY_EDIT_FLAGS: ReadonlyArray<{ option: string; flag: string }> 
 	{ option: "clearFinalSummary", flag: "--clear-final-summary" },
 	{ option: "comment", flag: "--comment" },
 	{ option: "commentAuthor", flag: "--comment-author" },
-	{ option: "ordinal", flag: "--ordinal" },
 	{ option: "modifiedFile", flag: "--modified-file" },
 	{ option: "removeAc", flag: "--remove-ac" },
 	{ option: "checkAc", flag: "--check-ac" },
@@ -864,7 +974,6 @@ function getDefaultAdvancedConfig(existingConfig?: BacklogConfig | null): Partia
 		autoCommit: existingConfig?.autoCommit ?? false,
 		zeroPaddedIds: existingConfig?.zeroPaddedIds,
 		defaultEditor: existingConfig?.defaultEditor,
-		definitionOfDone: existingConfig?.definitionOfDone ? [...existingConfig.definitionOfDone] : undefined,
 		defaultPort: existingConfig?.defaultPort ?? 6420,
 		autoOpenBrowser: existingConfig?.autoOpenBrowser ?? true,
 	};
@@ -896,6 +1005,8 @@ async function requireProjectRoot(): Promise<string> {
 		console.error("No Backlog.md project found. Run `backlog init` to initialize.");
 		process.exit(1);
 	}
+	// Fail before command-specific lookups or mutations when the project schema is unusable.
+	void new Core(root).filesystem.taskSchema;
 	return root;
 }
 
@@ -1066,6 +1177,61 @@ program
 	.version(version, "-v, --version", "display version number")
 	.showSuggestionAfterError()
 	.showHelpAfterError("Run with --help to see accepted fields and examples.");
+
+const schemaCommand = addHelpSchema(program.command("schema"), {
+	reads: "Task field, user, section, and UI definitions from task-schema.yml",
+	required: [],
+	optional: [{ name: "json", type: "Boolean", description: "Print the complete schema as JSON" }],
+	output: "The complete task schema",
+	examples: ["backlog schema", "backlog schema --json", "backlog schema validate"],
+})
+	.description("show the configured task schema")
+	.option("--json", "print the complete schema as JSON")
+	.action(async (options: { json?: boolean }) => {
+		const root = await requireProjectRoot();
+		const filesystem = new Core(root).filesystem;
+		const schema = loadTaskSchema(filesystem.backlogDir, filesystem.configFilePath);
+		if (options.json) {
+			printJson({ schemaVersion: 2, kind: "schema", ...schema });
+			return;
+		}
+		console.log("Users:");
+		for (const user of schema.users) console.log(`  ${user.handle}: ${user.name}${user.default ? " (default)" : ""}`);
+		if (schema.users.length === 0) console.log("  Any handle is allowed");
+		console.log("Fields:");
+		for (const [key, definition] of Object.entries(schema.fields))
+			console.log(`  ${key}: ${JSON.stringify(definition)}`);
+		console.log("Sections:");
+		for (const [key, definition] of Object.entries(schema.sections))
+			console.log(`  ${key}: ${JSON.stringify(definition)}`);
+		console.log(`UI: ${JSON.stringify(schema.ui)}`);
+	});
+
+schemaCommand
+	.command("validate")
+	.description("validate the schema and every stored task")
+	.action(async () => {
+		const root = await requireProjectRoot();
+		const filesystem = new Core(root).filesystem;
+		const schema = loadTaskSchema(filesystem.backlogDir, filesystem.configFilePath);
+		const issues = validateTaskFiles(filesystem.backlogDir, schema);
+		if (issues.length) {
+			for (const issue of issues) console.error(`${issue.key}: ${issue.message}`);
+			process.exitCode = 1;
+			return;
+		}
+		console.log("Task schema and stored task fields are valid.");
+	});
+
+program
+	.command("fields", { hidden: true })
+	.allowUnknownOption()
+	.action(() => {
+		console.error(
+			"backlog fields was removed. Use backlog schema instead; edit backlog/task-schema.yml to configure fields.",
+		);
+		process.exitCode = 1;
+	});
 
 addHelpSchema(program.command("init [projectName]"), {
 	required: [],
@@ -1766,7 +1932,6 @@ addHelpSchema(program.command("init [projectName]"), {
 						autoCommit: advancedConfig.autoCommit,
 						zeroPaddedIds: advancedConfig.zeroPaddedIds,
 						defaultEditor: advancedConfig.defaultEditor,
-						definitionOfDone: advancedConfig.definitionOfDone,
 						defaultPort: advancedConfig.defaultPort,
 						autoOpenBrowser: advancedConfig.autoOpenBrowser,
 						taskPrefix: taskPrefix || undefined,
@@ -1863,11 +2028,7 @@ addHelpSchema(program.command("init [projectName]"), {
 					if (config.defaultEditor) {
 						summaryLines.push(`  ${label("Default editor:")} ${config.defaultEditor}`);
 					}
-					summaryLines.push(
-						`  ${label("Definition of Done defaults:")} ${
-							(config.definitionOfDone ?? []).length > 0 ? config.definitionOfDone?.join(" | ") : muted("none")
-						}`,
-					);
+					summaryLines.push();
 				} else {
 					summaryLines.push(`${label("Advanced settings:")} ${muted("unchanged (run `backlog config` to customize)")}`);
 				}
@@ -1972,7 +2133,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 			name: "assignee",
 			type: "Comma-separated strings",
 			description:
-				'Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the configured defaultAssignee, while -a "" leaves the task unassigned',
+				'Assign one or more @names; repeat -a or use @name1,@name2; omitting it applies the schema default user, while -a "" leaves the task unassigned',
 		},
 		{
 			name: "labels",
@@ -1982,33 +2143,27 @@ addHelpSchema(taskCmd.command("create [title]"), {
 		{ name: "priority", type: priorityType, description: "Task priority" },
 		{ name: "type", type: taskType, description: "Task type; case-insensitive" },
 		{ name: "project", type: projectType, description: "Task project; case-insensitive" },
+		{ name: "field", type: "key=value", description: "Set any editable schema field; repeatable" },
 		{ name: "due-date", type: "date", description: "Optional due date (YYYY-MM-DD)" },
-		{ name: "acceptanceCriteria", type: "Markdown list item text", description: "Repeat --ac for multiple criteria" },
+		{ name: "section", type: "id=text", description: "Set a configured Markdown section; repeatable" },
+		{ name: "add-item", type: "id=text", description: "Add a configured checklist item; repeatable" },
+		{ name: "author", type: "User handle", description: "Acting user for automatic change log entries" },
 		{ name: "ordinal", type: "Integer", description: "Non-negative manual ordering value" },
 		{ name: "parent", type: "Task ID", description: "Existing parent task for subtasks; not a milestone ID" },
-		{
-			name: "plan",
-			type: "Markdown",
-			description:
-				"Only for already-started work created directly in a configured active status (for example, In Progress)",
-		},
-		{ name: "notes", type: "Markdown", description: "Same restriction as plan" },
-		{
-			name: "final-summary",
-			type: "Markdown",
-			description: "Only for finished, verified work created directly in a configured terminal status",
-		},
 	],
 	writes: "Creates a task or draft markdown file through Backlog.md",
 	output: "Created task details; use --plain for text output",
 	examples: [
-		'backlog task create "Add OAuth" --ac "Login succeeds"',
+		'backlog task create "Add OAuth" --add-item acceptance="Login succeeds"',
 		`backlog task create "Fix session expiry" --type ${TASK_TYPE_EXAMPLE}`,
 		'backlog task create -p {{TASK_ID:1}} "Add tests"',
 	],
 })
 	.option("-d, --description <text>", "task description")
 	.option("--desc <text>", "alias for --description")
+	.option("--section <id=text>", "set a markdown section (repeatable)", createMultiValueAccumulator())
+	.option("--add-item <id=text>", "add a checklist item (repeatable)", createMultiValueAccumulator())
+	.option("--author <handle>", "acting user for automatic change log entries")
 	.option(
 		"-a, --assignee <assignees>",
 		'assign task to one or more @names (comma-separated or repeatable); pass "" to leave it unassigned',
@@ -2019,7 +2174,9 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--priority <priority>", "set task priority (configured priorities)")
 	.option("--type <type>", "set task type (configured task types)")
 	.option("--project <project>", "set task project (configured projects)")
+	.option("--field <key=value>", "set a declared task field (repeatable)", createMultiValueAccumulator())
 	.option("--due-date <date>", "set due date (YYYY-MM-DD)")
+	.option("--reporter <handle>", "set task reporter")
 	.option("--plain", "use plain text output after creating")
 	.option("--ac <criteria>", "add acceptance criteria (can be used multiple times)", createMultiValueAccumulator())
 	.option(
@@ -2036,7 +2193,7 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	.option("--notes <text>", "add implementation notes")
 	.option("--final-summary <text>", "add final summary")
 	.option("--ordinal <number>", "set task ordinal for custom ordering")
-	.option("-m, --milestone <milestone>", "assign task to milestone by ID or title")
+	.option("-m, --milestone <milestone>", "assign task to milestone by ID")
 	.option("--draft")
 	.option("-p, --parent <taskId>", "specify existing parent task ID, not a milestone ID")
 	.option(
@@ -2073,7 +2230,10 @@ addHelpSchema(taskCmd.command("create [title]"), {
 	)
 	.action(async (title: string | undefined, options) => {
 		const shouldUseWizard = hasInteractiveTTY && title === undefined && !hasCreateFieldFlags(options);
-		if (!shouldUseWizard && (title === undefined || title.trim().length === 0)) {
+		const hasFieldTitle = toStringArray(options.field).some(
+			(entry) => entry.startsWith("title=") && entry.slice(6).trim(),
+		);
+		if (!shouldUseWizard && (title === undefined || title.trim().length === 0) && !hasFieldTitle) {
 			printMissingRequiredArgument("title");
 			return;
 		}
@@ -2084,12 +2244,11 @@ addHelpSchema(taskCmd.command("create [title]"), {
 
 		if (shouldUseWizard) {
 			const statuses = await getValidStatuses(core);
-			const config = await core.filesystem.loadConfig();
 			const wizardInput = await runTaskCreateWizard({
 				statuses,
-				priorities: config?.priorities,
-				types: config?.types,
-				projects: config?.projects,
+				priorities: core.filesystem.taskSchema.fields.priority?.values,
+				types: core.filesystem.taskSchema.fields.type?.values,
+				projects: core.filesystem.taskSchema.fields.project?.values,
 			});
 			if (!wizardInput) {
 				clack.cancel("Task create cancelled.");
@@ -2110,58 +2269,49 @@ addHelpSchema(taskCmd.command("create [title]"), {
 
 		const createAsDraft = Boolean(options.draft);
 		const usePlainOutput = isPlainRequested(options);
-		let ordinalValue: number | undefined;
-
-		if (options.ordinal !== undefined) {
-			const parsed = Number(options.ordinal);
-			if (!Number.isFinite(parsed) || parsed < 0) {
-				console.error(`Invalid ordinal: ${options.ordinal}. Must be a non-negative number.`);
-				process.exitCode = 1;
-				return;
-			}
-			ordinalValue = parsed;
-		}
-
-		const listFlagError = validateTaskListFlags(options, { supportsClearFlags: false });
+		const listFlagError = validateTaskListFlags(
+			{ ...options, dep: undefined, dependsOn: undefined },
+			{ supportsClearFlags: false },
+		);
 		if (listFlagError) {
 			console.error(listFlagError);
 			process.exitCode = 1;
 			return;
 		}
 
-		const dependencies = parseDelimitedStringList([...toStringArray(options.dependsOn), ...toStringArray(options.dep)]);
-
 		try {
-			const criteria = processAcceptanceCriteriaOptions(options);
-			const milestone =
-				typeof options.milestone === "string" ? await resolveCliMilestoneInput(core, options.milestone) : undefined;
-			const { task, filePath } = await core.createTaskFromInput({
+			rejectRemovedSectionFlags(options);
+			const sections = Object.fromEntries(
+				Object.entries(parseSectionAssignments(options.section, "--section")).map(([id, values]) => [
+					id,
+					values.at(-1) ?? "",
+				]),
+			);
+			if (options.description !== undefined || options.desc !== undefined) {
+				sections.description = String(options.description ?? options.desc);
+			}
+			const fieldAssignments = allFieldAssignments(options);
+			const schema = core.filesystem.taskSchema;
+			const createInput: TaskCreateInput = {
 				title: title ?? "",
-				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
-				status: createAsDraft ? "Draft" : options.status ? String(options.status) : undefined,
-				dueDate: typeof options.dueDate === "string" ? options.dueDate : undefined,
-				assignee: parseClearableStringList(options.assignee),
-				labels: parseDelimitedStringList(options.labels),
-				dependencies,
+				...(options.author !== undefined && { actingUser: String(options.author) }),
+				sections,
+				sectionItems: parseSectionAssignments(options.addItem, "--add-item"),
+				status: createAsDraft ? "Draft" : undefined,
 				references: parseDelimitedStringList(options.ref),
 				documentation: parseDelimitedStringList(options.doc),
 				modifiedFiles: parseDelimitedStringList(options.modifiedFile),
-				parentTaskId: options.parent ? String(options.parent) : undefined,
-				priority: options.priority ? String(options.priority) : undefined,
-				type: options.type !== undefined ? String(options.type) : undefined,
-				project: options.project !== undefined ? String(options.project) : undefined,
-				...(ordinalValue !== undefined ? { ordinal: ordinalValue } : {}),
-				milestone,
-				implementationPlan: options.plan ? String(options.plan) : undefined,
-				implementationNotes: options.notes ? String(options.notes) : undefined,
-				finalSummary: options.finalSummary ? String(options.finalSummary) : undefined,
-				acceptanceCriteria: criteria.map((text) => ({ text, checked: false })),
-				definitionOfDoneAdd: toStringArray(options.dod),
-				disableDefinitionOfDoneDefaults: options.dodDefaults === false,
-			});
+			};
+			const preparedInput = applyCreateFieldAssignments(new FieldRegistry(schema), createInput, fieldAssignments);
+			const { task, filePath } = await core.createTaskFromInput(preparedInput);
 
 			if (usePlainOutput) {
-				console.log(formatTaskPlainText(await loadTaskDetail(core, task), { filePathOverride: filePath }));
+				console.log(
+					formatTaskPlainText(await loadTaskDetail(core, task), {
+						filePathOverride: filePath,
+						registry: new FieldRegistry(schema),
+					}),
+				);
 				return;
 			}
 
@@ -2383,7 +2533,15 @@ addListWindowOptions(searchCommand)
 				return;
 			}
 			const page = selectListWindow(printed, listWindow);
-			printJson(searchJson(await projectSearchTaskRows(core, page.items), cwd, core.filesystem.docsDir, page));
+			printJson(
+				searchJson(
+					await projectSearchTaskRows(core, page.items),
+					cwd,
+					core.filesystem.docsDir,
+					page,
+					new FieldRegistry(core.filesystem.taskSchema),
+				),
+			);
 			cleanup();
 			return;
 		}
@@ -2607,19 +2765,25 @@ function isDocumentSearchResult(result: SearchResult): result is DocumentSearchR
  * Prints the sections of a plain task list: each status under its heading, or the one section of
  * a flat priority list under its own heading with the status on every row.
  */
-function printTaskSections(tasks: Task[], sortField: string | undefined, statuses: string[]): void {
+function printTaskSections(
+	tasks: Task[],
+	sortField: string | undefined,
+	statuses: string[],
+	showFields: string[] = [],
+	registry?: FieldRegistry,
+): void {
 	// Use the stdout stream, as JSON output does, so pending pipe writes keep the CLI alive.
 	for (const section of sectionTasks(tasks, sortField, statuses)) {
 		if (section.status === null) {
-			process.stdout.write("Tasks (sorted by priority):\n");
+			process.stdout.write(`Tasks (sorted by ${sortField ?? "priority"}):\n`);
 			for (const task of section.tasks) {
-				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true })}\n`);
+				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields, registry })}\n`);
 			}
 			continue;
 		}
 		process.stdout.write(`${section.status || "No Status"}:\n`);
 		for (const task of section.tasks) {
-			process.stdout.write(`${formatPlainTaskListRow(task)}\n`);
+			process.stdout.write(`${formatPlainTaskListRow(task, { showFields, registry })}\n`);
 		}
 		process.stdout.write("\n");
 	}
@@ -2635,6 +2799,8 @@ async function runTaskList(
 	const { outputMode, listWindow } = listOutput;
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
+	const taskSchema = core.filesystem.taskSchema;
+	const registry = new FieldRegistry(taskSchema);
 	const hasDuplicateIds = await printDuplicateIntegrityWarning(core);
 	const cleanup = () => {
 		core.disposeSearchService();
@@ -2651,6 +2817,26 @@ async function runTaskList(
 		return;
 	}
 	const baseFilters: TaskListFilter = {};
+	let schemaConditions: ReturnType<FieldRegistry["parseCondition"]>[] = [];
+	try {
+		schemaConditions = toStringArray(options.where).map((expression) => registry.parseCondition(expression));
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		cleanup();
+		return;
+	}
+	const showFields = parseDelimitedStringList(options.showFields) ?? [];
+	for (const name of showFields) {
+		if (!Object.hasOwn(taskSchema.fields, name)) {
+			console.error(
+				`Unknown task field "${name}" in --show-fields. Declared fields: ${Object.keys(taskSchema.fields).join(", ")}`,
+			);
+			process.exitCode = 1;
+			cleanup();
+			return;
+		}
+	}
 	if (options.status) {
 		baseFilters.status = parseDelimitedStringList(options.status) ?? options.status;
 	}
@@ -2735,9 +2921,11 @@ async function runTaskList(
 	}
 
 	if (options.sort) {
-		const sortField = options.sort.toLowerCase();
-		if (!TASK_SORT_FIELDS.includes(sortField)) {
-			console.error(`Invalid sort field: ${options.sort}. Valid values are: ${TASK_SORT_FIELD_LIST}`);
+		const [sortField, direction = "asc"] = String(options.sort).split(":");
+		if (!sortField || !taskSchema.fields[sortField] || !["asc", "desc"].includes(direction)) {
+			console.error(
+				`Invalid sort field: ${options.sort}. Valid values are: ${Object.keys(taskSchema.fields).join(", ")}`,
+			);
 			process.exitCode = 1;
 			cleanup();
 			return;
@@ -2759,20 +2947,30 @@ async function runTaskList(
 			baseFilters.parentTaskId = resolvedParentId;
 		}
 
-		const tasks = await core.queryTasks({
+		const queriedTasks = await core.queryTasks({
 			query: searchQuery || undefined,
 			filters: Object.keys(baseFilters).length > 0 ? baseFilters : undefined,
 			includeCrossBranch: false,
 		});
-		const config = await core.filesystem.loadConfig();
-
+		const tasks = queriedTasks.filter((task) =>
+			schemaConditions.every((condition) => registry.matches(task, condition)),
+		);
 		// Ordering, the parent narrowing and the limit are the same whatever the rows carry, so the
 		// readiness projection below travels through them instead of being derived twice.
 		const parentFilter = resolvedParentId;
 		// The sort was validated above, before any task was read. Without one, sortTasks uses the
 		// default order of every task list.
 		const narrowForDisplay = <T extends Task>(rows: T[]): T[] => {
-			const sorted = sortTasks(rows, options.sort, config?.priorities);
+			const sorted = options.sort
+				? [...rows].sort((a, b) => {
+						const [key = "", direction = "asc"] = String(options.sort).split(":");
+						const left = registry.getField(a, key);
+						const right = registry.getField(b, key);
+						if (left === undefined || right === undefined) return registry.compare(key, left, right);
+						const order = registry.compare(key, left, right);
+						return order === 0 ? a.id.localeCompare(b.id) : direction === "desc" ? -order : order;
+					})
+				: sortTasks(rows, options.sort, taskSchema.fields.priority?.values, registry);
 			const narrowed = parentFilter
 				? sorted.filter((task) => task.parentTaskId && taskIdsEqual(parentFilter, task.parentTaskId))
 				: sorted;
@@ -2788,7 +2986,7 @@ async function runTaskList(
 		const readyRows = options.ready ? readinessRows.filter((row) => row.isReady) : readinessRows;
 		if (outputMode === "json") {
 			const page = selectListWindow(narrowForDisplay(readyRows), listWindow);
-			emitJson(taskListJson(page.items, page));
+			emitJson(taskListJson(page.items, page, registry));
 			cleanup();
 			return;
 		}
@@ -2796,7 +2994,7 @@ async function runTaskList(
 
 		// The window is taken from the sorted list, as it is for JSON, so both formats select the same
 		// tasks. Only the selected tasks are then split into the sections plain output prints.
-		const statuses = config?.statuses || [];
+		const statuses = taskSchema.fields.status?.values ?? [];
 		printListWindow(displayTasks, listWindow, (windowTasks) => {
 			if (windowTasks.length === 0) {
 				if (resolvedParentId) {
@@ -2806,7 +3004,7 @@ async function runTaskList(
 				}
 				return;
 			}
-			printTaskSections(windowTasks, options.sort, statuses);
+			printTaskSections(windowTasks, options.sort, statuses, showFields, registry);
 		});
 		cleanup();
 		return;
@@ -2901,14 +3099,12 @@ async function runTaskList(
 	// Assignee and parent stay loader filters because the view has no control for them.
 	// Project deliberately does not: it travels in initialUnifiedFilter instead, so the
 	// picker can widen it again. Loading a project-narrowed set would make that a no-op.
-	const prefiltersDisplayList = Object.keys(interactiveLoaderFilters).length > 0;
+	const prefiltersDisplayList = Object.keys(interactiveLoaderFilters).length > 0 || schemaConditions.length > 0;
 	await runUnifiedView({
 		core,
 		initialView: "task-list",
 		tasksLoader: async (updateProgress) => {
 			updateProgress("Loading configuration...");
-			const config = await core.filesystem.loadConfig();
-
 			updateProgress("Loading local tasks...");
 			const tasks = await core.queryTasks({
 				filters: Object.keys(interactiveLoaderFilters).length > 0 ? interactiveLoaderFilters : undefined,
@@ -2922,10 +3118,11 @@ async function runTaskList(
 
 			return {
 				// The view orders these rows itself, from the sort in the filter below.
-				tasks: resolvedParentId
+				tasks: (resolvedParentId
 					? tasks.filter((task) => task.parentTaskId && taskIdsEqual(resolvedParentId, task.parentTaskId))
-					: tasks,
-				statuses: config?.statuses || [],
+					: tasks
+				).filter((task) => schemaConditions.every((condition) => registry.matches(task, condition))),
+				statuses: taskSchema.fields.status?.values ?? [],
 				// The filters above narrow what is displayed. Dependency readiness must still see
 				// every task, or a dependency assigned to someone else reads as unknown.
 				readinessTasks: prefiltersDisplayList ? await core.queryTasks({ includeCrossBranch: false }) : undefined,
@@ -2969,6 +3166,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 			type: () => projectType({ multiple: true }),
 			description: "Filter by one or more configured projects; repeat or comma-separate values",
 		},
+		{ name: "where", type: "key<op>value", description: "Filter a declared schema field; repeat for AND" },
+		{ name: "show-fields", type: "k1,k2", description: "Append selected schema fields to --plain task rows" },
 		{
 			name: "labels",
 			type: "Comma-separated strings",
@@ -3031,6 +3230,8 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 		"filter tasks by configured project (repeatable or comma-separated)",
 		createMultiValueAccumulator(),
 	)
+	.option("--where <expr>", "filter a declared schema field (repeatable; AND)", createMultiValueAccumulator())
+	.option("--show-fields <names>", "append comma-separated schema fields to plain task rows")
 	.option(
 		"-l, --labels <labels>",
 		"filter tasks by labels; require every comma-separated label (repeatable)",
@@ -3065,6 +3266,8 @@ addListWindowOptions(taskListCommand)
 			filesystem.milestonesDir,
 			filesystem.archiveMilestonesDir,
 			filesystem.configFilePath,
+			join(filesystem.backlogDir, "task-schema.yml"),
+			join(filesystem.backlogDir, "fields.yml"),
 		];
 		await watchJson([filesystem.backlogDir, dirname(filesystem.configFilePath)], inputs, async () => {
 			let result: string | undefined;
@@ -3184,7 +3387,8 @@ async function runEditCommand(target: EditCommandTarget, requestedIds: string[] 
 	}
 }
 
-async function performEdit(target: EditCommandTarget, requestedIds: string[] | undefined, options: OptionValues) {
+async function performEdit(target: EditCommandTarget, requestedIds: string[] | undefined, rawOptions: OptionValues) {
+	let options = rawOptions;
 	// Listing the same task twice is a slip, not a request to edit it twice, so identities that
 	// compare equal collapse to the first spelling the user typed. Canonical identity keeps a bare
 	// number on the default prefix, so "7" cannot swallow an explicit "JIRA-7".
@@ -3224,6 +3428,121 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
+	const schemaFieldChanges: Pick<
+		TaskUpdateInput,
+		"schemaFields" | "clearSchemaFields" | "addSchemaFields" | "removeSchemaFields"
+	> = {};
+	const sectionChanges: TaskUpdateInput = {};
+	try {
+		rejectRemovedSectionFlags(options);
+		const sectionSets = parseSectionAssignments(options.section, "--section");
+		const setSections = Object.fromEntries(
+			Object.entries(sectionSets).map(([id, values]) => [id, values.at(-1) ?? ""]),
+		);
+		if (options.description !== undefined || options.desc !== undefined) {
+			setSections.description = String(options.description ?? options.desc);
+		}
+		if (Object.keys(setSections).length > 0) sectionChanges.setSections = setSections;
+		const appendSections = parseSectionAssignments(options.appendSection, "--append-section");
+		if (Object.keys(appendSections).length > 0) sectionChanges.appendSections = appendSections;
+		const addSectionItems = parseSectionAssignments(options.addItem, "--add-item");
+		if (Object.keys(addSectionItems).length > 0) sectionChanges.addSectionItems = addSectionItems;
+		const checkSectionItems = parseSectionIndices(options.check, "--check");
+		if (Object.keys(checkSectionItems).length > 0) sectionChanges.checkSectionItems = checkSectionItems;
+		const uncheckSectionItems = parseSectionIndices(options.uncheck, "--uncheck");
+		if (Object.keys(uncheckSectionItems).length > 0) sectionChanges.uncheckSectionItems = uncheckSectionItems;
+		const removeSectionItems = parseSectionIndices(options.removeItem, "--remove-item");
+		if (Object.keys(removeSectionItems).length > 0) sectionChanges.removeSectionItems = removeSectionItems;
+		const commentEntries = toStringArray(options.comment);
+		if (commentEntries.length > 0) {
+			sectionChanges.appendLogs = commentEntries.map((body) => ({
+				body,
+				...(options.author || options.commentAuthor ? { author: String(options.author ?? options.commentAuthor) } : {}),
+				...(options.date ? { date: String(options.date) } : {}),
+			}));
+		}
+		if (options.author !== undefined) sectionChanges.actingUser = String(options.author);
+		const schema = core.filesystem.taskSchema;
+		{
+			const registry = new FieldRegistry(schema);
+			if (options.label !== undefined && (options.addLabel !== undefined || options.removeLabel !== undefined))
+				throw new Error(
+					"Cannot combine --label with --add-label or --remove-label. Use one labels operation per edit.",
+				);
+			for (const [key, raw] of Object.entries(allFieldAssignments(options))) {
+				const field = schema.fields[key];
+				if (field?.managed && key !== "ordinal") throw new Error(`Task field "${key}" is managed by Backlog`);
+				if (!schemaFieldChanges.schemaFields) schemaFieldChanges.schemaFields = {};
+				if (target.label === "Draft" && key === "status") {
+					if (raw.trim().toLowerCase() !== "draft")
+						throw new Error(`Invalid status: ${raw}. Valid statuses are: Draft`);
+					schemaFieldChanges.schemaFields[key] = "Draft";
+				} else {
+					schemaFieldChanges.schemaFields[key] = registry.parseInput(key, raw);
+				}
+			}
+			for (const key of toStringArray(options.clearField).map((value) => String(value).trim())) {
+				const field = schema.fields[key];
+				if (!field) throw new Error(`Unknown task field "${key}"`);
+				if (field.managed || field.required) throw new Error(`Task field "${key}" cannot be cleared`);
+				if (!schemaFieldChanges.clearSchemaFields) schemaFieldChanges.clearSchemaFields = [];
+				schemaFieldChanges.clearSchemaFields.push(key);
+			}
+			for (const [flag, key] of [
+				[options.clearDueDate, "due_date"],
+				[options.clearMilestone, "milestone"],
+				[options.clearDeps, "dependencies"],
+				[options.clearLabels, "labels"],
+			] as const) {
+				if (!flag) continue;
+				if (schemaFieldChanges.schemaFields?.[key] !== undefined)
+					throw new Error(`Cannot set and clear task field "${key}" in one edit`);
+				if (!schemaFieldChanges.clearSchemaFields) schemaFieldChanges.clearSchemaFields = [];
+				schemaFieldChanges.clearSchemaFields.push(key);
+			}
+			for (const [option, target] of [
+				[options.add, "addSchemaFields"],
+				[options.remove, "removeSchemaFields"],
+			] as const) {
+				for (const entry of toStringArray(option)) {
+					const [key, raw] = Object.entries(parseCustomFieldFlags([entry]))[0] ?? [];
+					if (!key || raw === undefined) throw new Error(`Invalid field operation "${entry}"`);
+					const field = schema.fields[key];
+					if (!field || !["multi-enum", "string-list", "user-list", "task-ref-list"].includes(field.type))
+						throw new Error(`Task field "${key}" is not a list field`);
+					const values = registry.parseInput(key, raw);
+					if (!Array.isArray(values)) throw new Error(`Task field "${key}" is not a list field`);
+					if (!schemaFieldChanges[target]) schemaFieldChanges[target] = {};
+					const assignments = schemaFieldChanges[target];
+					assignments[key] = [...((assignments[key] as string[] | undefined) ?? []), ...values];
+				}
+			}
+		}
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		return;
+	}
+	// Shortcut fields have become registry operations. The remaining edit builder handles body
+	// sections and non-shortcut list flags.
+	options = {
+		...options,
+		status: undefined,
+		assignee: undefined,
+		priority: undefined,
+		type: undefined,
+		project: undefined,
+		label: undefined,
+		milestone: undefined,
+		ordinal: undefined,
+		dueDate: undefined,
+		clearDueDate: undefined,
+		dependsOn: undefined,
+		dep: undefined,
+		clearDeps: undefined,
+		clearMilestone: undefined,
+		clearLabels: undefined,
+	};
 
 	if (shouldUseWizard) {
 		let selectedTaskId = taskId?.trim() || undefined;
@@ -3253,13 +3572,12 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 		}
 
 		const statuses = await target.statuses(core);
-		const config = await core.filesystem.loadConfig();
 		const wizardInput = await runTaskEditWizard({
 			task: existingTaskForWizard,
 			statuses,
-			priorities: config?.priorities,
-			types: config?.types,
-			projects: config?.projects,
+			priorities: core.filesystem.taskSchema.fields.priority?.values,
+			types: core.filesystem.taskSchema.fields.type?.values,
+			projects: core.filesystem.taskSchema.fields.project?.values,
 		});
 		if (!wizardInput) {
 			clack.cancel(`${target.label} edit cancelled.`);
@@ -3484,16 +3802,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 
 	const planAppendValues = toStringArray(options.appendPlan);
 	const notesAppendValues = toStringArray(options.appendNotes);
-	const commentsAppendValues = toStringArray(options.comment);
 	const finalSummaryAppendValues = toStringArray(options.appendFinalSummary);
 
 	const editArgs: TaskEditArgs = {};
 	if (options.title) {
 		editArgs.title = String(options.title);
-	}
-	const descriptionOption = options.description ?? options.desc;
-	if (descriptionOption !== undefined) {
-		editArgs.description = String(descriptionOption);
 	}
 	if (canonicalStatus) {
 		editArgs.status = canonicalStatus;
@@ -3574,12 +3887,6 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (notesAppendValues.length > 0) {
 		editArgs.notesAppend = notesAppendValues;
 	}
-	if (commentsAppendValues.length > 0) {
-		editArgs.commentsAppend = commentsAppendValues;
-	}
-	if (typeof options.commentAuthor === "string") {
-		editArgs.commentAuthor = String(options.commentAuthor);
-	}
 	if (typeof options.finalSummary === "string") {
 		editArgs.finalSummary = String(options.finalSummary);
 	}
@@ -3622,7 +3929,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	if (taskIds.length === 1) {
 		let updatedTask: Task;
 		try {
-			updatedTask = await target.update(core, existingTask, buildTaskUpdateInput(editArgs));
+			updatedTask = await target.update(core, existingTask, {
+				...buildTaskUpdateInput(editArgs),
+				...schemaFieldChanges,
+				...sectionChanges,
+			});
 		} catch (error) {
 			console.error(formatTaskEditError(error, existingTask.id, target.label.toLowerCase()));
 			process.exitCode = 1;
@@ -3630,7 +3941,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 		}
 
 		if (isPlainRequested(options)) {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, updatedTask)));
+			console.log(
+				formatTaskPlainText(await loadTaskDetail(core, updatedTask), {
+					registry: new FieldRegistry(core.filesystem.taskSchema),
+				}),
+			);
 			return;
 		}
 
@@ -3643,7 +3958,11 @@ async function performEdit(target: EditCommandTarget, requestedIds: string[] | u
 	// rather than repeating a full task body for every ID.
 	for (const task of resolvedTasks) {
 		try {
-			const updated = await target.update(core, task, buildTaskUpdateInput(editArgs));
+			const updated = await target.update(core, task, {
+				...buildTaskUpdateInput(editArgs),
+				...schemaFieldChanges,
+				...sectionChanges,
+			});
 			console.log(`Updated ${target.label.toLowerCase()} ${updated.id}`);
 		} catch (error) {
 			editFailures.push({ taskId: task.id, message: formatTaskEditError(error, task.id, target.label.toLowerCase()) });
@@ -3666,6 +3985,14 @@ function configureEditCommand(cmd: Command) {
 		.option("-t, --title <title>")
 		.option("-d, --description <text>", "task description")
 		.option("--desc <text>", "alias for --description")
+		.option("--section <id=text>", "set a markdown section (repeatable)", createMultiValueAccumulator())
+		.option("--append-section <id=text>", "append to a markdown section (repeatable)", createMultiValueAccumulator())
+		.option("--add-item <id=text>", "add a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--check <id:n>", "check a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--uncheck <id:n>", "uncheck a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--remove-item <id:n>", "remove a checklist item (repeatable)", createMultiValueAccumulator())
+		.option("--author <handle>", "author for --comment, from schema users")
+		.option("--date <date>", "business date for --comment (YYYY-MM-DD)")
 		.option(
 			"-a, --assignee <assignees>",
 			'replace all task assignees with one or more @names (comma-separated or repeatable); pass "" to clear them',
@@ -3680,10 +4007,19 @@ function configureEditCommand(cmd: Command) {
 		.option("--priority <priority>", "set task priority (configured priorities)")
 		.option("--type <type>", "set task type (configured task types; pass an empty value to clear)")
 		.option("--project <project>", "set task project (configured projects; pass an empty value to clear)")
+		.option("--field <key=value>", "set a declared task field (repeatable)", createMultiValueAccumulator())
+		.option("--clear-field <key>", "clear a declared task field (repeatable)", createMultiValueAccumulator())
+		.option("--add <key=value>", "add values to a declared list field (repeatable)", createMultiValueAccumulator())
+		.option(
+			"--remove <key=value>",
+			"remove values from a declared list field (repeatable)",
+			createMultiValueAccumulator(),
+		)
 		.option("--due-date <date>", "set due date (YYYY-MM-DD)")
+		.option("--reporter <handle>", "set task reporter")
 		.option("--clear-due-date", "clear task due date")
 		.option("--ordinal <number>", "set task ordinal for custom ordering")
-		.option("-m, --milestone <milestone>", "assign task to milestone by ID or title")
+		.option("-m, --milestone <milestone>", "assign task to milestone by ID")
 		.option("--clear-milestone", "clear task milestone assignment")
 		.option("--plain", "use plain text output after editing")
 		.option(
@@ -3739,10 +4075,10 @@ function configureEditCommand(cmd: Command) {
 		.option("--notes <text>", "set implementation notes (replaces existing)")
 		.option(
 			"--comment <text>",
-			"append a task comment; standalone '---' lines are reserved (can be used multiple times)",
+			"append to the first configured log section; standalone '---' lines are reserved (repeatable)",
 			createMultiValueAccumulator(),
 		)
-		.option("--comment-author <author>", "author to record for appended comments")
+		.option("--comment-author <author>", "alias for --author when appending a log entry")
 		.option("--final-summary <text>", "set final summary (replaces existing)")
 		.option(
 			"--append-plan <text>",
@@ -3834,6 +4170,8 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: projectType,
 			description: "Replacement task project; case-insensitive; pass an empty value to clear",
 		},
+		{ name: "field", type: "key=value", description: "Set any editable schema field; repeatable" },
+		{ name: "clear-field", type: "key", description: "Clear an editable schema field; repeatable" },
 		{ name: "due-date", type: "date", description: "Set the task due date (YYYY-MM-DD)" },
 		{ name: "clear-due-date", type: "Boolean", description: "Clear the task due date" },
 		{
@@ -3896,25 +4234,20 @@ const taskEditCommand = addHelpSchema(taskCmd.command("edit [taskIds...]"), {
 			type: "Boolean",
 			description: "Remove all documentation; cannot combine with --doc, --add-doc, or --remove-doc",
 		},
-		{ name: "plan", type: "Markdown", description: "Replacement implementation plan" },
-		{
-			name: "append-plan",
-			type: "Markdown",
-			description: "Append after --plan replacement; repeatable",
-		},
-		{ name: "notes", type: "Markdown", description: "Replacement implementation notes" },
-		{ name: "append-notes", type: "Markdown", description: "Append to implementation notes; repeatable" },
-		{ name: "comment", type: "Markdown", description: "Append a discussion comment" },
-		{ name: "final-summary", type: "Markdown", description: "Completion summary" },
-		{ name: "append-final-summary", type: "Markdown", description: "Append to final summary; repeatable" },
-		{ name: "check-ac", type: "Integer", description: "1-based acceptance criterion index" },
+		{ name: "section", type: "id=text", description: "Replace a configured Markdown section; repeatable" },
+		{ name: "append-section", type: "id=text", description: "Append to a configured Markdown section; repeatable" },
+		{ name: "add-item", type: "id=text", description: "Add a configured checklist item; repeatable" },
+		{ name: "check", type: "id:n", description: "Check a configured checklist item" },
+		{ name: "uncheck", type: "id:n", description: "Uncheck a configured checklist item" },
+		{ name: "remove-item", type: "id:n", description: "Remove a configured checklist item" },
+		{ name: "comment", type: "Markdown", description: "Append to the first configured log section" },
 	],
 	writes: "Updates task metadata and structured task sections through Backlog.md",
 	output: "Updated task details; use --plain for text output",
 	examples: [
 		'backlog task edit {{TASK_ID:1}} --status "<active status>" -a @sara',
 		`backlog task edit {{TASK_ID:1}} --type ${TASK_TYPE_EXAMPLE}`,
-		"backlog task edit {{TASK_ID:1}} --check-ac 1",
+		"backlog task edit {{TASK_ID:1}} --check acceptance:1",
 		'backlog task edit {{TASK_ID:1}} {{TASK_ID:2}} --status "<active status>"',
 	],
 }).description("edit an existing task");
@@ -3922,7 +4255,35 @@ configureEditCommand(taskEditCommand).action(async (taskIds: string[] | undefine
 	await runEditCommand(taskEditTarget, taskIds, options);
 });
 
-// Note: Implementation notes appending is handled via `task edit --append-notes` only.
+addHelpSchema(taskCmd.command("log <taskId> <text>"), {
+	reads: "The configured log section and schema users",
+	writes: "Appends one immutable log entry to the task",
+	required: [
+		{ name: "taskId", type: "Task ID", description: "Task receiving the entry" },
+		{ name: "text", type: "Markdown", description: "Log entry body" },
+	],
+	optional: [
+		{ name: "section", type: "Section ID", description: "Log section; defaults to the first configured log" },
+		{ name: "author", type: "User handle", description: "Schema user; defaults to the schema default user" },
+		{ name: "date", type: "YYYY-MM-DD", description: "Business date; defaults to the local day" },
+	],
+	output: "Updated task ID",
+	examples: ['backlog task log {{TASK_ID:1}} "Called client" --author @alice'],
+})
+	.option("--section <id>", "log section ID")
+	.option("--author <handle>", "author handle from schema users")
+	.option("--date <date>", "business date (YYYY-MM-DD)")
+	.action(async (taskId: string, body: string, options: { section?: string; author?: string; date?: string }) => {
+		try {
+			const cwd = await requireProjectRoot();
+			const core = new Core(cwd);
+			const updated = await core.updateTaskFromInput(taskId, { appendLog: { body, ...options } });
+			console.log(`Updated task ${updated.id}`);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exitCode = 1;
+		}
+	});
 
 addHelpSchema(taskCmd.command("view <taskId>"), {
 	reads: "Task metadata, description, plan, notes, comments, final summary, AC, and DoD",
@@ -3956,12 +4317,16 @@ addHelpSchema(taskCmd.command("view <taskId>"), {
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, new FieldRegistry(core.filesystem.taskSchema)));
 			return;
 		}
 
 		if (outputMode === "plain") {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, task)));
+			console.log(
+				formatTaskPlainText(await loadTaskDetail(core, task), {
+					registry: new FieldRegistry(core.filesystem.taskSchema),
+				}),
+			);
 			return;
 		}
 
@@ -4115,12 +4480,16 @@ taskCmd
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, new FieldRegistry(core.filesystem.taskSchema)));
 			return;
 		}
 
 		if (outputMode === "plain") {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, task)));
+			console.log(
+				formatTaskPlainText(await loadTaskDetail(core, task), {
+					registry: new FieldRegistry(core.filesystem.taskSchema),
+				}),
+			);
 			return;
 		}
 
@@ -4134,16 +4503,30 @@ taskCmd
 		});
 	});
 
-async function viewDraftById(core: Core, taskId: string, options?: { plain?: boolean }): Promise<void> {
+async function viewDraftById(core: Core, taskId: string, options?: { plain?: boolean; json?: boolean }): Promise<void> {
 	try {
 		const draft = await core.filesystem.loadDraft(taskId);
 		if (!draft) {
 			console.error(`Draft ${taskId} not found.`);
 			return;
 		}
+		if (options?.json) {
+			printJson(
+				draftViewJson(
+					await loadTaskDetail(core, draft),
+					await requireProjectRoot(),
+					new FieldRegistry(core.filesystem.taskSchema),
+				),
+			);
+			return;
+		}
 		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
 		if (usePlainOutput) {
-			console.log(formatTaskPlainText(await loadTaskDetail(core, draft)));
+			console.log(
+				formatTaskPlainText(await loadTaskDetail(core, draft), {
+					registry: new FieldRegistry(core.filesystem.taskSchema),
+				}),
+			);
 			return;
 		}
 		await viewTaskEnhanced(draft, { startWithDetailFocus: true, core });
@@ -4178,7 +4561,11 @@ addListWindowOptions(draftListCommand)
 	.option("--plain", "use plain text output")
 	.option("--json", "print versioned machine-readable JSON output")
 	.action(async (options: ListWindowOptions & { plain?: boolean; sort?: string }) => {
-		const listOutput = resolveListOutput({ ...options, plain: isPlainRequested(options) }, draftListCommand);
+		const effectiveOptions = { ...draftCmd.opts(), ...options };
+		const listOutput = resolveListOutput(
+			{ ...effectiveOptions, plain: isPlainRequested(effectiveOptions) },
+			draftListCommand,
+		);
 		if (!listOutput) return;
 		const { outputMode, listWindow } = listOutput;
 		// The draft list keeps its own default: drafts are sorted by priority unless --sort is given.
@@ -4192,12 +4579,16 @@ addListWindowOptions(draftListCommand)
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
 		const drafts = await core.filesystem.listDrafts();
-		const config = await core.filesystem.loadConfig();
-		const sortedDrafts = sortTasks(drafts, sortField, config?.priorities);
+		const sortedDrafts = sortTasks(
+			drafts,
+			sortField,
+			core.filesystem.taskSchema.fields.priority?.values,
+			new FieldRegistry(core.filesystem.taskSchema),
+		);
 
 		if (outputMode === "json") {
 			const page = selectListWindow(sortedDrafts, listWindow);
-			printJson(draftListJson(page.items, page));
+			printJson(draftListJson(page.items, page, new FieldRegistry(core.filesystem.taskSchema)));
 			return;
 		}
 
@@ -4244,18 +4635,24 @@ draftCmd
 	)
 	.option("-s, --status <status>")
 	.option("-l, --labels <labels>", "add draft labels (comma-separated or repeatable)", createMultiValueAccumulator())
+	.option("--field <key=value>", "set any editable schema field (repeatable)", createMultiValueAccumulator())
 	.action(async (title: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
 		try {
-			const { task, filePath } = await core.createTaskFromInput({
-				title,
-				description: options.description || options.desc ? String(options.description || options.desc) : undefined,
-				status: "Draft",
-				assignee: parseClearableStringList(options.assignee),
-				labels: parseDelimitedStringList(options.labels),
-			});
+			const input = applyCreateFieldAssignments(
+				new FieldRegistry(core.filesystem.taskSchema),
+				{
+					title,
+					description: options.description || options.desc ? String(options.description || options.desc) : undefined,
+					status: "Draft",
+					assignee: parseClearableStringList(options.assignee),
+					labels: parseDelimitedStringList(options.labels),
+				},
+				parseCustomFieldFlags(options.field),
+			);
+			const { task, filePath } = await core.createTaskFromInput(input);
 			console.log(`Created draft ${task.id}`);
 			console.log(`File: ${filePath}`);
 		} catch (error) {
@@ -4291,7 +4688,7 @@ const draftEditCommand = addHelpSchema(draftCmd.command("edit [taskId]"), {
 		{ name: "clear-labels", type: "Boolean", description: "Remove all labels" },
 		{ name: "priority", type: "String", description: "Set priority (configured priorities)" },
 		{ name: "ordinal", type: "Number", description: "Set ordinal for custom ordering" },
-		{ name: "milestone", type: "String", description: "Assign to milestone by ID or title" },
+		{ name: "milestone", type: "String", description: "Assign to milestone by ID" },
 		{ name: "clear-milestone", type: "Boolean", description: "Clear the milestone assignment" },
 		{ name: "ac", type: "Comma-separated strings", description: "Add acceptance criteria; repeatable" },
 		{
@@ -4332,7 +4729,7 @@ const draftEditCommand = addHelpSchema(draftCmd.command("edit [taskId]"), {
 	],
 	writes: "Updates draft metadata and structured sections through Backlog.md",
 	output: "Updated draft details; use --plain for text output",
-	examples: ['backlog draft edit DRAFT-1 -t "Renamed draft"', "backlog draft edit DRAFT-1 --check-ac 1"],
+	examples: ['backlog draft edit DRAFT-1 -t "Renamed draft"', "backlog draft edit DRAFT-1 --check acceptance:1"],
 }).description("edit an existing draft");
 configureEditCommand(draftEditCommand).action(async (taskId: string | undefined, options) => {
 	await runEditCommand(draftEditTarget, taskId ? [taskId] : [], options);
@@ -4383,16 +4780,18 @@ draftCmd
 	.command("view <taskId>")
 	.description("display draft details")
 	.option("--plain", "use plain text output instead of interactive UI")
+	.option("--json", "print versioned machine-readable JSON output")
 	.action(async (taskId: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
-		await viewDraftById(core, taskId, options);
+		await viewDraftById(core, taskId, { ...draftCmd.opts(), ...options });
 	});
 
 draftCmd
 	.argument("[taskId]")
 	.option("--plain", "use plain text output")
-	.action(async (taskId: string | undefined, options: { plain?: boolean }) => {
+	.option("--json", "print versioned machine-readable JSON output")
+	.action(async (taskId: string | undefined, options: { plain?: boolean; json?: boolean }) => {
 		if (!taskId) {
 			draftCmd.help();
 			return;
@@ -4429,14 +4828,13 @@ addListWindowOptions(milestoneListCommand)
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
 
-		const [tasks, milestones, archivedMilestones, config] = await Promise.all([
+		const [tasks, milestones, archivedMilestones] = await Promise.all([
 			core.queryTasks({ includeCrossBranch: false }),
 			core.filesystem.listMilestones(),
 			core.filesystem.listArchivedMilestones(),
-			core.filesystem.loadConfig(),
 		]);
 
-		const statuses = config?.statuses ?? ["To Do", "In Progress", "Done"];
+		const statuses = core.filesystem.taskSchema.fields.status?.values ?? ["To Do", "In Progress", "Done"];
 		const archivedMilestoneIds = collectArchivedMilestoneKeys(archivedMilestones, milestones);
 		const buckets = buildMilestoneBuckets(tasks, milestones, statuses, { archivedMilestoneIds, archivedMilestones });
 		const active = buckets.filter((bucket) => !bucket.isNoMilestone && !bucket.isCompleted);
@@ -4608,9 +5006,8 @@ function addBoardOptions(cmd: Command) {
 async function handleBoardView(options: { layout?: string; vertical?: boolean; milestones?: boolean }) {
 	const cwd = await requireProjectRoot();
 	const core = new Core(cwd);
-	const config = await core.filesystem.loadConfig();
 
-	const statuses = config?.statuses || [];
+	const statuses = core.filesystem.taskSchema.fields.status?.values || [];
 
 	// Use unified view for Tab switching support
 	const { runUnifiedView } = await import("./ui/unified-view.ts");
@@ -4741,7 +5138,7 @@ boardCmd
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		const config = await core.filesystem.loadConfig();
-		const statuses = config?.statuses || [];
+		const statuses = core.filesystem.taskSchema.fields.status?.values || [];
 		if (await printDuplicateIntegrityWarning(core)) return;
 
 		// Load tasks with progress tracking
@@ -5288,7 +5685,7 @@ agentsCmd
 
 // Config command group
 const CONFIG_AVAILABLE_KEYS =
-	"Available keys: defaultEditor, projectName, defaultAssignee, defaultStatus, statuses, labels, priorities, types, projects, milestones, definitionOfDone, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays";
+	"Available keys: defaultEditor, projectName, milestones, dateFormat, maxColumnWidth, defaultPort, autoOpenBrowser, hideEmptyColumns, remoteOperations, autoCommit, filesystemOnly, bypassGitHooks, zeroPaddedIds, checkActiveBranches, activeBranchDays. Task fields are configured in task-schema.yml.";
 
 const configCmd = addHelpSchema(program.command("config"), {
 	reads: "Project Backlog.md configuration",
@@ -5338,7 +5735,6 @@ const configCmd = addHelpSchema(program.command("config"), {
 			console.log(`  Auto open browser: ${mergedConfig.autoOpenBrowser ?? true}`);
 			console.log(`  Bypass git hooks: ${mergedConfig.bypassGitHooks ?? false}`);
 			console.log(`  Auto commit: ${mergedConfig.autoCommit ?? false}`);
-			console.log(`  Definition of Done defaults: ${(mergedConfig.definitionOfDone ?? []).join(" | ") || "(none)"}`);
 			if (completionResult) {
 				console.log(`  Shell completions: installed to ${completionResult.installPath}`);
 			} else if (completionError) {
@@ -5384,7 +5780,7 @@ addHelpSchema(configCmd.command("get <key>"), {
 	required: [{ name: "key", type: choiceType(CONFIG_GET_KEYS), description: "Configuration value to print" }],
 	optional: [],
 	output: "The selected configuration value",
-	examples: ["backlog config get defaultEditor", "backlog config get types"],
+	examples: ["backlog config get defaultEditor", "backlog config get defaultPort"],
 })
 	.description("get a configuration value")
 	.action(async (key: string) => {
@@ -5411,39 +5807,11 @@ addHelpSchema(configCmd.command("get <key>"), {
 				case "projectName":
 					console.log(config.projectName);
 					break;
-				case "defaultAssignee":
-					console.log(config.defaultAssignee?.join(", ") || "");
-					break;
-				case "defaultStatus":
-					console.log(config.defaultStatus || "");
-					break;
-				case "statuses":
-					console.log(config.statuses.join(", "));
-					break;
-				case "labels":
-					console.log(config.labels.join(", "));
-					break;
-				case "priorities":
-					console.log(
-						getPriorityOptions(config)
-							.map((priority) => priority.label)
-							.join(", "),
-					);
-					break;
-				case "types":
-					console.log(getTaskTypeValues(config).join(", "));
-					break;
-				case "projects":
-					console.log(getProjectValues(config).join(", "));
-					break;
 				case "milestones": {
 					const milestones = await core.filesystem.listMilestones();
 					console.log(milestones.map((milestone) => milestone.id).join(", "));
 					break;
 				}
-				case "definitionOfDone":
-					console.log(config.definitionOfDone?.join(", ") || "");
-					break;
 				case "dateFormat":
 					console.log(config.dateFormat);
 					break;
@@ -5498,11 +5866,7 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 	optional: [],
 	writes: "Updates the project Backlog.md configuration file",
 	output: "Confirmation of the updated config value",
-	examples: [
-		'backlog config set defaultEditor "code --wait"',
-		"backlog config set autoCommit true",
-		'backlog config set defaultAssignee "@alice,@bob"',
-	],
+	examples: ['backlog config set defaultEditor "code --wait"', "backlog config set autoCommit true"],
 })
 	.description("set a configuration value")
 	.action(async (key: string, value: string) => {
@@ -5535,13 +5899,6 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 				}
 				case "projectName":
 					config.projectName = value;
-					break;
-				case "defaultAssignee":
-					// An empty value clears the default; comma-separated values set several assignees.
-					config.defaultAssignee = parseDelimitedStringList(value);
-					break;
-				case "defaultStatus":
-					config.defaultStatus = value;
 					break;
 				case "dateFormat":
 					config.dateFormat = value;
@@ -5671,29 +6028,8 @@ addHelpSchema(configCmd.command("set <key> <value>"), {
 					config.activeBranchDays = days;
 					break;
 				}
-				case "statuses":
-				case "labels":
-				case "types":
-				case "priorities":
-				case "projects":
 				case "milestones":
-				case "definitionOfDone":
-					if (key === "milestones") {
-						console.error("milestones cannot be set directly.");
-						console.error(
-							"Use milestone files via milestone commands (e.g. `backlog milestone list`, `backlog milestone add`).",
-						);
-					} else if (key === "definitionOfDone") {
-						console.error("definitionOfDone cannot be set directly.");
-						console.error(
-							"Use `backlog config` for interactive editing, update the project config file (`backlog/config.yml`, `.backlog/config.yml`, or `backlog.config.yml`), or use Web UI Settings.",
-						);
-					} else {
-						console.error(`${key} cannot be set directly. View current values with 'backlog config get ${key}'.`);
-						console.error(
-							"Edit the list in the project config file (`backlog/config.yml`, `.backlog/config.yml`, or `backlog.config.yml`) directly.",
-						);
-					}
+					console.error("milestones cannot be set directly. Use milestone commands to edit milestone files.");
 					process.exit(1);
 					break;
 				case "taskPrefix":
@@ -5739,20 +6075,8 @@ addHelpSchema(configCmd.command("list"), {
 			console.log("Configuration:");
 			console.log(`  projectName: ${config.projectName}`);
 			console.log(`  defaultEditor: ${config.defaultEditor || "(not set)"}`);
-			console.log(`  defaultAssignee: [${(config.defaultAssignee ?? []).join(", ")}]`);
-			console.log(`  defaultStatus: ${config.defaultStatus || "(not set)"}`);
-			console.log(`  statuses: [${config.statuses.join(", ")}]`);
-			console.log(`  labels: [${config.labels.join(", ")}]`);
-			console.log(
-				`  priorities: [${getPriorityOptions(config)
-					.map((priority) => priority.label)
-					.join(", ")}]`,
-			);
-			console.log(`  types: [${getTaskTypeValues(config).join(", ")}]`);
-			console.log(`  projects: [${getProjectValues(config).join(", ")}]`);
 			const milestones = await core.filesystem.listMilestones();
 			console.log(`  milestones: [${milestones.map((milestone) => milestone.id).join(", ")}]`);
-			console.log(`  definitionOfDone: [${(config.definitionOfDone ?? []).join(", ")}]`);
 			console.log(`  dateFormat: ${config.dateFormat}`);
 			console.log(`  maxColumnWidth: ${config.maxColumnWidth || "(not set)"}`);
 			console.log(`  autoOpenBrowser: ${config.autoOpenBrowser ?? "(not set)"}`);
@@ -5977,7 +6301,7 @@ addHelpSchema(program.command("cleanup"), {
 				process.exit(1);
 			}
 
-			const statuses = config.statuses ?? [...DEFAULT_STATUSES];
+			const statuses = core.filesystem.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES];
 			const terminalStatus = getTerminalStatus(statuses);
 			if (!terminalStatus) {
 				console.log("No terminal status configured for cleanup.");
@@ -6169,6 +6493,36 @@ registerInstructionsCommand(program);
 
 // MCP command group
 registerMcpCommand(program);
+
+// Keep removed options parseable only so the command can name their replacements.
+// They are no longer part of the advertised create/edit interface.
+const retiredSectionFlags = new Set([
+	"--ac",
+	"--acceptance-criteria",
+	"--clear-ac",
+	"--check-ac",
+	"--uncheck-ac",
+	"--remove-ac",
+	"--dod",
+	"--check-dod",
+	"--uncheck-dod",
+	"--remove-dod",
+	"--no-dod-defaults",
+	"--plan",
+	"--append-plan",
+	"--notes",
+	"--append-notes",
+	"--final-summary",
+	"--append-final-summary",
+	"--clear-final-summary",
+]);
+function hideRetiredSectionFlags(command: Command): void {
+	for (const option of command.options) {
+		if (option.long && retiredSectionFlags.has(option.long)) option.hideHelp();
+	}
+	for (const child of command.commands) hideRetiredSectionFlags(child);
+}
+hideRetiredSectionFlags(program);
 
 program
 	.parseAsync(process.argv)

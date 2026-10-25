@@ -1,0 +1,34 @@
+# Operations Tracker agent instructions
+
+This repository tracks client work with Backlog.md. Run commands from the repository root. The project schema is `backlog/task-schema.yml` (or the configured backlog directory). Read the live schema before changing work:
+
+```bash
+backlog schema --json
+backlog task list --plain
+```
+
+Use `backlog browser --no-open` to review the board locally. If the project has not been initialized, run `backlog init` first; it writes an editable, commented schema. Replace the example users, clients, and enum values in `task-schema.yml` for this team before recording real work.
+
+## Working rules
+
+1. Search existing tasks before creating one. Read the full task with `backlog task view <id> --plain` and check its dependencies.
+2. Read field keys, enum values, user handles, and section IDs from `backlog schema --json`. Copy enum values and `@handles` exactly.
+3. Write through `backlog task create`, `backlog task edit`, and `backlog task log`. Never edit task Markdown files by hand. Use `--field key=value` for core and custom fields, `--section id=text` for Markdown, `--add-item` or `--check` for checklists, and `task log` for dated updates. The CLI preserves IDs, references, and unknown content.
+4. Query with `--where`, `--sort`, and `--show-fields`. Check the returned task IDs and values before reporting a result. Use `--json` for scripts.
+5. Finish a task only after verifying its acceptance items, recording the result in the log, and moving it to the schema's final status.
+
+## Common requests
+
+These examples use the companion `operations-tracker-schema.yml`. Adjust exact enum values and handles to the active schema.
+
+| Request | Command |
+| --- | --- |
+| Show work waiting on the client | `backlog task list --where 'tech_action=Awaiting Client' --show-fields side,tech_action --plain` |
+| Show client-facing open work | `backlog task list --where 'client_facing=true' --where 'status!=Done' --plain` |
+| Find release items without UAT dates | `backlog task list --where 'release_item=true' --where 'uat_date=' --show-fields project,uat_date,prod_date --plain` |
+| Order production work by date | `backlog task list --where 'release_item=true' --sort prod_date --show-fields prod_date,tech_action --plain` |
+| Add a client inquiry | `backlog task create 'Client inquiry' --field type=Inquiry --field project='Client A' --field side=them --field client_facing=true --section description='Client question and context'` |
+| Assign an owner and record an update | `backlog task edit TASK-1 --field assignee=@owner` then `backlog task log TASK-1 'Called client' --author @owner --date 2026-10-24` |
+| Complete a verified acceptance item | `backlog task edit TASK-1 --check acceptance:1` |
+
+Run `backlog instructions overview`, then the matching task creation, execution, or finalization guide before making substantial changes.

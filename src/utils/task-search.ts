@@ -8,6 +8,8 @@
  */
 
 import Fuse, { type IFuseOptions } from "fuse.js";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import { type FieldCondition, FieldRegistry } from "../schema/field-registry.ts";
 import type { LabelMatchMode, Task } from "../types/index.ts";
 import { labelsToLower } from "./label-filter.ts";
 import {
@@ -40,6 +42,8 @@ export interface TaskFilterOptions {
 	excludeStatus?: string | string[];
 	type?: string | string[];
 	project?: string | string[];
+	where?: FieldCondition[];
+	registry?: FieldRegistry;
 	priority?: string | string[];
 	assignee?: string | string[];
 	unassigned?: boolean;
@@ -62,18 +66,17 @@ export interface TaskSearchIndex {
  */
 export function buildTaskSearchBodyText(task: Task): string {
 	const parts: string[] = [];
-	if (task.description) parts.push(task.description);
-	if (Array.isArray(task.acceptanceCriteriaItems) && task.acceptanceCriteriaItems.length > 0) {
-		const lines = [...task.acceptanceCriteriaItems]
-			.sort((a, b) => a.index - b.index)
-			.map((criterion) => `- [${criterion.checked ? "x" : " "}] ${criterion.text}`);
-		parts.push(lines.join("\n"));
+	if (task.sections) {
+		for (const section of Object.values(task.sections)) {
+			if (typeof section === "string") parts.push(section);
+			else parts.push(section.map((entry) => ("text" in entry ? entry.text : entry.body)).join("\n"));
+		}
+	} else {
+		if (task.description) parts.push(task.description);
+		if (task.acceptanceCriteriaItems) parts.push(task.acceptanceCriteriaItems.map((item) => item.text).join("\n"));
+		if (task.comments) parts.push(task.comments.map((comment) => comment.body).join("\n"));
 	}
-	if (task.implementationPlan) parts.push(task.implementationPlan);
-	if (task.implementationNotes) parts.push(task.implementationNotes);
-	if (Array.isArray(task.comments) && task.comments.length > 0) {
-		parts.push(task.comments.map((comment) => comment.body).join("\n\n"));
-	}
+	if (task.other) parts.push(task.other);
 	if (task.labels?.length) parts.push(task.labels.join("\n"));
 	if (task.assignee?.length) parts.push(task.assignee.join("\n"));
 	if (task.modifiedFiles?.length) parts.push(task.modifiedFiles.join("\n"));
@@ -145,6 +148,11 @@ export function createTaskFilterMatcher(options: TaskFilterOptions, corpus: Task
 	if (options.project) {
 		const projects = options.project;
 		checks.push((task) => matchesProjectFilter(task.project, projects));
+	}
+	if (options.where?.length) {
+		const conditions = options.where;
+		const registry = options.registry ?? new FieldRegistry(getDefaultTaskSchema());
+		checks.push((task) => conditions.every((condition) => registry.matches(task, condition)));
 	}
 
 	const priorities = new Set(

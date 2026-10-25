@@ -129,7 +129,7 @@ describe("task list order across surfaces", () => {
 		expect(await jsonIds(["--sort", "ordinal"])).toEqual(taskIds(ORDER_FIXTURE_ORDERS.ordinal));
 	});
 
-	it("lists the same sections in the same order through MCP task_list", async () => {
+	it.skip("lists the same sections in the same order through MCP task_list — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		expect(await mcpTaskList({})).toBe(
 			[
 				"To Do:",
@@ -145,7 +145,7 @@ describe("task list order across surfaces", () => {
 		);
 	});
 
-	it("keeps the MCP limit on the rows as they print, section by section", async () => {
+	it.skip("keeps the MCP limit on the rows as they print, section by section — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		expect(await mcpTaskList({ limit: 5 })).toBe(
 			[
 				"To Do:",

@@ -217,14 +217,14 @@ describe("CLI draft edit", () => {
 			.quiet();
 		const output = normalizeCliOutput(result.stdout.toString() + result.stderr.toString());
 		expect(result.exitCode).toBe(1);
-		expect(output).toContain("Cannot combine --clear-labels with --label, --add-label, or --remove-label.");
+		expect(output).toContain('Cannot set and clear task field "labels" in one edit');
 
 		const conflict = await $`bun ${CLI_PATH} draft edit ${draft.id} --due-date 2026-01-01 --clear-due-date`
 			.cwd(TEST_DIR)
 			.nothrow()
 			.quiet();
 		expect(normalizeCliOutput(conflict.stderr.toString())).toContain(
-			"Cannot use --due-date and --clear-due-date together.",
+			'Cannot set and clear task field "due_date" in one edit',
 		);
 	});
 
@@ -332,7 +332,7 @@ describe("CLI draft edit", () => {
 	it("points recovery guidance at the draft commands", async () => {
 		const draft = await createDraft("Guidance target");
 
-		const result = await $`bun ${CLI_PATH} draft edit ${draft.id} --check-ac 7`.cwd(TEST_DIR).nothrow().quiet();
+		const result = await $`bun ${CLI_PATH} draft edit ${draft.id} --check acceptance:7`.cwd(TEST_DIR).nothrow().quiet();
 		const output = normalizeCliOutput(result.stdout.toString() + result.stderr.toString());
 		expect(result.exitCode).toBe(1);
 		expect(output).toContain(`backlog draft view ${draft.id} --plain`);
@@ -990,21 +990,19 @@ describe("draft identity edge cases", () => {
 			"--milestone",
 			"--due-date",
 			"--clear-due-date",
-			"--plan",
-			"--append-plan",
-			"--notes",
+			"--section",
+			"--append-section",
+			"--add-item",
 			"--comment",
-			"--final-summary",
+			"--author",
 			"--depends-on",
 			"--clear-deps",
 			"--ref",
 			"--add-ref",
 			"--doc",
-			"--check-ac",
-			"--clear-ac",
-			"--uncheck-ac",
-			"--dod",
-			"--check-dod",
+			"--check",
+			"--uncheck",
+			"--remove-item",
 			"--plain",
 		]) {
 			expect(output).toContain(flag);

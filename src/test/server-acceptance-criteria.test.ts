@@ -23,22 +23,21 @@ describe("browser acceptance criteria replacement", () => {
 		await safeCleanup(testDir);
 	});
 
-	it("honors explicit true and false instead of inheriting matching checks", async () => {
+	it("applies schema checklist checks and unchecks without inheriting prior state", async () => {
 		const { task } = await core.createTaskFromInput({
 			title: "Browser checks",
-			acceptanceCriteria: [
-				{ text: "First", checked: true },
-				{ text: "Second", checked: false },
-			],
+			sectionItems: { acceptance: ["First", "Second"] },
+			sectionChecks: { acceptance: [1] },
 		});
 		const response = await fetch(`http://127.0.0.1:${server.getPort()}/api/tasks/${task.id}`, {
-			method: "PUT",
+			method: "PATCH",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				acceptanceCriteriaItems: [
-					{ text: "First", checked: false },
-					{ text: "Second", checked: true },
-					{ text: "New", checked: true },
+				checklist: [
+					{ section: "acceptance", op: "uncheck", index: 1 },
+					{ section: "acceptance", op: "check", index: 2 },
+					{ section: "acceptance", op: "add", text: "New" },
+					{ section: "acceptance", op: "check", index: 3 },
 				],
 			}),
 		});
@@ -48,7 +47,7 @@ describe("browser acceptance criteria replacement", () => {
 			{ index: 2, text: "Second", checked: true },
 			{ index: 3, text: "New", checked: true },
 		];
-		expect(((await response.json()) as Task).acceptanceCriteriaItems).toEqual(expected);
-		expect((await core.filesystem.loadTask(task.id))?.acceptanceCriteriaItems).toEqual(expected);
+		expect(((await response.json()) as Task).sections?.acceptance).toEqual(expected);
+		expect((await core.filesystem.loadTask(task.id))?.sections?.acceptance).toEqual(expected);
 	});
 });

@@ -15,8 +15,7 @@ const task = (id: string, title: string, status: string) => ({
 	createdDate: "2026-01-01",
 	labels: [],
 	dependencies: [],
-	description: "work",
-	rawContent: "work",
+	sections: { description: "work" },
 });
 
 describe("CLI status filtering", () => {

@@ -4,7 +4,7 @@ import { Core } from "../core/backlog.ts";
 import { parseTask } from "../markdown/parser.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, initializeTestProject, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -26,14 +26,14 @@ describe("task project field", () => {
 	describe("fail-closed when unconfigured", () => {
 		it("should reject a project value when no projects are configured", async () => {
 			await expect(core.createTaskFromInput({ title: "Web task", project: "web" }, false)).rejects.toThrow(
-				"No projects are configured. Add a 'projects:' list to",
+				"no values configured; add values to task-schema.yml fields.project.values",
 			);
 		});
 
 		it("should reject a project value on edit when no projects are configured", async () => {
 			const { task } = await core.createTaskFromInput({ title: "Task" }, false);
 			await expect(core.updateTaskFromInput(task.id, { project: "web" }, false)).rejects.toThrow(
-				"No projects are configured. Add a 'projects:' list to",
+				"no values configured; add values to task-schema.yml fields.project.values",
 			);
 		});
 
@@ -46,10 +46,9 @@ describe("task project field", () => {
 
 	describe("persistence round-trip", () => {
 		beforeEach(async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.projects = ["web", "api", "mobile"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["web", "api", "mobile"];
+			});
 		});
 
 		it("should persist project on create and read it back", async () => {
@@ -98,54 +97,50 @@ describe("task project field", () => {
 
 	describe("validation", () => {
 		beforeEach(async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.projects = ["web", "api"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["web", "api"];
+			});
 		});
 
 		it("should reject unknown project on create with allowed values in the error", async () => {
 			await expect(core.createTaskFromInput({ title: "Bad project", project: "mobile" }, false)).rejects.toThrow(
-				"Invalid project: mobile. Valid projects are: web, api",
+				'Invalid task field "project": allowed values: web, api',
 			);
 		});
 
 		it("should reject unknown project on edit", async () => {
 			const { task } = await core.createTaskFromInput({ title: "Task" }, false);
 			await expect(core.updateTaskFromInput(task.id, { project: "mobile" }, false)).rejects.toThrow(
-				"Invalid project: mobile",
+				'Invalid task field "project"',
 			);
 		});
 	});
 
 	describe("config override", () => {
 		it("should validate against configured projects and preserve configured casing", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.projects = ["Web", "API"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["Web", "API"];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Custom project", project: "api" }, false);
 			expect(task.project).toBe("API");
 
 			await expect(core.createTaskFromInput({ title: "Bad project", project: "mobile" }, false)).rejects.toThrow(
-				"Invalid project: mobile. Valid projects are: Web, API",
+				'Invalid task field "project": allowed values: Web, API',
 			);
 		});
 
-		it("should round-trip the projects config key", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.projects = ["web", "api"];
-			await core.filesystem.saveConfig(config);
+		it("should round-trip project values through the task schema", async () => {
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["web", "api"];
+			});
 
-			const reloaded = await new Core(TEST_DIR).filesystem.loadConfig();
-			expect(reloaded?.projects).toEqual(["web", "api"]);
+			const reloaded = new Core(TEST_DIR).filesystem.taskSchema;
+			expect(reloaded.fields.project!.values).toEqual(["web", "api"]);
 		});
 
-		it("should leave projects undefined when the config key is absent", async () => {
-			const config = await core.filesystem.loadConfig();
-			expect(config?.projects).toBeUndefined();
+		it("should keep project values empty in the default schema", async () => {
+			expect(core.filesystem.taskSchema.fields.project!.values).toEqual([]);
 		});
 	});
 
@@ -164,10 +159,9 @@ describe("task project field", () => {
 		});
 
 		it("should not write a project key for tasks without a project", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.projects = ["web"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.project!.values = ["web"];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Untagged task" }, false);
 			await core.updateTaskFromInput(task.id, { title: "Still untagged" }, false);

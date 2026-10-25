@@ -142,7 +142,7 @@ describe("Web task popup status field", () => {
 	}
 
 	function statusField(container: HTMLElement): { options: string[]; selected?: string; disabled?: boolean } {
-		const select = container.querySelector("select") as HTMLSelectElement | null;
+		const select = container.querySelector("#schema-field-status") as HTMLSelectElement | null;
 		expect(select).toBeTruthy();
 		return {
 			options: Array.from(select?.options ?? []).map((option) => option.value),
@@ -155,11 +155,11 @@ describe("Web task popup status field", () => {
 		serveStatuses();
 		const container = await renderModal(draft("DRAFT-1", "Draft under review"));
 
-		const { options, selected, disabled } = statusField(container);
-		expect(options).toEqual(["Draft", "To Do", "In Progress", "Done"]);
-		expect(selected).toBe("Draft");
+		expect(container.textContent).toContain("Draft");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const select = container.querySelector("#schema-field-status");
 		// Promotion stays on the Drafts page action, which is the only place that reports the new ID.
-		expect(disabled).toBe(true);
+		expect(select).toBeNull();
 	});
 
 	it("offers only the configured statuses for a task", async () => {
@@ -173,9 +173,10 @@ describe("Web task popup status field", () => {
 			dependencies: [],
 			createdDate: "2026-08-15 10:00",
 		});
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
 
 		const { options, selected, disabled } = statusField(container);
-		expect(options).toEqual(["To Do", "In Progress", "Done"]);
+		expect(options).toEqual(["", "To Do", "In Progress", "Done"]);
 		expect(selected).toBe("To Do");
 		expect(disabled).toBe(false);
 	});

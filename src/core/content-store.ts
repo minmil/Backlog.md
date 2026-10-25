@@ -3,6 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FileSystem } from "../file-system/operations.ts";
 import { parseDecision, parseDocument, parseTask } from "../markdown/parser.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
 import type { BacklogConfig, Decision, Document, Task, TaskListFilter } from "../types/index.ts";
 import { watchConfigFile } from "../utils/config-watcher.ts";
 import { documentIdKey, documentIdsEqual } from "../utils/document-id.ts";
@@ -318,6 +319,11 @@ export class ContentStore {
 		}
 		if (filter?.project) {
 			tasks = tasks.filter((task) => matchesProjectFilter(task.project, filter.project));
+		}
+		if (filter?.where?.length) {
+			const conditions = filter.where;
+			const registry = new FieldRegistry(this.filesystem.taskSchema);
+			tasks = tasks.filter((task) => conditions.every((condition) => registry.matches(task, condition)));
 		}
 		if (filter?.assignee) {
 			const assignee = filter.assignee;
@@ -787,6 +793,7 @@ export class ContentStore {
 			created.push(await this.createTaskWatcher(epoch));
 			created.push(this.createDecisionWatcher(epoch));
 			created.push(await this.createDocumentWatcher(epoch));
+			created.push(this.createSchemaWatcher(epoch));
 			if (!this.isRootWatcherCurrent(epoch)) {
 				for (const watcher of created) watcher.stop();
 				return;
@@ -801,6 +808,49 @@ export class ContentStore {
 			}
 			throw error;
 		}
+	}
+
+	private createSchemaWatcher(epoch: number): WatchHandle {
+		const schemaPath = join(this.filesystem.backlogDir, "task-schema.yml");
+		let timer: ReturnType<typeof setTimeout> | null = null;
+		let lastPublishedContent: string | null = null;
+		const watcher = watch(this.filesystem.backlogDir, { recursive: false }, (_event, filename) => {
+			if (filename && String(filename) !== "task-schema.yml") return;
+			if (timer) clearTimeout(timer);
+			timer = setTimeout(() => {
+				timer = null;
+				void (async () => {
+					if (!this.isRootWatcherCurrent(epoch)) return;
+					const content = await Bun.file(schemaPath)
+						.text()
+						.catch(() => "");
+					if (content === lastPublishedContent) return;
+					try {
+						this.filesystem.taskSchema;
+						await this.enqueue(async () => {
+							if (!this.isRootWatcherCurrent(epoch)) return;
+							const loaded = await this.loadCurrentContent(epoch, (snapshot) => {
+								this.installTaskCorpus(snapshot.taskCorpus ?? this.asTaskCorpus(snapshot.tasks));
+								this.replaceDocuments(snapshot.documents);
+								this.replaceDecisions(snapshot.decisions);
+							});
+							if (!loaded) return;
+							lastPublishedContent = content;
+							this.notify("ready");
+						});
+					} catch {
+						// Keep the last published snapshot until the schema becomes valid.
+					}
+				})().catch(() => {});
+			}, 50);
+		});
+		this.attachWatcherErrorHandler(watcher, "task schema");
+		return {
+			stop: () => {
+				if (timer) clearTimeout(timer);
+				watcher.close();
+			},
+		};
 	}
 
 	private stopRootWatchers(): void {
@@ -1105,7 +1155,12 @@ export class ContentStore {
 						epoch,
 						readEventPath: async () => {
 							if (!(await Bun.file(fullPath).exists())) return null;
-							const task = { ...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text())), filePath: fullPath };
+							const task = {
+								...normalizeTaskIdentity(
+									parseTask(await Bun.file(fullPath).text(), undefined, this.filesystem.taskSchema),
+								),
+								filePath: fullPath,
+							};
 							return task;
 						},
 						findIdentity: async () => {
@@ -1118,7 +1173,9 @@ export class ContentStore {
 								},
 								async (candidatePath) => {
 									const task = {
-										...normalizeTaskIdentity(parseTask(await Bun.file(candidatePath).text())),
+										...normalizeTaskIdentity(
+											parseTask(await Bun.file(candidatePath).text(), undefined, this.filesystem.taskSchema),
+										),
 										filePath: candidatePath,
 									};
 									if (!taskIdsEqual(task.id, normalizedTaskId)) throw new Error("Task identity mismatch");
@@ -1153,7 +1210,12 @@ export class ContentStore {
 						return false;
 					}
 					try {
-						const task = { ...normalizeTaskIdentity(parseTask(await Bun.file(fullPath).text())), filePath: fullPath };
+						const task = {
+							...normalizeTaskIdentity(
+								parseTask(await Bun.file(fullPath).text(), undefined, this.filesystem.taskSchema),
+							),
+							filePath: fullPath,
+						};
 						if (!taskIdsEqual(task.id, normalizedTaskId)) {
 							this.publishWatchedTask(task);
 							return false;
@@ -1431,7 +1493,10 @@ export class ContentStore {
 		this.filesystem.saveTask = (async (task: Task, originalContent?: string): Promise<string> => {
 			const owner: PublicationOwner = { root: this.currentRoot() };
 			const result = await originalSaveTask.call(this.filesystem, task, originalContent);
-			const savedTask = { ...normalizeTaskIdentity(parseTask(await Bun.file(result).text())), filePath: result };
+			const savedTask = {
+				...normalizeTaskIdentity(parseTask(await Bun.file(result).text(), undefined, this.filesystem.taskSchema)),
+				filePath: result,
+			};
 			await this.updateTaskFromDisk(task.id, owner, savedTask);
 			return result;
 		}) as FileSystem["saveTask"];

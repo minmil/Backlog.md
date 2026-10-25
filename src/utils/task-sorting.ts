@@ -1,3 +1,6 @@
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
+import type { Task } from "../types/index.ts";
 import { getPriorityRank } from "./priority-config.ts";
 
 /**
@@ -182,7 +185,12 @@ function sortByOrdinalAndPriority<T extends { id: string; ordinal?: number; prio
 	});
 }
 
-type SortableTask = { id: string; priority?: string; ordinal?: number };
+type SortableTask = {
+	id: string;
+	priority?: string;
+	ordinal?: number;
+	fieldValues?: Record<string, unknown>;
+};
 type TaskSorter = <T extends SortableTask>(items: T[], priorityOrder?: readonly string[]) => T[];
 
 /**
@@ -210,7 +218,17 @@ export function sortTasks<T extends SortableTask>(
 	items: T[],
 	sortField?: string,
 	priorityOrder?: readonly string[],
+	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
 ): T[] {
+	const [fieldKey, direction = "asc"] = sortField?.split(":") ?? [];
+	if (fieldKey && registry.schema.fields[fieldKey]) {
+		return [...items].sort((a, b) => {
+			const left = registry.getField(a as unknown as Task, fieldKey);
+			const right = registry.getField(b as unknown as Task, fieldKey);
+			const order = registry.compare(fieldKey, left, right, fieldKey === "priority" ? priorityOrder : undefined);
+			return order ? (direction === "desc" ? -order : order) : compareTaskIds(a.id, b.id);
+		});
+	}
 	const sorter = TASK_SORTERS.get(sortField?.toLowerCase() ?? "") ?? sortByOrdinalAndPriority;
 	return sorter(items, priorityOrder);
 }
@@ -227,7 +245,7 @@ export function sectionTasks<T extends { status: string }>(
 	sortField: string | undefined,
 	statuses: string[],
 ): Array<{ status: string | null; tasks: T[] }> {
-	if (sortField?.toLowerCase() === "priority") {
+	if (sortField && (sortField.toLowerCase() === "priority" || !TASK_SORT_FIELDS.includes(sortField.toLowerCase()))) {
 		return [{ status: null, tasks }];
 	}
 

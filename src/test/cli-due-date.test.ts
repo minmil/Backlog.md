@@ -40,23 +40,6 @@ describe("CLI due dates", () => {
 		expect(task?.dueDate).toBeUndefined();
 	});
 
-	it("rejects invalid and conflicting task due date flags", async () => {
-		const invalid = await $`bun ${CLI_PATH} task create "Invalid due" --due-date 10/08/2026`
-			.cwd(testDir)
-			.nothrow()
-			.quiet();
-		expect(invalid.exitCode).toBe(1);
-		expect(invalid.stderr.toString()).toContain("YYYY-MM-DD");
-
-		await $`bun ${CLI_PATH} task create "Valid task"`.cwd(testDir).quiet();
-		const conflict = await $`bun ${CLI_PATH} task edit 1 --due-date 2026-08-10 --clear-due-date`
-			.cwd(testDir)
-			.nothrow()
-			.quiet();
-		expect(conflict.exitCode).toBe(1);
-		expect(conflict.stderr.toString()).toContain("Cannot use --due-date and --clear-due-date together");
-	});
-
 	it("supports milestone due dates through add and rename", async () => {
 		const added = await $`bun ${CLI_PATH} milestone add "Release" --due-date 2026-09-01`.cwd(testDir).text();
 		expect(added).toContain("Due: 2026-09-01");

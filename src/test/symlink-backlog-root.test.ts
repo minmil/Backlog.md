@@ -28,7 +28,6 @@ describe("Symlinked backlog root", () => {
 		await writeFile(
 			join(backlogDir, "config.yml"),
 			`project_name: "Symlink Root"
-statuses: ["To Do", "In Progress", "Done"]
 auto_commit: false
 `,
 		);
@@ -58,7 +57,6 @@ auto_commit: false
 		await writeFile(
 			join(backlogDir, "config.yml"),
 			`project_name: "Symlink Root"
-statuses: ["To Do", "In Progress", "Done"]
 auto_commit: true
 `,
 		);
@@ -81,7 +79,6 @@ auto_commit: true
 		await writeFile(
 			join(sharedBacklogDir, "config.yml"),
 			`project_name: "In-repository Symlink"
-statuses: ["To Do", "In Progress", "Done"]
 auto_commit: false
 `,
 		);

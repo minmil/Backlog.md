@@ -33,12 +33,11 @@ export async function loadTaskCorpus(
 	core: Core,
 	options: { includeCrossBranch: boolean } = { includeCrossBranch: false },
 ): Promise<TaskCorpus> {
-	const [workingCopyTasks, archivedTasks, config] = await Promise.all([
+	const [workingCopyTasks, archivedTasks] = await Promise.all([
 		core.queryTasks({ includeCrossBranch: false }),
 		core.filesystem.listArchivedTasks(),
-		core.filesystem.loadConfig(),
 	]);
-	const statuses = config?.statuses;
+	const statuses = core.filesystem.taskSchema.fields.status?.values;
 
 	if (!options.includeCrossBranch) {
 		return { tasks: workingCopyTasks, archivedTasks, statuses };

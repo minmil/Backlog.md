@@ -17,7 +17,18 @@ import {
 import { type GitBranchTip, type GitIndexEntry, GitOperations } from "../git/operations.ts";
 import { FrontmatterReferenceError, parseFrontmatter } from "../markdown/frontmatter.ts";
 import { extractSection, parseTask } from "../markdown/parser.ts";
-import { assertSectionInputHasNoMarkerLines, assertValidChecklistMarks } from "../markdown/structured-sections.ts";
+import {
+	appendMarkdown,
+	checklistAdd,
+	checklistCheck,
+	checklistRemove,
+	checklistReplace,
+	checklistUncheck,
+	logAppend,
+	parseSections,
+	setMarkdown,
+} from "../markdown/sections.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
 import {
 	type AcceptanceCriterion,
 	type BacklogConfig,
@@ -35,7 +46,6 @@ import {
 	type Milestone,
 	type SearchFilters,
 	type Task,
-	type TaskCommentInput,
 	type TaskCreateInput,
 	type TaskListFilter,
 	type TaskUpdateInput,
@@ -63,21 +73,9 @@ import {
 	getPrefixForType,
 	normalizeId,
 } from "../utils/prefix-config.ts";
-import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
-import {
-	formatValidProjectValues,
-	getProjectValues,
-	noProjectsConfiguredMessage,
-	resolveProjectValue,
-} from "../utils/project-config.ts";
 import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
-import {
-	getCanonicalStatus as resolveCanonicalStatus,
-	getValidStatuses as resolveValidStatuses,
-} from "../utils/status.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
 import {
-	buildDefinitionOfDoneItems,
 	normalizeStringList,
 	parseDelimitedStringList,
 	stringArraysEqual,
@@ -102,7 +100,6 @@ import {
 import { applyTaskFilters, createTaskSearchIndex } from "../utils/task-search.ts";
 import { sortByOrdinal } from "../utils/task-sorting.ts";
 import { attachSubtaskSummaries, findDirectSubtasks } from "../utils/task-subtasks.ts";
-import { formatValidTaskTypeValues, resolveTaskTypeValue } from "../utils/task-type-config.ts";
 import { upsertTaskUpdatedDate } from "../utils/task-updated-date.ts";
 import { isTerminalStatus } from "../utils/terminal-status.ts";
 import { formatUtcTimestamp, parseStoredUtcDate } from "../utils/utc-timestamp.ts";
@@ -311,18 +308,13 @@ function buildUpdatedDateComparableTask(task: Task): Record<string, unknown> {
 		documentation: task.documentation ?? [],
 		modifiedFiles: task.modifiedFiles ?? [],
 		rawContent: task.rawContent ?? "",
-		description: task.description,
-		implementationPlan: task.implementationPlan,
-		implementationNotes: task.implementationNotes,
-		comments: task.comments ?? [],
-		finalSummary: task.finalSummary,
-		acceptanceCriteriaItems: task.acceptanceCriteriaItems ?? [],
-		definitionOfDoneItems: task.definitionOfDoneItems ?? [],
+		sections: task.sections ?? {},
 		parentTaskId: task.parentTaskId,
 		subtasks: task.subtasks ?? [],
 		priority: task.priority,
 		type: task.type,
 		project: task.project,
+		fieldValues: task.fieldValues ?? {},
 		onStatusChange: task.onStatusChange,
 	};
 }
@@ -346,17 +338,6 @@ function normalizeDocumentTypeInput(type: unknown): DocumentType | undefined {
 		return type as DocumentType;
 	}
 	throw new Error(`Document type must be one of: ${DOCUMENT_TYPE_VALUES.join(", ")}.`);
-}
-
-function formatAvailableIndexHint(items: AcceptanceCriterion[], emptyMessage: string): string {
-	if (items.length === 0) {
-		return emptyMessage;
-	}
-	const indexes = items.map((item) => item.index).sort((a, b) => a - b);
-	const first = indexes[0] ?? 1;
-	const last = indexes[indexes.length - 1] ?? first;
-	const range = first === last ? `#${first}` : `#${first}-#${last}`;
-	return `Available indexes: ${range}.`;
 }
 
 /** Dependencies are validated against the working copy on both the create and the edit path. */
@@ -383,35 +364,6 @@ function normalizeTargetMilestone(targetMilestone: string | null | undefined): s
 	if (typeof targetMilestone !== "string") return undefined;
 	const trimmed = targetMilestone.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
-}
-
-/**
- * Structured-section input that contains its own sentinel marker as a whole
- * line is rejected before any write: wrapping it would nest markers and hide
- * the stored content from every reader (GitHub issue #932).
- */
-function assertSectionInputsSafe(input: {
-	description?: string;
-	implementationPlan?: string;
-	implementationNotes?: string;
-	finalSummary?: string;
-	appendImplementationPlan?: string[];
-	appendImplementationNotes?: string[];
-	appendFinalSummary?: string[];
-}): void {
-	assertSectionInputHasNoMarkerLines(input.description, "description");
-	assertSectionInputHasNoMarkerLines(input.implementationPlan, "implementationPlan");
-	assertSectionInputHasNoMarkerLines(input.implementationNotes, "implementationNotes");
-	assertSectionInputHasNoMarkerLines(input.finalSummary, "finalSummary");
-	for (const value of input.appendImplementationPlan ?? []) {
-		assertSectionInputHasNoMarkerLines(value, "implementationPlan");
-	}
-	for (const value of input.appendImplementationNotes ?? []) {
-		assertSectionInputHasNoMarkerLines(value, "implementationNotes");
-	}
-	for (const value of input.appendFinalSummary ?? []) {
-		assertSectionInputHasNoMarkerLines(value, "finalSummary");
-	}
 }
 
 /**
@@ -676,7 +628,7 @@ export class Core {
 	constructor(projectRoot: string, options?: { enableWatchers?: boolean }) {
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.taskSchema);
 		// Disable watchers by default for CLI commands (non-interactive)
 		// Interactive modes (TUI, browser, MCP) should explicitly pass enableWatchers: true
 		this.enableWatchers = options?.enableWatchers ?? false;
@@ -949,7 +901,7 @@ export class Core {
 			filesystemOnly,
 			taskPrefix: config?.prefixes?.task ?? "task",
 			taskResolutionStrategy: config?.taskResolutionStrategy ?? "most_progressed",
-			statuses: config?.statuses ?? DEFAULT_STATUSES,
+			statuses: this.fs.taskSchema.fields.status?.values ?? DEFAULT_STATUSES,
 			backlogDir: filesystem.backlogDirName,
 		};
 	}
@@ -1131,52 +1083,28 @@ export class Core {
 	}
 
 	private async requireCanonicalStatus(status: string): Promise<string> {
-		const canonical = await resolveCanonicalStatus(status, this);
-		if (canonical) {
-			return canonical;
-		}
-		const validStatuses = await resolveValidStatuses(this);
-		throw new Error(`Invalid status: ${status}. Valid statuses are: ${validStatuses.join(", ")}`);
+		return new FieldRegistry(this.fs.taskSchema).parseInput("status", status) as string;
 	}
 
 	private async normalizePriority(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value.trim() === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const normalized = resolvePriorityValue(value, config);
-		if (!normalized) {
-			throw new Error(`Invalid priority: ${value}. Valid values are: ${formatValidPriorityValues(config)}`);
-		}
-		return normalized;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("priority", value) as string;
 	}
 
 	private async normalizeTaskType(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const canonical = resolveTaskTypeValue(value, config);
-		if (!canonical) {
-			throw new Error(`Invalid type: ${value}. Valid types are: ${formatValidTaskTypeValues(config)}`);
-		}
-		return canonical;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("type", value) as string;
 	}
 
 	private async normalizeProject(value: string | undefined): Promise<string | undefined> {
 		if (value === undefined || value === "") {
 			return undefined;
 		}
-		const config = await this.fs.loadConfig();
-		const configuredProjects = getProjectValues(config);
-		if (configuredProjects.length === 0) {
-			throw new Error(noProjectsConfiguredMessage(this.fs.configFilePath));
-		}
-		const canonical = resolveProjectValue(value, config);
-		if (!canonical) {
-			throw new Error(`Invalid project: ${value}. Valid projects are: ${formatValidProjectValues(config)}`);
-		}
-		return canonical;
+		return new FieldRegistry(this.fs.taskSchema).parseInput("project", value) as string;
 	}
 
 	/**
@@ -1509,7 +1437,7 @@ export class Core {
 				localTasks,
 				archivedTasks,
 				[],
-				config?.statuses ?? [...DEFAULT_STATUSES],
+				this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES],
 				config?.taskResolutionStrategy ?? "most_progressed",
 				null,
 				filesystem,
@@ -1655,7 +1583,7 @@ export class Core {
 		this.disposeContentStore();
 		this.fs = new FileSystem(projectRoot);
 		this.git = new GitOperations(projectRoot, null, () => this.fs.loadConfig());
-		this.branchTaskLoader = new BranchTaskLoader(this.git);
+		this.branchTaskLoader = new BranchTaskLoader(this.git, () => this.fs.taskSchema);
 	}
 
 	disposeSearchService(): void {
@@ -2168,7 +2096,15 @@ export class Core {
 		if (!input.title || input.title.trim().length === 0) {
 			throw new Error("Title is required to create a task.");
 		}
-		assertSectionInputsSafe(input);
+		if (
+			input.implementationPlan !== undefined ||
+			input.implementationNotes !== undefined ||
+			input.finalSummary !== undefined ||
+			input.definitionOfDoneAdd?.length ||
+			input.disableDefinitionOfDoneDefaults
+		) {
+			throw new Error("Legacy section inputs were removed. Use schema section operations instead.");
+		}
 
 		// Determine if this is a draft BEFORE generating the ID
 		const requestedStatus = input.status?.trim();
@@ -2198,6 +2134,23 @@ export class Core {
 		const priority = await this.normalizePriority(input.priority);
 		const type = await this.normalizeTaskType(input.type);
 		const project = await this.normalizeProject(input.project);
+		const taskSchema = this.fs.taskSchema;
+		const registry = new FieldRegistry(taskSchema);
+		const fieldValues: Record<string, unknown> = {};
+		for (const key of Object.keys(input.fieldValues ?? {})) {
+			if (!taskSchema.fields[key] || taskSchema.fields[key].core) throw new Error(`Unknown custom task field "${key}"`);
+		}
+		for (const [key, definition] of Object.entries(taskSchema.fields)) {
+			if (definition.core) continue;
+			const raw = input.fieldValues?.[key] ?? definition.default;
+			if (raw === undefined || raw === null || raw === "") {
+				if (definition.required) throw new Error(`Task field "${key}" is required`);
+				continue;
+			}
+			fieldValues[key] = registry.validateValue(key, raw);
+		}
+		if (input.reporter) registry.validateValue("reporter", input.reporter);
+		registry.validateValue("assignee", normalizedAssignees);
 		const createdDate = formatUtcTimestamp();
 		if (
 			input.ordinal !== undefined &&
@@ -2206,26 +2159,17 @@ export class Core {
 			throw new Error("Ordinal must be a non-negative number.");
 		}
 
-		const acceptanceCriteriaItems = Array.isArray(input.acceptanceCriteria)
-			? input.acceptanceCriteria
-					.map((criterion, index) => ({
-						index: index + 1,
-						text: String(criterion.text ?? "").trim(),
-						checked: Boolean(criterion.checked),
-					}))
-					.filter((criterion) => criterion.text.length > 0)
-			: [];
-		const config = await this.fs.loadConfig();
-		const definitionOfDoneItems = buildDefinitionOfDoneItems({
-			defaults: config?.definitionOfDone,
-			add: input.definitionOfDoneAdd,
-			disableDefaults: input.disableDefinitionOfDoneDefaults,
-		});
-		const resolvedStatus = isDraft ? "Draft" : status || config?.defaultStatus || FALLBACK_STATUS;
+		const resolvedStatus = isDraft
+			? "Draft"
+			: status || (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS;
 		// An absent assignee means "no opinion" and takes the configured default; an explicit
 		// assignee replaces it entirely, and an explicit empty list means "unassigned".
+		const defaultUser = taskSchema.users.find((user) => user.default)?.handle;
 		const resolvedAssignees =
-			input.assignee === undefined ? (normalizeStringList(config?.defaultAssignee) ?? []) : normalizedAssignees;
+			input.assignee === undefined
+				? (normalizeStringList(this.fs.taskSchema.fields.assignee?.default as string[] | undefined) ??
+					(defaultUser ? [defaultUser] : []))
+				: normalizedAssignees;
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
 
 		const { task, write } = await this.withCreateLock(async () => {
@@ -2253,35 +2197,79 @@ export class Core {
 				throw formatMissingDependenciesError(invalidDependencies);
 			}
 			const ordinal = await this.resolveCreateOrdinal(input.ordinal, isDraft);
+			const createdSections = parseSections(input.rawContent ?? "", taskSchema);
+			if (input.description !== undefined && input.sections?.description === undefined) {
+				setMarkdown(createdSections, "description", input.description, taskSchema);
+			}
+			for (const [id, value] of Object.entries(input.sections ?? {})) {
+				setMarkdown(createdSections, id, value, taskSchema);
+			}
+			for (const criterion of input.acceptanceCriteria ?? []) {
+				if (!criterion.text?.trim()) continue;
+				checklistAdd(createdSections, "acceptance", criterion.text.trim(), taskSchema);
+				if (criterion.checked) {
+					const count = (createdSections.sections.acceptance as AcceptanceCriterion[]).length;
+					checklistCheck(createdSections, "acceptance", count, taskSchema);
+				}
+			}
+			for (const [id, values] of Object.entries(input.sectionItems ?? {})) {
+				for (const value of values) checklistAdd(createdSections, id, value, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(input.sectionChecks ?? {})) {
+				for (const index of indices) checklistCheck(createdSections, id, index, taskSchema);
+			}
+			if (input.appendLog) {
+				logAppend(createdSections, input.appendLog.section ?? "log", input.appendLog, taskSchema);
+			}
 			const task: Task = {
 				id,
 				title: input.title.trim(),
 				status: resolvedStatus,
 				assignee: resolvedAssignees,
+				...(input.reporter || this.fs.taskSchema.users.find((user) => user.default)?.handle
+					? { reporter: input.reporter ?? this.fs.taskSchema.users.find((user) => user.default)?.handle }
+					: {}),
 				labels: normalizedLabels,
 				dependencies: validDependencies,
 				references: normalizedReferences,
 				documentation: normalizedDocumentation,
 				modifiedFiles: normalizedModifiedFiles,
 				rawContent: input.rawContent ?? "",
+				sections: createdSections.sections,
+				other: createdSections.other,
 				createdDate,
 				...(dueDate && { dueDate }),
 				...(parentTaskId && { parentTaskId }),
 				...(priority && { priority }),
 				...(type && { type }),
 				...(project && { project }),
+				fieldValues,
+				...(input.onStatusChange && { onStatusChange: input.onStatusChange }),
 				...(typeof ordinal === "number" && { ordinal }),
 				...(typeof input.milestone === "string" &&
 					input.milestone.trim().length > 0 && {
 						milestone: input.milestone.trim(),
 					}),
-				...(typeof input.description === "string" && { description: input.description }),
-				...(typeof input.implementationPlan === "string" && { implementationPlan: input.implementationPlan }),
-				...(typeof input.implementationNotes === "string" && { implementationNotes: input.implementationNotes }),
-				...(typeof input.finalSummary === "string" && { finalSummary: input.finalSummary }),
-				...(acceptanceCriteriaItems.length > 0 && { acceptanceCriteriaItems }),
-				...(definitionOfDoneItems && definitionOfDoneItems.length > 0 && { definitionOfDoneItems }),
+				...(typeof createdSections.sections.description === "string" && {
+					description: createdSections.sections.description,
+				}),
+				...(Array.isArray(createdSections.sections.acceptance) && {
+					acceptanceCriteriaItems: createdSections.sections.acceptance as AcceptanceCriterion[],
+				}),
 			};
+			const trackedLogId = Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+			if (trackedLogId) {
+				for (const [key, definition] of Object.entries(taskSchema.fields)) {
+					if (!definition.track_changes) continue;
+					const value = registry.getField(task, key);
+					if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
+						continue;
+					}
+					const label = definition.label ?? key;
+					const body = `${label}: ∅ → ${String(registry.format(key, value, "plain"))}`;
+					logAppend(createdSections, trackedLogId, { body, author: input.actingUser, auto: true }, taskSchema);
+				}
+			}
 
 			const targetPath = await this.fs.getTaskWritePath(task, isDraft);
 			const previousIndexEntries = autoCommitEnabled ? await this.git.getIndexEntries(targetPath) : undefined;
@@ -2343,8 +2331,7 @@ export class Core {
 
 	async createTask(task: Task, autoCommit?: boolean): Promise<string> {
 		if (!task.status) {
-			const config = await this.fs.loadConfig();
-			task.status = config?.defaultStatus || FALLBACK_STATUS;
+			task.status = (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS;
 		}
 
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
@@ -2412,37 +2399,54 @@ export class Core {
 		input: TaskUpdateInput,
 		statusResolver: (status: string) => Promise<string>,
 	): Promise<{ task: Task; mutated: boolean }> {
-		assertSectionInputsSafe(input);
-		if (
-			input.acceptanceCriteria !== undefined ||
-			input.removeAcceptanceCriteria?.length ||
-			input.checkAcceptanceCriteria?.length ||
-			input.uncheckAcceptanceCriteria?.length
-		) {
-			assertValidChecklistMarks(task.rawContent ?? "", "AC");
-		}
-		if (
-			input.removeDefinitionOfDone?.length ||
-			input.checkDefinitionOfDone?.length ||
-			input.uncheckDefinitionOfDone?.length
-		) {
-			assertValidChecklistMarks(task.rawContent ?? "", "DOD");
-		}
 		let mutated = false;
-
-		const applyStringField = (
-			value: string | undefined,
-			current: string | undefined,
-			assign: (next: string) => void,
-		) => {
-			if (typeof value === "string") {
-				const next = value;
-				if ((current ?? "") !== next) {
-					assign(next);
+		const taskSchema = this.fs.taskSchema;
+		const trackedRegistry = new FieldRegistry(taskSchema);
+		const trackedBefore = Object.fromEntries(
+			Object.entries(taskSchema.fields)
+				.filter(([, definition]) => definition.track_changes)
+				.map(([key]) => [key, trackedRegistry.getField(task, key)]),
+		);
+		if (taskSchema) {
+			const registry = new FieldRegistry(taskSchema);
+			const apply = (key: string, next: Task): void => {
+				const previous = registry.getField(task, key);
+				const replacement = registry.getField(next, key);
+				if (JSON.stringify(previous) !== JSON.stringify(replacement)) {
+					Object.assign(task, next);
 					mutated = true;
 				}
+			};
+			for (const key of input.clearSchemaFields ?? []) apply(key, registry.clearField(task, key));
+			for (const [key, value] of Object.entries(input.schemaFields ?? {})) {
+				let resolved = value;
+				if (key === "dependencies" && Array.isArray(value)) {
+					const { valid, invalid } = await validateDependencies(value, this, task);
+					if (invalid.length > 0) throw formatMissingDependenciesError(invalid);
+					resolved = valid;
+				}
+				apply(key, registry.setField(task, key, resolved, { allowManaged: key === "ordinal" }));
 			}
-		};
+			for (const [operation, assignments] of [
+				["add", input.addSchemaFields],
+				["remove", input.removeSchemaFields],
+			] as const) {
+				for (const [key, value] of Object.entries(assignments ?? {})) {
+					const field = taskSchema.fields[key];
+					if (!field || !["multi-enum", "string-list", "user-list", "task-ref-list"].includes(field.type))
+						throw new Error(`Task field "${key}" is not a list field`);
+					const current = registry.getField(task, key);
+					const entries = registry.validateValue(key, value);
+					if (!Array.isArray(entries)) throw new Error(`Task field "${key}" is not a list field`);
+					const list = Array.isArray(current) ? current : [];
+					const changed =
+						operation === "add"
+							? [...list, ...entries.filter((entry) => !list.includes(entry))]
+							: list.filter((entry) => !entries.includes(entry));
+					apply(key, registry.setField(task, key, changed));
+				}
+			}
+		}
 
 		if (input.title !== undefined) {
 			const trimmed = input.title.trim();
@@ -2454,10 +2458,6 @@ export class Core {
 				mutated = true;
 			}
 		}
-
-		applyStringField(input.description, task.description, (next) => {
-			task.description = next;
-		});
 
 		if (input.dueDate !== undefined) {
 			const dueDate = input.dueDate === null ? undefined : normalizeDueDate(input.dueDate, "Due date");
@@ -2704,313 +2704,123 @@ export class Core {
 
 		resolveModifiedFiles();
 
-		const sanitizeAppendInput = (values: string[] | undefined): string[] => {
-			if (!values) return [];
-			return values.map((value) => String(value).trim()).filter((value) => value.length > 0);
+		const setSections = {
+			...(input.description !== undefined && { description: input.description }),
+			...input.setSections,
 		};
-
-		const appendBlock = (
-			existing: string | undefined,
-			additions: string[] | undefined,
-		): { value?: string; changed: boolean } => {
-			const sanitizedAdditions = (additions ?? [])
-				.map((value) => String(value).trim())
-				.filter((value) => value.length > 0);
-			if (sanitizedAdditions.length === 0) {
-				return { value: existing, changed: false };
-			}
-			const current = (existing ?? "").trim();
-			const additionBlock = sanitizedAdditions.join("\n\n");
-			if (current.length === 0) {
-				return { value: additionBlock, changed: true };
-			}
-			return { value: `${current}\n\n${additionBlock}`, changed: true };
+		const addSectionItems = {
+			...(input.addAcceptanceCriteria?.length && {
+				acceptance: input.addAcceptanceCriteria.map((item) => (typeof item === "string" ? item : item.text)),
+			}),
+			...input.addSectionItems,
 		};
-
-		const containsCommentMarker = (inputValue: string): boolean => /<!--\s*COMMENTS?:/i.test(inputValue);
-		const containsCommentDelimiter = (inputValue: string): boolean =>
-			/^\s*---\s*$/m.test(inputValue.replace(/\r\n/g, "\n"));
-
-		const sanitizeCommentInput = (value: TaskCommentInput | string): TaskCommentInput | undefined => {
-			const rawBody = typeof value === "string" ? value : value.body;
-			const body = String(rawBody ?? "")
-				.replace(/\r\n/g, "\n")
-				.trim();
-			if (body.length === 0) return undefined;
-			if (containsCommentMarker(body)) {
-				throw new Error("Comment body cannot contain Backlog comment markers.");
-			}
-			if (containsCommentDelimiter(body)) {
-				throw new Error("Comment body cannot contain standalone '---' delimiter lines.");
-			}
-			const author =
-				typeof value === "string"
-					? undefined
-					: String(value.author ?? "")
-							.replace(/\s+/g, " ")
-							.trim();
-			const createdDate = typeof value === "string" ? undefined : String(value.createdDate ?? "").trim();
-			if (author && containsCommentMarker(author)) {
-				throw new Error("Comment author cannot contain Backlog comment markers.");
-			}
-			if (author && containsCommentDelimiter(author)) {
-				throw new Error("Comment author cannot contain standalone '---' delimiter lines.");
-			}
-			if (createdDate && containsCommentMarker(createdDate)) {
-				throw new Error("Comment created date cannot contain Backlog comment markers.");
-			}
-			if (createdDate && containsCommentDelimiter(createdDate)) {
-				throw new Error("Comment created date cannot contain standalone '---' delimiter lines.");
-			}
-			return {
-				body,
-				...(author && { author }),
-				...(createdDate && { createdDate }),
-			};
+		const checkSectionItems = {
+			...(input.checkAcceptanceCriteria?.length && { acceptance: input.checkAcceptanceCriteria }),
+			...input.checkSectionItems,
 		};
-
-		if (input.clearImplementationPlan) {
-			if (task.implementationPlan !== undefined) {
-				task.implementationPlan = "";
-				mutated = true;
-			}
+		const uncheckSectionItems = {
+			...(input.uncheckAcceptanceCriteria?.length && { acceptance: input.uncheckAcceptanceCriteria }),
+			...input.uncheckSectionItems,
+		};
+		const removeSectionItems = {
+			...(input.removeAcceptanceCriteria?.length && { acceptance: input.removeAcceptanceCriteria }),
+			...input.removeSectionItems,
+		};
+		const replaceSectionItems = input.replaceSectionItems ?? {};
+		const appendLogs: NonNullable<TaskUpdateInput["appendLogs"]> = [
+			...(input.appendLogs ?? []),
+			...(input.appendComments ?? []).map((item) =>
+				typeof item === "string" ? { body: item } : { body: item.body, author: item.author },
+			),
+		];
+		if (
+			input.implementationPlan !== undefined ||
+			input.appendImplementationPlan?.length ||
+			input.clearImplementationPlan ||
+			input.implementationNotes !== undefined ||
+			input.appendImplementationNotes?.length ||
+			input.clearImplementationNotes ||
+			input.finalSummary !== undefined ||
+			input.appendFinalSummary?.length ||
+			input.clearFinalSummary ||
+			input.addDefinitionOfDone?.length ||
+			input.removeDefinitionOfDone?.length ||
+			input.checkDefinitionOfDone?.length ||
+			input.uncheckDefinitionOfDone?.length
+		) {
+			throw new Error("Legacy section inputs were removed. Use schema section operations instead.");
 		}
-
-		applyStringField(input.implementationPlan, task.implementationPlan, (next) => {
-			task.implementationPlan = next;
+		const trackedChanges = Object.entries(trackedBefore).flatMap(([key, previous]) => {
+			const next = trackedRegistry.getField(task, key);
+			if (JSON.stringify(previous) === JSON.stringify(next)) return [];
+			const label = taskSchema.fields[key]?.label ?? key;
+			const display = (value: typeof next) =>
+				value === undefined || value === "" || (Array.isArray(value) && value.length === 0)
+					? "∅"
+					: String(trackedRegistry.format(key, value, "plain"));
+			return [`${label}: ${display(previous)} → ${display(next)}`];
 		});
 
-		const planAppends = sanitizeAppendInput(input.appendImplementationPlan);
-		if (planAppends.length > 0) {
-			const { value, changed } = appendBlock(task.implementationPlan, planAppends);
-			if (changed) {
-				task.implementationPlan = value;
-				mutated = true;
-			}
-		}
-
-		if (input.clearImplementationNotes) {
-			if (task.implementationNotes !== undefined) {
-				task.implementationNotes = "";
-				mutated = true;
-			}
-		}
-
-		applyStringField(input.implementationNotes, task.implementationNotes, (next) => {
-			task.implementationNotes = next;
-		});
-
-		const notesAppends = sanitizeAppendInput(input.appendImplementationNotes);
-		if (notesAppends.length > 0) {
-			const { value, changed } = appendBlock(task.implementationNotes, notesAppends);
-			if (changed) {
-				task.implementationNotes = value;
-				mutated = true;
-			}
-		}
-
-		if (input.appendComments && input.appendComments.length > 0) {
-			const currentComments = Array.isArray(task.comments) ? task.comments.map((comment) => ({ ...comment })) : [];
-			let nextIndex = currentComments.length > 0 ? Math.max(...currentComments.map((comment) => comment.index)) + 1 : 1;
-			const createdDate = formatUtcTimestamp();
-			for (const value of input.appendComments) {
-				const sanitized = sanitizeCommentInput(value);
-				if (!sanitized) continue;
-				currentComments.push({
-					index: nextIndex++,
-					body: sanitized.body,
-					createdDate: sanitized.createdDate ?? createdDate,
-					...(sanitized.author && { author: sanitized.author }),
-				});
-				mutated = true;
-			}
-			if (mutated) {
-				task.comments = currentComments;
-			}
-		}
-
-		if (input.clearFinalSummary) {
-			if (task.finalSummary !== undefined) {
-				task.finalSummary = "";
-				mutated = true;
-			}
-		}
-
-		applyStringField(input.finalSummary, task.finalSummary, (next) => {
-			task.finalSummary = next;
-		});
-
-		const finalSummaryAppends = sanitizeAppendInput(input.appendFinalSummary);
-		if (finalSummaryAppends.length > 0) {
-			const { value, changed } = appendBlock(task.finalSummary, finalSummaryAppends);
-			if (changed) {
-				task.finalSummary = value;
-				mutated = true;
-			}
-		}
-
-		let acceptanceCriteria = Array.isArray(task.acceptanceCriteriaItems)
-			? task.acceptanceCriteriaItems.map((criterion) => ({ ...criterion }))
-			: [];
-
-		const rebuildIndices = () => {
-			acceptanceCriteria = acceptanceCriteria.map((criterion, index) => ({
-				...criterion,
-				index: index + 1,
-			}));
-		};
-
-		if (input.acceptanceCriteria !== undefined) {
-			const unmatchedCriteria = [...acceptanceCriteria];
-			const sanitized = input.acceptanceCriteria
-				.map((criterion) => ({
-					text: String(criterion.text ?? "").trim(),
-					checked: criterion.checked,
-				}))
-				.filter((criterion) => criterion.text.length > 0)
-				.map((criterion, index) => {
-					const matchIndex = unmatchedCriteria.findIndex((previous) => previous.text.trim() === criterion.text);
-					const previous = matchIndex < 0 ? undefined : unmatchedCriteria.splice(matchIndex, 1)[0];
-					return {
-						index: index + 1,
-						text: criterion.text,
-						checked: typeof criterion.checked === "boolean" ? criterion.checked : (previous?.checked ?? false),
-					};
-				});
-			acceptanceCriteria = sanitized;
-			mutated = true;
-		}
-
-		if (input.addAcceptanceCriteria && input.addAcceptanceCriteria.length > 0) {
-			const additions = input.addAcceptanceCriteria
-				.map((criterion) => (typeof criterion === "string" ? criterion.trim() : String(criterion.text ?? "").trim()))
-				.filter((text) => text.length > 0);
-			let index =
-				acceptanceCriteria.length > 0 ? Math.max(...acceptanceCriteria.map((criterion) => criterion.index)) + 1 : 1;
-			for (const text of additions) {
-				acceptanceCriteria.push({ index: index++, text, checked: false });
-				mutated = true;
-			}
-		}
-
-		if (input.removeAcceptanceCriteria && input.removeAcceptanceCriteria.length > 0) {
-			const removalSet = new Set(input.removeAcceptanceCriteria);
-			const beforeLength = acceptanceCriteria.length;
-			acceptanceCriteria = acceptanceCriteria.filter((criterion) => !removalSet.has(criterion.index));
-			if (acceptanceCriteria.length === beforeLength) {
-				throw new Error(
-					`Acceptance criterion ${Array.from(removalSet)
-						.map((index) => `#${index}`)
-						.join(", ")} not found. ${formatAvailableIndexHint(
-						acceptanceCriteria,
-						"No acceptance criteria are defined.",
-					)}`,
-				);
-			}
-			mutated = true;
-			rebuildIndices();
-		}
-
-		const toggleCriteria = (indices: number[] | undefined, checked: boolean) => {
-			if (!indices || indices.length === 0) return;
-			const missing: number[] = [];
-			for (const index of indices) {
-				const criterion = acceptanceCriteria.find((item) => item.index === index);
-				if (!criterion) {
-					missing.push(index);
-					continue;
-				}
-				if (criterion.checked !== checked) {
-					criterion.checked = checked;
-					mutated = true;
+		const sectionEditRequested = Boolean(
+			Object.keys(setSections).length ||
+				input.appendSections ||
+				Object.keys(addSectionItems).length ||
+				Object.keys(checkSectionItems).length ||
+				Object.keys(uncheckSectionItems).length ||
+				Object.keys(removeSectionItems).length ||
+				Object.keys(replaceSectionItems).length ||
+				input.acceptanceCriteria !== undefined ||
+				input.appendLog ||
+				appendLogs.length ||
+				trackedChanges.length,
+		);
+		if (sectionEditRequested) {
+			const parsed = parseSections(task.rawContent ?? "", taskSchema);
+			const before = JSON.stringify(parsed.sections);
+			for (const [id, value] of Object.entries(setSections)) setMarkdown(parsed, id, value, taskSchema);
+			for (const [id, items] of Object.entries(replaceSectionItems)) checklistReplace(parsed, id, items, taskSchema);
+			if (input.acceptanceCriteria !== undefined) {
+				parsed.sections.acceptance = [];
+				for (const criterion of input.acceptanceCriteria) {
+					checklistAdd(parsed, "acceptance", criterion.text, taskSchema);
+					if (criterion.checked) {
+						const count = (parsed.sections.acceptance as AcceptanceCriterion[]).length;
+						checklistCheck(parsed, "acceptance", count, taskSchema);
+					}
 				}
 			}
-			if (missing.length > 0) {
-				const label = missing.map((index) => `#${index}`).join(", ");
-				throw new Error(
-					`Acceptance criterion ${label} not found. ${formatAvailableIndexHint(
-						acceptanceCriteria,
-						"No acceptance criteria are defined.",
-					)}`,
-				);
+			for (const [id, values] of Object.entries(input.appendSections ?? {})) {
+				for (const value of values) appendMarkdown(parsed, id, value, taskSchema);
 			}
-		};
-
-		toggleCriteria(input.checkAcceptanceCriteria, true);
-		toggleCriteria(input.uncheckAcceptanceCriteria, false);
-
-		task.acceptanceCriteriaItems = acceptanceCriteria;
-
-		let definitionOfDone = Array.isArray(task.definitionOfDoneItems)
-			? task.definitionOfDoneItems.map((criterion) => ({ ...criterion }))
-			: [];
-
-		const rebuildDefinitionIndices = () => {
-			definitionOfDone = definitionOfDone.map((criterion, index) => ({
-				...criterion,
-				index: index + 1,
-			}));
-		};
-
-		if (input.addDefinitionOfDone && input.addDefinitionOfDone.length > 0) {
-			const additions = input.addDefinitionOfDone
-				.map((criterion) => (typeof criterion === "string" ? criterion.trim() : String(criterion.text ?? "").trim()))
-				.filter((text) => text.length > 0);
-			let index =
-				definitionOfDone.length > 0 ? Math.max(...definitionOfDone.map((criterion) => criterion.index)) + 1 : 1;
-			for (const text of additions) {
-				definitionOfDone.push({ index: index++, text, checked: false });
+			for (const [id, values] of Object.entries(addSectionItems)) {
+				for (const value of values) checklistAdd(parsed, id, value, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(checkSectionItems)) {
+				for (const index of indices) checklistCheck(parsed, id, index, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(uncheckSectionItems)) {
+				for (const index of indices) checklistUncheck(parsed, id, index, taskSchema);
+			}
+			for (const [id, indices] of Object.entries(removeSectionItems)) {
+				for (const index of [...indices].sort((a, b) => b - a)) checklistRemove(parsed, id, index, taskSchema);
+			}
+			for (const entry of [...(input.appendLog ? [input.appendLog] : []), ...appendLogs]) {
+				const logId =
+					entry.section ?? Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+				if (!logId) throw new Error("No log section is configured in task-schema.yml.");
+				logAppend(parsed, logId, entry, taskSchema);
+			}
+			const trackedLogId = Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
+			if (trackedLogId) {
+				for (const body of trackedChanges) {
+					logAppend(parsed, trackedLogId, { body, author: input.actingUser, auto: true }, taskSchema);
+				}
+			}
+			if (JSON.stringify(parsed.sections) !== before) {
+				task.sections = parsed.sections;
 				mutated = true;
 			}
 		}
-
-		const toggleDefinitionItems = (indices: number[] | undefined, checked: boolean) => {
-			if (!indices || indices.length === 0) return;
-			const missing: number[] = [];
-			for (const index of indices) {
-				const criterion = definitionOfDone.find((item) => item.index === index);
-				if (!criterion) {
-					missing.push(index);
-					continue;
-				}
-				if (criterion.checked !== checked) {
-					criterion.checked = checked;
-					mutated = true;
-				}
-			}
-			if (missing.length > 0) {
-				const label = missing.map((index) => `#${index}`).join(", ");
-				throw new Error(
-					`Definition of Done item ${label} not found. ${formatAvailableIndexHint(
-						definitionOfDone,
-						"No Definition of Done items are defined.",
-					)}`,
-				);
-			}
-		};
-
-		toggleDefinitionItems(input.checkDefinitionOfDone, true);
-		toggleDefinitionItems(input.uncheckDefinitionOfDone, false);
-
-		if (input.removeDefinitionOfDone && input.removeDefinitionOfDone.length > 0) {
-			const removalSet = new Set(input.removeDefinitionOfDone);
-			const beforeLength = definitionOfDone.length;
-			definitionOfDone = definitionOfDone.filter((criterion) => !removalSet.has(criterion.index));
-			if (definitionOfDone.length === beforeLength) {
-				throw new Error(
-					`Definition of Done item ${Array.from(removalSet)
-						.map((index) => `#${index}`)
-						.join(", ")} not found. ${formatAvailableIndexHint(
-						definitionOfDone,
-						"No Definition of Done items are defined.",
-					)}`,
-				);
-			}
-			mutated = true;
-			rebuildDefinitionIndices();
-		}
-
-		task.definitionOfDoneItems = definitionOfDone;
 
 		return { task, mutated };
 	}
@@ -4013,8 +3823,7 @@ export class Core {
 	 */
 	async getTerminalStatusTasksByAge(olderThanDays: number): Promise<Task[]> {
 		const tasks = await this.fs.listTasks();
-		const config = await this.fs.loadConfig();
-		const statuses = config?.statuses ?? [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES];
 		const cutoffDate = new Date();
 		cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
@@ -4040,8 +3849,7 @@ export class Core {
 	 * Neither stops the others. {@link formatCleanupResult} words the result for both callers.
 	 */
 	async archiveTerminalStatusTasks(taskIds: string[]): Promise<CleanupResult> {
-		const config = await this.fs.loadConfig();
-		const statuses = config?.statuses ?? [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES];
 		const archivedTaskIds: string[] = [];
 		const skipped: Array<{ taskId: string; reason: string }> = [];
 		const failures: Array<{ taskId: string; reason: string }> = [];
@@ -4101,11 +3909,10 @@ export class Core {
 				const draft = await this.fs.loadDraftFromFile(sourcePath);
 				if (!draft) return null;
 
-				const config = await this.fs.loadConfig();
 				const newTaskId = await this.generateNextId(EntityType.Task, draft.parentTaskId);
 				const promotedStatus =
 					!draft.status || draft.status.trim().toLowerCase() === "draft"
-						? config?.defaultStatus || FALLBACK_STATUS
+						? (this.fs.taskSchema.fields.status?.default as string | undefined) || FALLBACK_STATUS
 						: draft.status;
 
 				const promotedTask: Task = {
@@ -4206,123 +4013,45 @@ export class Core {
 		return { success, cleanedTaskIds };
 	}
 
-	/**
-	 * Add acceptance criteria to a task
-	 */
+	/** Legacy entry points forward to the configured checklist through the section engine. */
 	async addAcceptanceCriteria(taskId: string, criteria: string[], autoCommit?: boolean): Promise<void> {
-		const task = await this.fs.loadTask(taskId);
-		if (!task) {
-			throw new Error(`Task not found: ${taskId}`);
-		}
-
-		// Get existing criteria or initialize empty array
-		const current = Array.isArray(task.acceptanceCriteriaItems) ? [...task.acceptanceCriteriaItems] : [];
-
-		// Calculate next index (1-based)
-		let nextIndex = current.length > 0 ? Math.max(...current.map((c) => c.index)) + 1 : 1;
-
-		// Append new criteria
-		const newCriteria = criteria.map((text) => ({ index: nextIndex++, text, checked: false }));
-		task.acceptanceCriteriaItems = [...current, ...newCriteria];
-
-		// Save the task
-		await this.updateTask(task, autoCommit);
+		await this.updateTaskFromInput(taskId, { addSectionItems: { acceptance: criteria } }, autoCommit);
 	}
 
-	/**
-	 * Remove acceptance criteria by indices (supports batch operations)
-	 * @returns Array of removed indices
-	 */
 	async removeAcceptanceCriteria(taskId: string, indices: number[], autoCommit?: boolean): Promise<number[]> {
-		const task = await this.fs.loadTask(taskId);
-		if (!task) {
-			throw new Error(`Task not found: ${taskId}`);
-		}
-		assertValidChecklistMarks(task.rawContent ?? "", "AC");
-
-		let list = Array.isArray(task.acceptanceCriteriaItems) ? [...task.acceptanceCriteriaItems] : [];
-		const removed: number[] = [];
-
-		// Sort indices in descending order to avoid index shifting issues
-		const sortedIndices = [...indices].sort((a, b) => b - a);
-
-		for (const idx of sortedIndices) {
-			const before = list.length;
-			list = list.filter((c) => c.index !== idx);
-			if (list.length < before) {
-				removed.push(idx);
-			}
-		}
-
-		if (removed.length === 0) {
-			throw new Error("No criteria were removed. Check that the specified indices exist.");
-		}
-
-		// Re-index remaining items (1-based)
-		list = list.map((c, i) => ({ ...c, index: i + 1 }));
-		task.acceptanceCriteriaItems = list;
-
-		// Save the task
-		await this.updateTask(task, autoCommit);
-
-		return removed.sort((a, b) => a - b); // Return in ascending order
+		const items = await this.listAcceptanceCriteria(taskId);
+		const removed = [...new Set(indices.filter((index) => items.some((item) => item.index === index)))].sort(
+			(a, b) => a - b,
+		);
+		if (removed.length === 0) throw new Error("No criteria were removed. Check that the specified indices exist.");
+		await this.updateTaskFromInput(taskId, { removeSectionItems: { acceptance: removed } }, autoCommit);
+		return removed;
 	}
 
-	/**
-	 * Check or uncheck acceptance criteria by indices (supports batch operations)
-	 * Silently ignores invalid indices and only updates valid ones.
-	 * @returns Array of updated indices
-	 */
 	async checkAcceptanceCriteria(
 		taskId: string,
 		indices: number[],
 		checked: boolean,
 		autoCommit?: boolean,
 	): Promise<number[]> {
-		const task = await this.fs.loadTask(taskId);
-		if (!task) {
-			throw new Error(`Task not found: ${taskId}`);
-		}
-		assertValidChecklistMarks(task.rawContent ?? "", "AC");
-
-		let list = Array.isArray(task.acceptanceCriteriaItems) ? [...task.acceptanceCriteriaItems] : [];
-		const updated: number[] = [];
-
-		// Filter to only valid indices and update them
-		for (const idx of indices) {
-			if (list.some((c) => c.index === idx)) {
-				list = list.map((c) => {
-					if (c.index === idx) {
-						updated.push(idx);
-						return { ...c, checked };
-					}
-					return c;
-				});
-			}
-		}
-
-		if (updated.length === 0) {
-			throw new Error("No criteria were updated.");
-		}
-
-		task.acceptanceCriteriaItems = list;
-
-		// Save the task
-		await this.updateTask(task, autoCommit);
-
-		return updated.sort((a, b) => a - b);
+		const items = await this.listAcceptanceCriteria(taskId);
+		const updated = [...new Set(indices.filter((index) => items.some((item) => item.index === index)))].sort(
+			(a, b) => a - b,
+		);
+		if (updated.length === 0) throw new Error("No criteria were updated.");
+		await this.updateTaskFromInput(
+			taskId,
+			checked ? { checkSectionItems: { acceptance: updated } } : { uncheckSectionItems: { acceptance: updated } },
+			autoCommit,
+		);
+		return updated;
 	}
 
-	/**
-	 * List all acceptance criteria for a task
-	 */
 	async listAcceptanceCriteria(taskId: string): Promise<AcceptanceCriterion[]> {
 		const task = await this.fs.loadTask(taskId);
-		if (!task) {
-			throw new Error(`Task not found: ${taskId}`);
-		}
-
-		return task.acceptanceCriteriaItems || [];
+		if (!task) throw new Error(`Task not found: ${taskId}`);
+		const value = parseSections(task.rawContent ?? "", this.fs.taskSchema).sections.acceptance;
+		return Array.isArray(value) ? (value as AcceptanceCriterion[]) : [];
 	}
 
 	/**
@@ -4871,7 +4600,7 @@ export class Core {
 		const reloadTaskAfterEdit = async (path: string): Promise<{ task: Task } | { failure: "unreadable" }> => {
 			try {
 				const content = await Bun.file(path).text();
-				const reparsed = normalizeTaskIdentity(parseTask(content));
+				const reparsed = normalizeTaskIdentity(parseTask(content, undefined, this.fs.taskSchema));
 				return { task: { ...reparsed, filePath: path } };
 			} catch {
 				return { failure: "unreadable" };
@@ -5029,9 +4758,9 @@ export class Core {
 		progressCallback?: (msg: string) => void,
 	): Promise<{ tasks: Task[]; drafts: Task[]; statuses: string[]; priorities: string[] }> {
 		const snapshot = await this.loadTaskCorpusSnapshot(progressCallback);
-		const config = snapshot.config;
-		const statuses = (config?.statuses || DEFAULT_STATUSES) as string[];
-		const priorities = config?.priorities ?? [];
+		const schema = this.fs.taskSchema;
+		const statuses = (schema.fields.status?.values || DEFAULT_STATUSES) as string[];
+		const priorities = schema.fields.priority?.values ?? [];
 		if (!snapshot.identityIndex) throw new Error("Task corpus identity index was not initialized");
 		const tasks = snapshot.identityIndex.getTasks(true);
 
@@ -5091,7 +4820,7 @@ export class Core {
 				activeTasks,
 				archivedTasks,
 				[],
-				config?.statuses ?? [...DEFAULT_STATUSES],
+				this.fs.taskSchema.fields.status?.values ?? [...DEFAULT_STATUSES],
 				config?.taskResolutionStrategy ?? "most_progressed",
 			);
 			return {
@@ -5147,7 +4876,7 @@ export class Core {
 				? retrySnapshot
 				: await this.getActiveBranchSnapshot(config, generation, filesystem, git);
 		if (projectChanged()) return await retryForCurrentProject();
-		const statuses = config?.statuses || [...DEFAULT_STATUSES];
+		const statuses = this.fs.taskSchema.fields.status?.values || [...DEFAULT_STATUSES];
 		const resolutionStrategy = config?.taskResolutionStrategy || "most_progressed";
 		const includeArchived = options.includeArchived ?? false;
 		const shouldLoadBranches = config?.checkActiveBranches !== false && config?.filesystemOnly !== true;

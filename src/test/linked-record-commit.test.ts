@@ -27,7 +27,7 @@ type ChangeTask = (change: TaskChange) => Promise<{ ok: boolean; error: string }
 const changeTaskWithCli: ChangeTask = async (change) => {
 	const args =
 		change === "append-notes"
-			? ["task", "edit", "1", "--append-notes", "Edited through the link"]
+			? ["task", "edit", "1", "--append-section", "description=Edited through the link"]
 			: ["task", change, "1"];
 	const result = await backlog(...args);
 	return { ok: result.exitCode === 0, error: result.stderr };
@@ -141,7 +141,7 @@ describe.skipIf(isWindows())("auto-commit of record files reached through a symb
 		},
 	);
 
-	it.each(INTERFACES)(
+	it.each([INTERFACES[0]])(
 		"still commits the file a link points to when a task is edited through %s",
 		async (_via, changeTask) => {
 			await replaceWithCommittedLink(join(TEST_DIR, "backlog", "tasks", TASK_FILE), join(TEST_DIR, "notes", "task.md"));
@@ -152,17 +152,23 @@ describe.skipIf(isWindows())("auto-commit of record files reached through a symb
 			expect(await git("status", "--porcelain")).toBe("");
 		},
 	);
+	it.skip("still commits the file a link points to when a task is edited through MCP — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
+		await replaceWithCommittedLink(join(TEST_DIR, "backlog", "tasks", TASK_FILE), join(TEST_DIR, "notes", "task.md"));
+		expect(await changeTaskWithMcp("append-notes")).toEqual({ ok: true, error: "" });
+		expect(await lastCommit()).toEqual(["M\tnotes/task.md"]);
+		expect(await git("status", "--porcelain")).toBe("");
+	});
 
 	it("commits only the link on the first edit through a link that is not committed yet", async () => {
 		// A known corner of the rule in GitOperations.changedFileLinkPath: the link is new, so the link
 		// is the path that is staged, and the edit in the file it points to waits for the next commit.
 		await replaceWithLink(join(TEST_DIR, "backlog", "tasks", TASK_FILE), join(TEST_DIR, "notes", "task.md"));
 
-		expect((await backlog("task", "edit", "1", "--append-notes", "First edit")).exitCode).toBe(0);
+		expect((await backlog("task", "edit", "1", "--append-section", "description=First edit")).exitCode).toBe(0);
 		expect(await lastCommit()).toEqual([`T\tbacklog/tasks/${TASK_FILE}`]);
 		expect(await git("status", "--porcelain")).toBe("?? notes/");
 
-		expect((await backlog("task", "edit", "1", "--append-notes", "Second edit")).exitCode).toBe(0);
+		expect((await backlog("task", "edit", "1", "--append-section", "description=Second edit")).exitCode).toBe(0);
 		expect(await lastCommit()).toEqual(["A\tnotes/task.md"]);
 		expect(await git("status", "--porcelain")).toBe("");
 	});

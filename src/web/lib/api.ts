@@ -1,6 +1,8 @@
 import type { DuplicateRepairPlan, DuplicateRepairResult } from "../../core/duplicate-task-repair.ts";
 import type { TaskStatistics } from "../../core/statistics.ts";
 import type { TaskDetail } from "../../core/task-detail.ts";
+import type { FieldValue } from "../../schema/field-registry.ts";
+import type { TaskSchema } from "../../schema/types.ts";
 import type {
 	BacklogConfig,
 	Decision,
@@ -78,6 +80,20 @@ export type TaskUpdateRequest = Omit<Partial<Task>, "milestone" | "dueDate" | "p
 	commentsAppend?: string[];
 	commentAuthor?: string;
 };
+
+export interface SchemaTaskWrite {
+	title?: string;
+	fields?: Record<string, FieldValue | null>;
+	sections?: Record<string, string>;
+	checklist?: Array<{
+		section: string;
+		op: "add" | "check" | "uncheck" | "remove" | "replace";
+		index?: number;
+		text?: string;
+		items?: Array<{ index: number; text: string; checked: boolean }>;
+	}>;
+	log?: { section: string; body: string; author?: string; date?: string };
+}
 
 export interface InitializationStatus {
 	initialized: boolean;
@@ -345,6 +361,17 @@ export class ApiClient {
 		});
 	}
 
+	async patchSchemaTask(id: string, updates: SchemaTaskWrite): Promise<Task> {
+		return this.fetchJson<Task>(`${API_BASE}/tasks/${encodeURIComponent(id)}`, {
+			method: "PATCH",
+			body: JSON.stringify(updates),
+		});
+	}
+
+	async createSchemaTask(input: SchemaTaskWrite): Promise<Task> {
+		return this.fetchJson<Task>(`${API_BASE}/tasks`, { method: "POST", body: JSON.stringify(input) });
+	}
+
 	async reorderTask(payload: ReorderTaskPayload): Promise<{ success: boolean; task: Task; changedTasks: Task[] }> {
 		return this.fetchJson<{ success: boolean; task: Task; changedTasks: Task[] }>(`${API_BASE}/tasks/reorder`, {
 			method: "POST",
@@ -431,6 +458,12 @@ export class ApiClient {
 		if (!response.ok) {
 			throw new Error("Failed to fetch config");
 		}
+		return response.json();
+	}
+
+	async fetchSchema(): Promise<TaskSchema> {
+		const response = await fetch(`${API_BASE}/schema`);
+		if (!response.ok) throw new Error("Failed to fetch task schema");
 		return response.json();
 	}
 

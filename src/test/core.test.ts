@@ -11,6 +11,7 @@ import {
 	createUniqueTestDir,
 	initializeTestProject,
 	safeCleanup,
+	updateTestTaskSchema,
 } from "./test-utils.ts";
 
 let TEST_DIR: string;
@@ -72,6 +73,7 @@ describe("Core", () => {
 			labels: ["test"],
 			dependencies: [],
 			description: "This is a test task",
+			sections: { description: "This is a test task" },
 		};
 
 		beforeEach(async () => {
@@ -960,7 +962,7 @@ describe("Core", () => {
 			const taskNoHeader: Task = {
 				...sampleTask,
 				id: "task-2",
-				description: "Just text",
+				sections: { description: "Just text" },
 			};
 
 			await core.createTask(taskNoHeader, false);
@@ -975,7 +977,7 @@ describe("Core", () => {
 			const taskWithHeader: Task = {
 				...sampleTask,
 				id: "task-3",
-				description: "Existing",
+				sections: { description: "Existing" },
 			};
 
 			await core.createTask(taskWithHeader, false);
@@ -1288,16 +1290,14 @@ describe("Core", () => {
 	});
 
 	describe("integration with config", () => {
-		it("should use custom default status from config", async () => {
+		it("should use custom default status from the schema", async () => {
 			// Initialize with custom config
 			await initializeTestProject(core, "Custom Project");
 
-			// Update config with custom default status
-			const config = await core.filesystem.loadConfig();
-			if (config) {
-				config.defaultStatus = "Custom Status";
-				await core.filesystem.saveConfig(config);
-			}
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.status!.values = ["To Do", "Custom Status"];
+				schema.fields.status!.default = "Custom Status";
+			});
 
 			const taskWithoutStatus: Task = {
 				id: "task-custom",
@@ -1344,31 +1344,31 @@ describe("Core", () => {
 			expect(loadedTask?.status).toBe("To Do");
 		});
 
-		// createTaskFromInput is the shared create path for every surface (CLI, wizard, TUI, Web, MCP),
-		// so applying defaultAssignee here is what keeps the surfaces consistent.
-		it("should apply defaultAssignee to tasks and drafts created without an assignee", async () => {
+		// createTaskFromInput applies the schema's default user to tasks and drafts.
+		it("should apply the default user to tasks and drafts created without an assignee", async () => {
 			await initializeTestProject(core, "Default Assignee Project");
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Expected config");
-			config.defaultAssignee = ["@alice", "@bob"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Inherits default" }, false);
-			expect(task.assignee).toEqual(["@alice", "@bob"]);
+			expect(task.assignee).toEqual(["@alice"]);
 
 			const { task: draft } = await core.createTaskFromInput(
 				{ title: "Draft inherits default", status: "Draft" },
 				false,
 			);
-			expect(draft.assignee).toEqual(["@alice", "@bob"]);
+			expect(draft.assignee).toEqual(["@alice"]);
 		});
 
-		it("should let an explicit assignee replace defaultAssignee entirely", async () => {
+		it("should let an explicit assignee replace the default user entirely", async () => {
 			await initializeTestProject(core, "Override Assignee Project");
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Expected config");
-			config.defaultAssignee = ["@alice", "@bob"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.users = [
+					{ handle: "@alice", name: "Alice", default: true },
+					{ handle: "@carol", name: "Carol" },
+				];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Explicit assignee", assignee: ["@carol"] }, false);
 			expect(task.assignee).toEqual(["@carol"]);
@@ -1376,12 +1376,11 @@ describe("Core", () => {
 
 		// An explicit empty list is how every surface says "unassigned": CLI/draft `-a ""`,
 		// MCP `assignee: []`, and the Web edit payload all reach this method that way.
-		it("should let an explicit empty assignee override defaultAssignee", async () => {
+		it("should let an explicit empty assignee override the default user", async () => {
 			await initializeTestProject(core, "Explicit Unassign Project");
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Expected config");
-			config.defaultAssignee = ["@alice", "@bob"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Explicitly unassigned", assignee: [] }, false);
 			expect(task.assignee).toEqual([]);
@@ -1393,12 +1392,8 @@ describe("Core", () => {
 			expect(draft.assignee).toEqual([]);
 		});
 
-		it("should leave new tasks unassigned when defaultAssignee is empty", async () => {
+		it("should leave new tasks unassigned when users is empty", async () => {
 			await initializeTestProject(core, "Empty Assignee Project");
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Expected config");
-			config.defaultAssignee = [];
-			await core.filesystem.saveConfig(config);
 
 			const { task } = await core.createTaskFromInput({ title: "No default assignee" }, false);
 			expect(task.assignee).toEqual([]);

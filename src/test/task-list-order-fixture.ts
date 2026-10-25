@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { Core } from "../index.ts";
 import type { Task } from "../types/index.ts";
-import { initializeFilesystemTestProject } from "./test-utils.ts";
+import { initializeFilesystemTestProject, updateTestTaskSchema } from "./test-utils.ts";
 
 /**
  * One project for the tests that compare task list order across the plain, JSON, MCP, TUI and
@@ -52,9 +52,9 @@ export async function createOrderFixtureProject(projectDir: string): Promise<Cor
 	await mkdir(projectDir, { recursive: true });
 	const core = new Core(projectDir);
 	await initializeFilesystemTestProject(core, "Task List Order");
-	const config = await core.filesystem.loadConfig();
-	if (!config) throw new Error("Expected the fixture project to have a config");
-	await core.filesystem.saveConfig({ ...config, priorities: ORDER_FIXTURE_PRIORITIES });
+	await updateTestTaskSchema(core.filesystem, (schema) => {
+		schema.fields.priority!.values = ORDER_FIXTURE_PRIORITIES;
+	});
 	for (const fixtureTask of ORDER_FIXTURE_TASKS) {
 		await core.createTask(fixtureTask, false);
 	}

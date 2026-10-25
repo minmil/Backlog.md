@@ -18,6 +18,8 @@ For long lists, use `--max-count` and `--skip`, follow the printed `Next` comman
 
 For scripts, `task list`, `task view`, `task <id>`, `draft list`, `decision list`, and `search` accept versioned `--json` output instead of `--plain`. `task list --json --watch` emits complete replacement responses; read successive JSON values, not individual lines. Filters and local scope are unchanged; intermediate edits may be coalesced. Restart for a fresh snapshot.
 
+Run `backlog schema --json` first in a project to read its field keys, exact enum values, configured user handles, and sections. Use `--field key=value` for any editable field, `task list --where 'key=value'` to filter, `--sort key[:asc|:desc]` to order, and `--show-fields key1,key2` to add fields to plain list rows. Shortcut flags such as `--priority` use the same field validation. Copy enum values and user handles exactly from the schema. Use `--section`, `--check`, and `task log` for sections; make task changes through the CLI.
+
 ### Required Guides
 
 Read the matching guide before taking these actions; this overview does not replace it:

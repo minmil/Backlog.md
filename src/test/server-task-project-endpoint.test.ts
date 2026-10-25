@@ -4,7 +4,7 @@ import { $ } from "bun";
 import { FileSystem } from "../file-system/operations.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, safeCleanup, withTimeout } from "./test-utils.ts";
+import { createUniqueTestDir, safeCleanup, updateTestTaskSchema, withTimeout } from "./test-utils.ts";
 
 type ProjectServerHandlers = {
 	handleCreateTask(request: Request): Promise<Response>;
@@ -31,7 +31,9 @@ describe("BacklogServer task project field", () => {
 			remoteOperations: false,
 			checkActiveBranches: false,
 			autoCommit: false,
-			projects: ["web", "api"],
+		});
+		await updateTestTaskSchema(filesystem, (schema) => {
+			if (schema.fields.project) schema.fields.project.values = ["web", "api"];
 		});
 		server = new BacklogServer(testDir);
 		handlers = server as unknown as ProjectServerHandlers;

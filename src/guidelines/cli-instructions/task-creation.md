@@ -1,5 +1,9 @@
 ## Task Creation Guide
 
+### Custom fields
+
+Run `backlog schema --json` to inspect task fields, sections, enum values, and user handles. Pass `--field key=value` once for each value, and copy enum values and handles exactly as listed. Use `--section` and `--add-item` for body sections; make writes through the CLI.
+
 Use this guide when `backlog instructions` or the user indicates that new Backlog tasks are needed.
 
 ### Step 1: Search First
@@ -64,7 +68,7 @@ Include:
 - Acceptance criteria that are specific, testable, and independent.
 - References or documentation when they are needed for implementation.
 - Dependencies when work must happen in order.
-- An assignee with `-a` when the task has a known owner; omitting it applies the project's configured `defaultAssignee` when one is set, and `-a ""` leaves the task unassigned instead.
+- An assignee with `-a` when the task has a known owner; omitting it applies the default user from `task-schema.yml` when one is set, and `-a ""` leaves the task unassigned instead.
 
 For future work, do **not** add an implementation plan or speculative code approach during task creation. Creation
 captures the durable intent, context, scope, acceptance criteria, references, and dependencies. The worker researches
@@ -77,9 +81,9 @@ Examples:
 ```bash
 backlog task create "Add project search" \
   -d "Finding anything means running three separate commands, and matches in the ones you skip are missed silently. One search command covers tasks, docs, and decisions." \
-  --ac "Search returns matching tasks by title and description" \
-  --ac "Search supports --plain output" \
-  --ac "Tests cover task, document, and decision results"
+  --add-item acceptance="Search returns matching tasks by title and description" \
+  --add-item acceptance="Search supports --plain output" \
+  --add-item acceptance="Tests cover task, document, and decision results"
 ```
 
 Too thin: `-d "Users can search tasks, docs, and decisions from one CLI command."` states the change but not the need,
@@ -99,7 +103,7 @@ Use single-quoted CLI arguments for values that contain literal backticks:
 
 ```bash
 backlog task create 'Document `backlog init` setup' \
-  --ac 'Instructions mention `backlog init --defaults` literally'
+  --add-item acceptance='Instructions mention `backlog init --defaults` literally'
 ```
 
 If single quotes are not practical in your shell, escape each literal backtick before running the command. Do not rely on Backlog.md to sanitize accidental command output after substitution.
@@ -116,13 +120,15 @@ Good criteria:
 
 Avoid criteria like "Implement helper function" unless the helper itself is the user-visible deliverable.
 
-### Definition of Done
+### Additional Checklist Sections
 
-Project-level Definition of Done defaults apply automatically. Add task-specific DoD items only when this task needs extra completion hygiene:
+If the project schema defines another checklist section, add items with its section ID:
 
 ```bash
-backlog task create "Ship audit export" --dod "Manual export checked with sample data"
+backlog task create "Ship audit export" --add-item review="Manual export checked with sample data"
 ```
+
+Run `backlog schema` first to confirm that `review` exists; the built-in schema includes `acceptance` and no `review` section.
 
 ### After Creation
 

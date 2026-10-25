@@ -5,7 +5,7 @@ import { Core } from "../core/backlog.ts";
 import { parseTask } from "../markdown/parser.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, initializeTestProject, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 
@@ -72,46 +72,43 @@ describe("task type field", () => {
 	describe("validation", () => {
 		it("should reject unknown type on create with allowed values in the error", async () => {
 			await expect(core.createTaskFromInput({ title: "Bad type", type: "banana" }, false)).rejects.toThrow(
-				`Invalid type: banana. Valid types are: ${DEFAULT_TASK_TYPES.join(", ")}`,
+				`Invalid task field "type": allowed values: ${DEFAULT_TASK_TYPES.join(", ")}`,
 			);
 		});
 
 		it("should reject unknown type on edit", async () => {
 			const { task } = await core.createTaskFromInput({ title: "Typed task" }, false);
 			await expect(core.updateTaskFromInput(task.id, { type: "banana" }, false)).rejects.toThrow(
-				"Invalid type: banana",
+				'Invalid task field "type"',
 			);
 		});
 	});
 
 	describe("config override", () => {
 		it("should validate against configured types and preserve configured casing", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.types = ["Bug", "Epic"];
-			await core.filesystem.saveConfig(config);
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.type!.values = ["Bug", "Epic"];
+			});
 
 			const { task } = await core.createTaskFromInput({ title: "Custom type", type: "epic" }, false);
 			expect(task.type).toBe("Epic");
 
 			await expect(core.createTaskFromInput({ title: "Default type", type: "feature" }, false)).rejects.toThrow(
-				"Invalid type: feature. Valid types are: Bug, Epic",
+				'Invalid task field "type": allowed values: Bug, Epic',
 			);
 		});
 
-		it("should round-trip the types config key", async () => {
-			const config = await core.filesystem.loadConfig();
-			if (!config) throw new Error("Config not found");
-			config.types = ["bug", "epic"];
-			await core.filesystem.saveConfig(config);
+		it("should round-trip type values through the task schema", async () => {
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.type!.values = ["bug", "epic"];
+			});
 
-			const reloaded = await new Core(TEST_DIR).filesystem.loadConfig();
-			expect(reloaded?.types).toEqual(["bug", "epic"]);
+			const reloaded = new Core(TEST_DIR).filesystem.taskSchema;
+			expect(reloaded.fields.type!.values).toEqual(["bug", "epic"]);
 		});
 
-		it("should leave types undefined when the config key is absent", async () => {
-			const config = await core.filesystem.loadConfig();
-			expect(config?.types).toBeUndefined();
+		it("should use default type values when no schema file exists", async () => {
+			expect(core.filesystem.taskSchema.fields.type!.values).toContain("bug");
 		});
 	});
 

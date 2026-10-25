@@ -3,7 +3,12 @@ import { mkdir } from "node:fs/promises";
 import { $ } from "bun";
 import { Core } from "../core/backlog.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 const CLI_PATH = getTestCliPath();
 let TEST_DIR: string;
@@ -16,10 +21,9 @@ describe("CLI task types", () => {
 
 		core = new Core(TEST_DIR);
 		await initializeFilesystemTestProject(core, "CLI Task Type Project");
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		config.types = ["Bug", "Epic"];
-		await core.filesystem.saveConfig(config);
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.type!.values = ["Bug", "Epic"];
+		});
 	});
 
 	afterEach(async () => {
@@ -42,7 +46,7 @@ describe("CLI task types", () => {
 		await $`bun ${CLI_PATH} task edit TASK-1 --title "Still typed"`.cwd(TEST_DIR).quiet();
 		expect((await core.filesystem.loadTask("TASK-1"))?.type).toBe("Bug");
 
-		const cleared = await $`bun ${CLI_PATH} task edit TASK-1 --type "" --plain`.cwd(TEST_DIR).quiet();
+		const cleared = await $`bun ${CLI_PATH} task edit TASK-1 --clear-field type --plain`.cwd(TEST_DIR).quiet();
 		expect(cleared.stdout.toString()).not.toContain("Type:");
 		expect((await core.filesystem.loadTask("TASK-1"))?.type).toBeUndefined();
 	});
@@ -53,12 +57,12 @@ describe("CLI task types", () => {
 			.quiet()
 			.nothrow();
 		expect(invalidCreate.exitCode).toBe(1);
-		expect(invalidCreate.stderr.toString()).toContain("Invalid type: feature. Valid types are: Bug, Epic");
+		expect(invalidCreate.stderr.toString()).toContain('Invalid task field "type": allowed values: Bug, Epic');
 
 		await $`bun ${CLI_PATH} task create "Untyped task"`.cwd(TEST_DIR).quiet();
 		const invalidEdit = await $`bun ${CLI_PATH} task edit TASK-1 --type feature`.cwd(TEST_DIR).quiet().nothrow();
 		expect(invalidEdit.exitCode).toBe(1);
-		expect(invalidEdit.stderr.toString()).toContain("Invalid type: feature. Valid types are: Bug, Epic");
+		expect(invalidEdit.stderr.toString()).toContain('Invalid task field "type": allowed values: Bug, Epic');
 
 		const edited = await $`bun ${CLI_PATH} task edit TASK-1 --title "Still untyped" --plain`.cwd(TEST_DIR).quiet();
 		expect(edited.stdout.toString()).not.toContain("Type:");
@@ -80,12 +84,12 @@ describe("CLI task types", () => {
 		expect(sortedOutput).toContain("  TASK-2 - Untyped list task (To Do)");
 	});
 
-	it("documents configured values and exposes them through read-only config commands", async () => {
-		const getOutput = await $`bun ${CLI_PATH} config get types`.cwd(TEST_DIR).text();
-		expect(getOutput.trim()).toBe("Bug, Epic");
+	it("documents configured values in the schema and command help", async () => {
+		const schema = JSON.parse(await $`bun ${CLI_PATH} schema --json`.cwd(TEST_DIR).text());
+		expect(schema.fields.type.values).toEqual(["Bug", "Epic"]);
 
 		const listOutput = await $`bun ${CLI_PATH} config list`.cwd(TEST_DIR).text();
-		expect(listOutput).toContain("types: [Bug, Epic]");
+		expect(listOutput).not.toContain("types:");
 
 		const createHelp = await $`bun ${CLI_PATH} task create --help`.cwd(TEST_DIR).text();
 		const editHelp = await $`bun ${CLI_PATH} task edit --help`.cwd(TEST_DIR).text();

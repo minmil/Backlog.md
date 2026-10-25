@@ -9,15 +9,20 @@ import type { SearchService } from "../core/search-service.ts";
 import { getTaskStatistics } from "../core/statistics.ts";
 import { loadTaskDetail } from "../core/task-detail.ts";
 import { isCreateLockError, isTaskLockError } from "../file-system/operations.ts";
+import { toSchemaTaskJson } from "../formatters/json-output.ts";
+import { parseSections } from "../markdown/sections.ts";
 import { BacklogToolError } from "../mcp/errors/mcp-errors.ts";
 import { MilestoneHandlers } from "../mcp/tools/milestones/handlers.ts";
+import { applyCreateFieldValues } from "../schema/create-input.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import {
 	type ContentRecordKind,
 	DOCUMENT_TYPE_VALUES,
 	type Document,
-	type SearchPriorityFilter,
 	type SearchResultType,
 	type Task,
+	type TaskCreateInput,
 	type TaskUpdateInput,
 } from "../types/index.ts";
 import { launchBrowser } from "../utils/browser-launch.ts";
@@ -26,13 +31,6 @@ import { normalizeDueDate } from "../utils/due-date.ts";
 import { isAmbiguousIdError } from "../utils/entity-id.ts";
 import { resolveMilestoneInputForStorage } from "../utils/milestone-storage.ts";
 import { DRAFT_PREFIX, extractAnyPrefix, getTaskPrefixError } from "../utils/prefix-config.ts";
-import { formatValidPriorityValues, resolvePriorityValue } from "../utils/priority-config.ts";
-import {
-	formatValidProjectValues,
-	getProjectValues,
-	noProjectsConfiguredMessage,
-	resolveProjectValues,
-} from "../utils/project-config.ts";
 import { formatValidStatuses, getCanonicalStatuses, getValidStatuses } from "../utils/status.ts";
 import { isValidTaskId } from "../utils/task-id.ts";
 import { isAmbiguousTaskIdError, LOCAL_TASK_LOOKUP_HINT, taskNotFoundMessage } from "../utils/task-path.ts";
@@ -101,6 +99,118 @@ class DocumentPayloadValidationError extends Error {
 		super(message);
 		this.name = "DocumentPayloadValidationError";
 	}
+}
+
+class SchemaApiError extends Error {
+	constructor(
+		readonly key: string,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+function payloadObject(value: unknown, key: string): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new SchemaApiError(key, "Expected an object.");
+	}
+	return value as Record<string, unknown>;
+}
+
+function schemaErrorResponse(error: unknown, key = "task"): Response {
+	return Response.json(
+		{
+			errors: [
+				{
+					key: error instanceof SchemaApiError ? error.key : key,
+					message: error instanceof Error ? error.message : String(error),
+				},
+			],
+		},
+		{ status: 422 },
+	);
+}
+
+type SchemaChecklistOperation = {
+	section: string;
+	op: "add" | "check" | "uncheck" | "remove" | "replace";
+	text?: string;
+	index?: number;
+	items?: Array<{ index: number; text: string; checked: boolean }>;
+};
+
+function readSchemaSections(value: unknown, schema: TaskSchema): Record<string, string> {
+	const sections = payloadObject(value, "sections");
+	const result: Record<string, string> = {};
+	for (const [id, text] of Object.entries(sections)) {
+		if (schema.sections[id]?.kind !== "markdown")
+			throw new SchemaApiError(`sections.${id}`, "Expected a configured Markdown section.");
+		if (typeof text !== "string") throw new SchemaApiError(`sections.${id}`, "Expected text.");
+		result[id] = text;
+	}
+	return result;
+}
+
+function readSchemaChecklist(value: unknown, schema: TaskSchema): SchemaChecklistOperation[] {
+	if (!Array.isArray(value)) throw new SchemaApiError("checklist", "Expected an array of checklist operations.");
+	return value.map((entry, position) => {
+		const item = payloadObject(entry, `checklist.${position}`);
+		const section = item.section;
+		if (typeof section !== "string" || schema.sections[section]?.kind !== "checklist") {
+			throw new SchemaApiError(`checklist.${position}.section`, "Expected a configured checklist section.");
+		}
+		const op = item.op;
+		if (op !== "add" && op !== "check" && op !== "uncheck" && op !== "remove" && op !== "replace") {
+			throw new SchemaApiError(`checklist.${position}.op`, "Expected add, check, uncheck, remove, or replace.");
+		}
+		if (op === "replace") {
+			if (!Array.isArray(item.items))
+				throw new SchemaApiError(`checklist.${position}.items`, "Expected checklist items.");
+			const items = item.items.map((raw, index) => {
+				const value = payloadObject(raw, `checklist.${position}.items.${index}`);
+				if (
+					typeof value.text !== "string" ||
+					!value.text.trim() ||
+					/\r|\n/.test(value.text) ||
+					typeof value.checked !== "boolean"
+				)
+					throw new SchemaApiError(
+						`checklist.${position}.items.${index}`,
+						"Expected one-line text and checked true or false.",
+					);
+				return { index: index + 1, text: value.text, checked: value.checked };
+			});
+			return { section, op, items };
+		}
+		if (op === "add") {
+			if (typeof item.text !== "string" || !item.text.trim())
+				throw new SchemaApiError(`checklist.${position}.text`, "Expected nonempty text.");
+			return { section, op, text: item.text };
+		}
+		if (typeof item.index !== "number" || !Number.isInteger(item.index) || item.index < 1) {
+			throw new SchemaApiError(`checklist.${position}.index`, "Expected a positive integer.");
+		}
+		return { section, op, index: item.index };
+	});
+}
+
+function readSchemaLog(value: unknown, schema: TaskSchema): NonNullable<TaskUpdateInput["appendLog"]> {
+	const log = payloadObject(value, "log");
+	const section = log.section ?? "log";
+	if (typeof section !== "string" || schema.sections[section]?.kind !== "log") {
+		throw new SchemaApiError("log.section", "Expected a configured log section.");
+	}
+	if (typeof log.body !== "string" || !log.body.trim()) throw new SchemaApiError("log.body", "Expected nonempty text.");
+	if (log.author !== undefined && typeof log.author !== "string")
+		throw new SchemaApiError("log.author", "Expected a user handle.");
+	if (log.date !== undefined && typeof log.date !== "string")
+		throw new SchemaApiError("log.date", "Expected YYYY-MM-DD.");
+	return {
+		section,
+		body: log.body,
+		...(log.author !== undefined && { author: log.author }),
+		...(log.date !== undefined && { date: log.date }),
+	};
 }
 
 function parseDocumentType(value: unknown): Document["type"] | undefined {
@@ -431,6 +541,10 @@ export class BacklogServer {
 					"/api/tasks/:id": {
 						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id),
 						PUT: async (req: Request & { params: { id: string } }) => await this.handleUpdateTask(req, req.params.id),
+						PATCH: async (req: Request & { params: { id: string } }) => await this.handlePatchTask(req, req.params.id),
+					},
+					"/api/schema": {
+						GET: async () => Response.json({ schemaVersion: 2, kind: "schema", ...this.core.filesystem.taskSchema }),
 					},
 					"/api/tasks/:id/archive": {
 						POST: async (req: Request & { params: { id: string } }) => await this.handleArchiveTask(req.params.id),
@@ -751,17 +865,19 @@ export class BacklogServer {
 		}
 		const labels = labelParams.map((label) => label.trim()).filter((label) => label.length > 0);
 
-		const config = await this.core.filesystem.loadConfig();
+		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 		let priority: string | undefined;
 		if (priorityParam) {
-			const normalizedPriority = resolvePriorityValue(priorityParam, config);
-			if (!normalizedPriority) {
+			try {
+				priority = registry.validateValue("priority", priorityParam) as string;
+			} catch {
 				return Response.json(
-					{ error: `Invalid priority filter. Valid values are: ${formatValidPriorityValues(config)}` },
+					{
+						error: `Invalid priority filter. Valid values are: ${(registry.schema.fields.priority?.values ?? []).join(", ")}`,
+					},
 					{ status: 400 },
 				);
 			}
-			priority = normalizedPriority;
 		}
 
 		let excludeStatus: string[] | undefined;
@@ -815,7 +931,7 @@ export class BacklogServer {
 			refreshCrossBranch,
 		});
 
-		return Response.json(tasks);
+		return Response.json(tasks.map((task) => this.taskResponse(task, registry)));
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
@@ -878,7 +994,7 @@ export class BacklogServer {
 			const filters: {
 				status?: string | string[];
 				excludeStatus?: string | string[];
-				priority?: SearchPriorityFilter | SearchPriorityFilter[];
+				priority?: string | string[];
 				project?: string | string[];
 				assignee?: string | string[];
 				labels?: string | string[];
@@ -905,39 +1021,54 @@ export class BacklogServer {
 			}
 
 			if (priorityParamsRaw.length > 0) {
-				const config = await this.core.filesystem.loadConfig();
-				const normalizedPriorities = priorityParamsRaw.map((value) => resolvePriorityValue(value, config));
-				const invalidPriority = priorityParamsRaw[normalizedPriorities.findIndex((value) => !value)];
+				const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+				const normalizedPriorities = priorityParamsRaw.map((value) => {
+					try {
+						return registry.validateValue("priority", value) as string;
+					} catch {
+						return null;
+					}
+				});
+				const invalidPriority = priorityParamsRaw[normalizedPriorities.findIndex((value) => value === null)];
 				if (invalidPriority) {
 					return Response.json(
 						{
-							error: `Unsupported priority '${invalidPriority}'. Use ${formatValidPriorityValues(config)}.`,
+							error: `Unsupported priority '${invalidPriority}'. Use ${(registry.schema.fields.priority?.values ?? []).join(", ")}.`,
 						},
 						{ status: 400 },
 					);
 				}
-				const casted = normalizedPriorities.filter((value): value is SearchPriorityFilter => Boolean(value));
+				const casted = normalizedPriorities.filter((value): value is string => value !== null);
 				filters.priority = casted.length === 1 ? casted[0] : casted;
 			}
 
 			if (projectParamsRaw.length > 0) {
-				const config = await this.core.filesystem.loadConfig();
-				if (getProjectValues(config).length === 0) {
+				const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+				const validProjects = registry.schema.fields.project?.values ?? [];
+				if (validProjects.length === 0) {
 					return Response.json(
-						{ error: noProjectsConfiguredMessage(this.core.filesystem.configFilePath) },
+						{ error: "No project values configured. Edit task-schema.yml fields.project.values." },
 						{ status: 400 },
 					);
 				}
-				const { values: canonicalProjects, invalid } = resolveProjectValues(projectParamsRaw, config);
-				if (invalid.length > 0) {
+				const canonicalProjects = projectParamsRaw.map((value) => {
+					try {
+						return registry.validateValue("project", value) as string;
+					} catch {
+						return null;
+					}
+				});
+				const invalidProject = projectParamsRaw[canonicalProjects.findIndex((value) => value === null)];
+				if (invalidProject) {
 					return Response.json(
 						{
-							error: `Unsupported project '${invalid[0]}'. Use ${formatValidProjectValues(config)}.`,
+							error: `Unsupported project '${invalidProject}'. Use ${validProjects.join(", ")}.`,
 						},
 						{ status: 400 },
 					);
 				}
-				filters.project = canonicalProjects.length === 1 ? canonicalProjects[0] : canonicalProjects;
+				const values = canonicalProjects.filter((value): value is string => value !== null);
+				filters.project = values.length === 1 ? values[0] : values;
 			}
 
 			if (assigneeParamsRaw.length > 0) {
@@ -971,15 +1102,78 @@ export class BacklogServer {
 			}
 
 			const results = searchService.search({ query, limit, types, filters });
-			return Response.json(results);
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			return Response.json(
+				results.map((result) =>
+					result.type === "task" ? { ...result, task: this.taskResponse(result.task, registry) } : result,
+				),
+			);
 		} catch (error) {
 			console.error("Error performing search:", error);
 			return Response.json({ error: "Search failed" }, { status: 500 });
 		}
 	}
 
+	private taskResponse(
+		task: Task,
+		registry = new FieldRegistry(this.core.filesystem.taskSchema),
+	): Record<string, unknown> {
+		const body = parseSections(task.rawContent ?? "", registry.schema);
+		return {
+			...task,
+			...toSchemaTaskJson(task, registry),
+			sections: task.sections ?? body.sections,
+			other: task.other ?? body.other,
+		};
+	}
+
+	private async handleCreateSchemaTask(value: unknown): Promise<Response> {
+		try {
+			const payload = payloadObject(value, "task");
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const fields = payload.fields === undefined ? {} : payloadObject(payload.fields, "fields");
+			const title = payload.title ?? fields.title;
+			if (typeof title !== "string" || !title.trim()) throw new SchemaApiError("title", "Title is required.");
+			// Draft is a record lifecycle state, even when the configured status enum has no Draft value.
+			const creatingDraft = fields.status === "Draft";
+			const normalizedFields = creatingDraft ? { ...fields, status: undefined } : fields;
+			if (creatingDraft) delete normalizedFields.status;
+			let input: TaskCreateInput = applyCreateFieldValues(
+				registry,
+				{ title, ...(creatingDraft ? { status: "Draft" } : {}) },
+				normalizedFields,
+			);
+			if (payload.sections !== undefined) input.sections = readSchemaSections(payload.sections, registry.schema);
+			if (payload.checklist !== undefined) {
+				const sectionItems: Record<string, string[]> = {};
+				const sectionChecks: Record<string, number[]> = {};
+				for (const operation of readSchemaChecklist(payload.checklist, registry.schema)) {
+					if (operation.op === "add") {
+						sectionItems[operation.section] = [...(sectionItems[operation.section] ?? []), operation.text as string];
+					} else if (operation.op === "check") {
+						sectionChecks[operation.section] = [...(sectionChecks[operation.section] ?? []), operation.index as number];
+					} else throw new SchemaApiError("checklist", "Only add and check are available when creating a task.");
+				}
+				input = { ...input, sectionItems, sectionChecks };
+			}
+			if (payload.log !== undefined) input.appendLog = readSchemaLog(payload.log, registry.schema);
+			const { task } = await this.core.createTaskFromInput(input);
+			return Response.json(this.taskResponse(task), { status: 201 });
+		} catch (error) {
+			if (isCreateLockError(error)) return Response.json({ error: (error as Error).message }, { status: 409 });
+			return schemaErrorResponse(error);
+		}
+	}
+
 	private async handleCreateTask(req: Request): Promise<Response> {
 		const payload = await req.json();
+		if (
+			payload &&
+			typeof payload === "object" &&
+			("fields" in payload || "sections" in payload || "checklist" in payload || "log" in payload)
+		) {
+			return await this.handleCreateSchemaTask(payload);
+		}
 
 		if (!payload || typeof payload.title !== "string" || payload.title.trim().length === 0) {
 			return Response.json({ error: "Title is required" }, { status: 400 });
@@ -1028,7 +1222,7 @@ export class BacklogServer {
 				definitionOfDoneAdd,
 				disableDefinitionOfDoneDefaults,
 			});
-			return Response.json(createdTask, { status: 201 });
+			return Response.json(this.taskResponse(createdTask), { status: 201 });
 		} catch (error) {
 			if (isCreateLockError(error)) {
 				const message = error instanceof Error ? error.message : "Failed to create task";
@@ -1077,7 +1271,65 @@ export class BacklogServer {
 		const resolved = await this.resolveDetailTask(taskId);
 		if (resolved instanceof Response) return resolved;
 		await this.ensureServicesReady();
-		return Response.json(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true }));
+		return Response.json(this.taskResponse(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true })));
+	}
+
+	private async handlePatchTask(req: Request, taskId: string): Promise<Response> {
+		try {
+			const payload = payloadObject(await req.json(), "task");
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const update: TaskUpdateInput = {};
+			if (payload.fields !== undefined) {
+				const fields = payloadObject(payload.fields, "fields");
+				update.schemaFields = {};
+				update.clearSchemaFields = [];
+				for (const [key, value] of Object.entries(fields)) {
+					if (!registry.schema.fields[key]) throw new SchemaApiError(`fields.${key}`, `Unknown task field "${key}".`);
+					if (value === null) update.clearSchemaFields.push(key);
+					else {
+						try {
+							update.schemaFields[key] = registry.validateValue(key, value);
+						} catch (error) {
+							throw new SchemaApiError(`fields.${key}`, error instanceof Error ? error.message : String(error));
+						}
+					}
+				}
+			}
+			if (payload.sections !== undefined) update.setSections = readSchemaSections(payload.sections, registry.schema);
+			if (payload.checklist !== undefined) {
+				for (const operation of readSchemaChecklist(payload.checklist, registry.schema)) {
+					if (operation.op === "add") {
+						update.addSectionItems ??= {};
+						update.addSectionItems[operation.section] = [
+							...(update.addSectionItems[operation.section] ?? []),
+							operation.text as string,
+						];
+					} else if (operation.op === "replace") {
+						update.replaceSectionItems ??= {};
+						update.replaceSectionItems[operation.section] = operation.items ?? [];
+					} else {
+						const key =
+							operation.op === "check"
+								? "checkSectionItems"
+								: operation.op === "uncheck"
+									? "uncheckSectionItems"
+									: "removeSectionItems";
+						update[key] ??= {};
+						update[key][operation.section] = [...(update[key][operation.section] ?? []), operation.index as number];
+					}
+				}
+			}
+			if (payload.log !== undefined) update.appendLog = readSchemaLog(payload.log, registry.schema);
+			const task = isDraftId(taskId)
+				? (await this.core.editTaskOrDraft(taskId, update)).task
+				: await this.core.updateTaskFromInput(taskId, update);
+			return Response.json(this.taskResponse(task));
+		} catch (error) {
+			if (isAmbiguousIdError(error) || isAmbiguousTaskIdError(error) || isTaskLockError(error)) {
+				return Response.json({ error: (error as Error).message }, { status: 409 });
+			}
+			return schemaErrorResponse(error);
+		}
 	}
 
 	private async handleUpdateTask(req: Request, taskId: string): Promise<Response> {
@@ -1526,7 +1778,7 @@ export class BacklogServer {
 			if (!config) {
 				return Response.json({ error: "Configuration not found" }, { status: 404 });
 			}
-			return Response.json(config);
+			return Response.json({ ...config, schema: this.core.filesystem.taskSchema });
 		} catch (error) {
 			console.error("Error loading config:", error);
 			return Response.json({ error: "Failed to load configuration" }, { status: 500 });
@@ -1570,7 +1822,8 @@ export class BacklogServer {
 	private async handleListDrafts(): Promise<Response> {
 		try {
 			const drafts = await this.core.filesystem.listDrafts();
-			return Response.json(drafts);
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			return Response.json(drafts.map((draft) => this.taskResponse(draft, registry)));
 		} catch (error) {
 			console.error("Error listing drafts:", error);
 			return Response.json([]);
@@ -1998,15 +2251,14 @@ export class BacklogServer {
 		try {
 			const servicesWereReady = this.servicesInitialized;
 			const store = await this.getContentStoreInstance();
-			const currentConfig = await this.core.filesystem.loadConfig();
+			const schema = this.core.filesystem.taskSchema;
 			await store.ensureConfigWatcher();
 			if (servicesWereReady) await this.core.refreshTasksForTaskRead();
 			const corpus = store.getTaskCorpusSnapshot();
-			const corpusConfig = corpus.config ?? currentConfig;
 			const drafts = await this.core.filesystem.listDrafts();
-			const statuses = (corpusConfig?.statuses || DEFAULT_STATUSES) as string[];
+			const statuses = schema.fields.status?.values ?? Array.from(DEFAULT_STATUSES);
 			const tasks = corpus.identityIndex?.getTasks(true) ?? corpus.activeTasks;
-			const priorities = currentConfig?.priorities ?? corpusConfig?.priorities ?? [];
+			const priorities = schema.fields.priority?.values ?? [];
 
 			// Calculate statistics using the exact same function as CLI
 			const statistics = getTaskStatistics(tasks, drafts, statuses, priorities);

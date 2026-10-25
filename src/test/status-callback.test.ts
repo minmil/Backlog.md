@@ -107,11 +107,6 @@ describe("Status Change Callbacks", () => {
 		test("triggers global callback on status change", async () => {
 			// Create config with onStatusChange
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false
@@ -143,11 +138,6 @@ onStatusChange: 'echo "$TASK_ID:$OLD_STATUS->$NEW_STATUS" > "${callbackOutputPat
 		test("per-task callback overrides global callback", async () => {
 			// Create config with global onStatusChange
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false
@@ -180,11 +170,6 @@ onStatusChange: 'echo "per-task:$NEW_STATUS" > "${callbackOutputPath}"'
 		test("no callback when status unchanged", async () => {
 			// Create config with onStatusChange
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false
@@ -209,11 +194,6 @@ onStatusChange: 'echo "callback-ran" > "${callbackOutputPath}"'
 		test("no callback when no callback configured", async () => {
 			// Create config without onStatusChange
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false
@@ -234,11 +214,6 @@ checkActiveBranches: false
 		test("callback failure does not block status change", async () => {
 			// Create config with failing callback
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false
@@ -260,11 +235,6 @@ onStatusChange: 'exit 1'
 		test("triggers callback when reorderTask changes status", async () => {
 			// Create config with onStatusChange
 			const configContent = `projectName: Test
-statuses:
-  - To Do
-  - In Progress
-  - Done
-labels: []
 milestones: []
 dateFormat: yyyy-mm-dd
 checkActiveBranches: false

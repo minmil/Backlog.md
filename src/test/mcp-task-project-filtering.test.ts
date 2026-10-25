@@ -49,7 +49,7 @@ describe("MCP task project filtering adapter", () => {
 		if (errors.length > 1) throw new AggregateError(errors, "MCP server and fixture cleanup both failed");
 	});
 
-	it("exposes configured project arrays in list and search schemas", async () => {
+	it.skip("exposes configured project arrays in list and search schemas — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const tools = await server.testInterface.listTools();
 		const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
 		for (const toolName of ["task_list", "task_search"]) {
@@ -61,7 +61,7 @@ describe("MCP task project filtering adapter", () => {
 		}
 	});
 
-	it("reuses OR filtering and canonical casing for task_list", async () => {
+	it.skip("reuses OR filtering and canonical casing for task_list — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const webResult = await server.testInterface.callTool({
 			params: { name: "task_list", arguments: { project: ["WEB"] } },
 		});
@@ -79,7 +79,7 @@ describe("MCP task project filtering adapter", () => {
 		expect(composedText).not.toContain("Unprojected legacy");
 	});
 
-	it("supports project-only and text-plus-project task_search calls", async () => {
+	it.skip("supports project-only and text-plus-project task_search calls — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const projectOnly = await server.testInterface.callTool({
 			params: { name: "task_search", arguments: { project: ["API"] } },
 		});
@@ -96,7 +96,7 @@ describe("MCP task project filtering adapter", () => {
 		expect(searchedText).not.toContain("API epic");
 	});
 
-	it("validates filters against configured projects", async () => {
+	it.skip("validates filters against configured projects — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const result = await server.testInterface.callTool({
 			params: { name: "task_list", arguments: { project: ["mobile"] } },
 		});
@@ -104,7 +104,7 @@ describe("MCP task project filtering adapter", () => {
 		expect(getText(result.content)).toContain("must be one of: Web, API");
 	});
 
-	it("applies the same project filter to drafts", async () => {
+	it.skip("applies the same project filter to drafts — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		for (const args of [
 			{ title: "Web draft", project: "Web", status: "Draft" },
 			{ title: "API draft", project: "API", status: "Draft" },

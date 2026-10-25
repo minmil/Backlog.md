@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Board from './Board';
 import { type Milestone, type Task } from '../../types';
-import { resolvePriorityValue } from '../../utils/priority-config';
 import { resolveProjectValue } from '../../utils/project-config';
 import { resolveTaskTypeValue } from '../../utils/task-type-config';
 import { type LaneMode } from '../lib/lanes';
+import { useSchema } from './schema/SchemaProvider.tsx';
+import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 
 interface BoardPageProps {
 	onEditTask: (task: Task) => void;
@@ -48,7 +49,52 @@ export default function BoardPage({
 	availableTypes,
 	availableProjects,
 }: BoardPageProps) {
+	const { schema } = useSchema();
 	const [searchParams, setSearchParams] = useSearchParams();
+	const schemaFilterKeys = schema.ui.board.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const schemaFilters = Object.fromEntries(schemaFilterKeys.map((key) => {
+		const field = schema.fields[key];
+		const raw = searchParams.get(key) ?? (key === 'labels' ? searchParams.getAll('label').join(',') : '');
+		if (!raw) return [key, null];
+		if (key !== 'assignee' && (field?.type === 'string-list' || field?.type === 'multi-enum' || field?.type === 'user-list')) return [key, raw.split(',').map((value) => value.trim()).filter(Boolean)];
+		if (field?.type === 'enum') return [key, field.values?.find((value) => value.toLowerCase() === raw.toLowerCase()) ?? null];
+		if (field?.type === 'number') return [key, Number(raw)];
+		if (field?.type === 'bool') return [key, raw === 'true' ? true : raw === 'false' ? false : null];
+		return [key, raw];
+	})) as Record<string, RegistryFieldValue | null>;
+	const handleSchemaFilterChange = (key: string, value: RegistryFieldValue | null) => {
+		setSearchParams((params) => {
+			params.delete(key);
+			if (key === 'labels') params.delete('label');
+			if (value !== null && value !== '' && (!Array.isArray(value) || value.length > 0)) params.set(key, Array.isArray(value) ? value.join(',') : String(value));
+			return params;
+		}, { replace: true });
+	};
+	const handleSchemaFiltersClear = () => {
+		setSearchParams((params) => {
+			for (const key of schemaFilterKeys) params.delete(key);
+			params.delete('label');
+			return params;
+		}, { replace: true });
+	};
+	useEffect(() => {
+		if (isLoading) return;
+		const corrections = schemaFilterKeys.flatMap((key) => {
+			if (schema.fields[key]?.type !== 'enum' || ['priority', 'type', 'project'].includes(key)) return [];
+			const raw = searchParams.get(key);
+			if (!raw) return [];
+			const canonical = schema.fields[key]?.values?.find((value) => value.toLowerCase() === raw.toLowerCase()) ?? null;
+			return canonical === raw ? [] : [{ key, canonical }];
+		});
+		if (!corrections.length) return;
+		setSearchParams((params) => {
+			for (const { key, canonical } of corrections) {
+				if (canonical) params.set(key, canonical);
+				else params.delete(key);
+			}
+			return params;
+		}, { replace: true });
+	}, [schema, searchParams, isLoading, setSearchParams]);
 	const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
 	const [laneMode, setLaneMode] = useState<LaneMode>('none');
 	const [milestoneFilter, setMilestoneFilter] = useState<string | null>(null);
@@ -146,11 +192,11 @@ export default function BoardPage({
 		...searchParams.getAll('labels').flatMap((value) => value.split(',')),
 	].map((label) => label.trim()).filter((label) => label.length > 0);
 	const rawFilterPriority = searchParams.get('priority') ?? '';
-	const filterPriority = resolvePriorityValue(rawFilterPriority, availablePriorities) ?? '';
+	const filterPriority = schema.fields.priority?.values?.find((value) => value.toLowerCase() === rawFilterPriority.toLowerCase()) ?? '';
 	const rawFilterType = searchParams.get('type') ?? '';
-	const filterType = resolveTaskTypeValue(rawFilterType, availableTypes) ?? '';
+	const filterType = resolveTaskTypeValue(rawFilterType, schema.fields.type?.values) ?? '';
 	const rawFilterProject = searchParams.get('project') ?? '';
-	const filterProject = resolveProjectValue(rawFilterProject, availableProjects) ?? '';
+	const filterProject = resolveProjectValue(rawFilterProject, schema.fields.project?.values) ?? '';
 
 	useEffect(() => {
 		if (
@@ -215,6 +261,9 @@ export default function BoardPage({
 				filterType={filterType}
 				availableTypes={availableTypes}
 				filterProject={filterProject}
+				schemaFilters={schemaFilters}
+				onSchemaFilterChange={handleSchemaFilterChange}
+				onSchemaFiltersClear={handleSchemaFiltersClear}
 				availableProjects={availableProjects}
 				onFiltersChange={handleFiltersChange}
 				hideEmptyColumns={hideEmptyColumns}

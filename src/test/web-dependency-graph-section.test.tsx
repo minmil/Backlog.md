@@ -184,7 +184,7 @@ describe("Web task details modal dependency graph", () => {
 		expect(html).toContain("Dependency Graph");
 		expect(html).toContain("Depends on");
 		expect(html).toContain("Dependents");
-		expect(html).toContain('href="/tasks/TASK-1"');
+		expect(html).toContain('href="/tasks/TASK-1/foundation"');
 		// The graph arrives with the task, so opening it costs no extra round trip at all.
 		expect(requests.filter((url) => url.includes("dependency-graph"))).toEqual([]);
 	});

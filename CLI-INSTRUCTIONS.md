@@ -6,6 +6,12 @@ All examples use the `backlog` command, available after installing the `backlog.
 
 ## Project Setup
 
+### Task schema
+
+`backlog init` writes editable `<backlog-dir>/task-schema.yml` boilerplate. A project without that file uses the same built-in schema through the field registry. Run `backlog schema` or `backlog schema --json` to inspect fields, users, sections, and display settings. `fields.yml` is obsolete; a leftover file causes a startup error pointing to `task-schema.yml`.
+
+Use repeatable `--field key=value` on task creation and edit, and `--clear-field key` on edit. Built-in shortcut flags use the same registry validation. `task list --where <expr>` filters any declared field; repeat it to combine conditions with AND. Supported operators are `=` and `!=` for all types and `<`, `<=`, `>`, `>=` for dates and datetimes. `key=` means unset, `key!=` means set, and `key=a|b` accepts either value. Date expressions accept `today`, `+Nd`, and `-Nd`, resolved using the machine's local time zone. Sort fields with `--sort key[:asc|:desc]`; unset values sort last. `task list --plain --show-fields k1,k2` appends selected values.
+
 | Action      | Example                                              |
 |-------------|------------------------------------------------------|
 | Initialize project | `backlog init [project-name]` (creates backlog structure with a minimal interactive flow) |
@@ -20,7 +26,7 @@ All examples use the `backlog` command, available after installing the `backlog.
 - **Instruction files (CLI path)** – the CLI setup writes a short nudge to AGENTS.md by default in non-interactive setup. `--agent-instructions cursor` also selects AGENTS.md, and the interactive CLI and Web setup identify Cursor under that shared target. Existing user-managed `.cursor/rules` files may coexist; Backlog.md does not migrate or remove them, and repeated initialization preserves non-Backlog content in AGENTS.md.
 - **Advanced settings prompt** – default answer "No" finishes init immediately; choosing "Yes" jumps straight into the advanced wizard documented in [ADVANCED-CONFIG.md](ADVANCED-CONFIG.md).
 
-The advanced wizard includes interactive Definition of Done defaults editing (add/remove/reorder/clear), so project checklist defaults can be managed without manual YAML edits.
+Field values, users, and checklist sections are edited in `task-schema.yml`; the advanced wizard handles the remaining `config.yml` settings.
 
 You can rerun the wizard anytime with `backlog config`. All existing CLI flags (for example `--defaults`, `--agent-instructions`) continue to provide fully non-interactive setups, and init also supports `--backlog-dir <path>` plus `--config-location <folder|root>` for scripted configuration.
 
@@ -39,65 +45,39 @@ Humans and agents can run `backlog instructions` for workflow guides and `backlo
 
 ## Task Management
 
-| Action      | Example                                              |
-|-------------|------------------------------------------------------|
-| Create task | `backlog task create "Add OAuth System"`                    |
-| Create with description | `backlog task create "Feature" -d "Add authentication system"` |
-| Create with assignee | `backlog task create "Feature" -a @sara`           |
-| Create with status | `backlog task create "Feature" -s "In Progress"`    |
-| Create with labels | `backlog task create "Feature" -l auth,backend`     |
-| Create with priority | `backlog task create "Feature" --priority high`     |
-| Create with due date | `backlog task create "Feature" --due-date 2026-08-10` |
-| Create with plan | `backlog task create "Feature" --plan "1. Research\n2. Implement"`     |
-| Create with AC | `backlog task create "Feature" --ac "Must work,Must be tested"` |
-| Add DoD items on create | `backlog task create "Feature" --dod "Run tests"` |
-| Create without DoD defaults | `backlog task create "Feature" --no-dod-defaults` |
-| Create with notes | `backlog task create "Feature" --notes "Started initial research"` |
-| Create with final summary | `backlog task create "Feature" --final-summary "Completion summary"` |
-| Create with deps | `backlog task create "Feature" --dep task-1,task-2` |
-| Create with refs | `backlog task create "Feature" --ref https://docs.example.com --ref src/api.ts` |
-| Create with docs | `backlog task create "Feature" --doc https://design-docs.example.com --doc docs/spec.md` |
-| Create sub task | `backlog task create -p 14 "Add Login with Google"`|
-| Create (all options) | `backlog task create "Feature" -d "Description" -a @sara -s "To Do" -l auth --priority high --ac "Must work" --notes "Initial setup done" --dep task-1 --ref src/api.ts --doc docs/spec.md -p 14` |
-| List tasks  | `backlog task list [-s <status>] [-a <assignee>] [-p <parent>] [--labels <labels>] [--search <query>] [--limit <n>]` |
-| List filtered | `backlog task list --labels frontend,bug --search "login" --limit 10 --plain` |
+| Action | Example |
+|--------|---------|
+| Create task | `backlog task create "Add OAuth System"` |
+| Set description | `backlog task create "Feature" -d "Why this matters"` |
+| Set a declared field | `backlog task create "Feature" --field priority=high` |
+| Set multiple values | `backlog task edit 7 --field labels=auth,backend` |
+| Clear a field | `backlog task edit 7 --clear-field due_date` |
+| Add acceptance criteria | `backlog task create "Feature" --add-item acceptance="First outcome" --add-item acceptance="Second outcome"` |
+| Replace Markdown section | `backlog task edit 7 --section description="Revised context"` |
+| Append Markdown section | `backlog task edit 7 --append-section description="Implementation plan: ..."` |
+| Check checklist item | `backlog task edit 7 --check acceptance:1` |
+| Uncheck checklist item | `backlog task edit 7 --uncheck acceptance:1` |
+| Remove checklist item | `backlog task edit 7 --remove-item acceptance:2` |
+| Add log entry | `backlog task log 7 "Verified the behavior" --author @sara` |
+| Add log entry on edit | `backlog task edit 7 --comment "Question for review" --comment-author @sara` |
+| Create with dependencies | `backlog task create "Feature" --dep task-1,task-2` |
+| Create with references | `backlog task create "Feature" --ref https://docs.example.com --ref src/api.ts` |
+| Create subtask | `backlog task create -p 14 "Add Login with Google"` |
+| List filtered tasks | `backlog task list --where priority=high --search "login" --plain` |
 | List in windows | `backlog task list --max-count 20 --skip 20 --plain` |
-| Count tasks | `backlog task list --status "To Do" --count` |
-| List as JSON | `backlog task list --status "To Do" --json` |
+| List as JSON | `backlog task list --json` |
 | Watch as JSON | `backlog task list --json --watch` |
-| List by parent | `backlog task list --parent 42` or `backlog task list -p task-42` |
-| View detail | `backlog task 7` (interactive UI, press 'E' to edit in editor) |
-| View (AI mode) | `backlog task 7 --plain`                           |
-| View as JSON | `backlog task 7 --json` |
-| Edit        | `backlog task edit 7 -a @sara -l auth,backend`       |
+| View detail | `backlog task view 7 --plain` |
+| View as JSON | `backlog task view 7 --json` |
 | Replace documentation | `backlog task edit 7 --doc docs/spec.md --doc docs/api.md` |
-| Add documentation | `backlog task edit 7 --add-doc docs/spec.md --add-doc docs/api.md` |
+| Add documentation | `backlog task edit 7 --add-doc docs/spec.md` |
 | Remove documentation | `backlog task edit 7 --remove-doc docs/spec.md` |
 | Clear documentation | `backlog task edit 7 --clear-docs` |
-| Add plan    | `backlog task edit 7 --plan "Implementation approach"`    |
-| Add AC      | `backlog task edit 7 --ac "New criterion" --ac "Another one"` |
-| Add DoD     | `backlog task edit 7 --dod "Ship notes"` |
-| Remove AC   | `backlog task edit 7 --remove-ac 2` (removes AC #2)      |
-| Remove multiple ACs | `backlog task edit 7 --remove-ac 2 --remove-ac 4` (removes AC #2 and #4) |
-| Check AC    | `backlog task edit 7 --check-ac 1` (marks AC #1 as done) |
-| Check DoD   | `backlog task edit 7 --check-dod 1` (marks DoD #1 as done) |
-| Check multiple ACs | `backlog task edit 7 --check-ac 1 --check-ac 3` (marks AC #1 and #3 as done) |
-| Uncheck AC  | `backlog task edit 7 --uncheck-ac 3` (marks AC #3 as not done) |
-| Uncheck DoD | `backlog task edit 7 --uncheck-dod 3` (marks DoD #3 as not done) |
-| Mixed AC operations | `backlog task edit 7 --check-ac 1 --uncheck-ac 2 --remove-ac 4` |
-| Mixed DoD operations | `backlog task edit 7 --check-dod 1 --uncheck-dod 2 --remove-dod 4` |
-| Add notes   | `backlog task edit 7 --notes "Completed X, working on Y"` (replaces existing) |
-| Append notes | `backlog task edit 7 --append-notes "New findings"` |
-| Add comment | `backlog task edit 7 --comment "Question for review" --comment-author @sara` |
-| Add final summary | `backlog task edit 7 --final-summary "Completion summary"` |
-| Append final summary | `backlog task edit 7 --append-final-summary "More details"` |
-| Clear final summary | `backlog task edit 7 --clear-final-summary` |
-| Add deps    | `backlog task edit 7 --dep task-1 --dep task-2`     |
-| Set due date | `backlog task edit 7 --due-date 2026-08-10` |
-| Clear due date | `backlog task edit 7 --clear-due-date` |
-| Archive     | `backlog task archive 7` (move a task in any status off the board) |
-| Restore     | `backlog task restore 7` (move an archived task back to the board) |
-| Delete      | `backlog task delete 7` (permanently remove an archived task and release its ID once no other branch or worktree still holds the task) |
+| Archive | `backlog task archive 7` |
+| Restore | `backlog task restore 7` |
+| Delete | `backlog task delete 7` |
+
+The built-in schema has `description` (Markdown), `acceptance` (checklist), and `log` (append-only log). Use `backlog schema` to discover additional sections and users. Empty sections are omitted from Markdown files but remain available in task view. Content outside configured markers appears under `Other` and is preserved through edits. Checklist removal renumbers remaining items. Log entries have an author, business date, and recorded UTC creation time; standalone `---` lines are reserved.
 
 Mark finished work Done (or the configured final status). During periodic cleanup, Archive moves it off the board; Archive also takes canceled, duplicate, or invalid work off the board at any time. An archived task keeps its ID, its record, and every dependency and reference to it. It stays readable with `backlog task view`, where its status line ends in `(archived)`, and it is read-only. A dependency on an archived task counts as satisfied only when that task is in the final status.
 
@@ -123,139 +103,48 @@ Showing 21-40 of 57 items. Next: backlog task list --status 'To Do' --max-count 
 
 The last window has no `Next:` part, and a `--skip` past the end prints only `Showing 0 of 57 items.` Output that is not cut has no footer. `--count` prints only the number of items the same command would list, as `grep --count` does; it cannot be combined with `--json`. There are no short forms because `-m` already means `--milestone`. `--limit` keeps its behavior: it silently shortens the list before any window applies.
 
-Task comments are append-only discussion entries with optional author labels. Use comments for review questions and collaboration notes; use implementation notes for execution progress and final summary for PR-ready completion notes. Comment bodies may contain Markdown, but standalone `---` lines are reserved as comment delimiters.
+Log sections are append-only. Use `backlog task log <id> "text"` for progress, review questions, and final results; `--comment` on task edit is an alias for the first log section. Authors come from the schema users block. A standalone `---` line is reserved as a log delimiter.
 
 Task and milestone due dates are calendar days stored as `YYYY-MM-DD`. Use a plain date such as `2026-08-10`; a due date carries no time and no timezone.
 
 ### Stable JSON output
 
-Use `--json` when a script or integration needs structured output:
-
-```bash
-backlog task list --status "To Do" --json | jq '.tasks[] | .id'
-backlog task view BACK-7 --json | jq '.task.acceptanceCriteria'
-backlog task BACK-7 --json
-backlog search "authentication" --json | jq '.results[] | [.type, .data.id]'
-```
-
-Use `backlog task list --json --watch` to receive the full matching list immediately, then a full replacement whenever its JSON result changes. Every response uses exactly the same fields, envelope, indentation, and trailing newline as `task list --json`. Read successive complete JSON values, not individual lines or the whole stream as one document. For example:
-
-```bash
-backlog task list --json --watch | jq --unbuffered -c '.tasks'
-```
-
-Each response replaces the subscriber's previous list, including an empty `tasks` array. Filters, sorting, limits, and local editable task scope are unchanged; archived tasks, drafts, and other branches are not added to the list. Dependency and configuration changes can update derived fields or which tasks match. Unchanged results are suppressed, and rapid edits or slow consumers may coalesce intermediate states. The command reconciles periodically as well as on file notifications; this is a current-state subscription, not an edit history. Restart it to receive a fresh full list.
-
-`--watch` requires `--json` and cannot be combined with `--plain`. Stop it with Ctrl+C or terminate the process; closing the output pipe also stops it. It also ends when the process that started it ends. A failure after earlier responses writes a diagnostic to stderr and exits nonzero without emitting a replacement for that failed read.
-
-Each successful response is one pretty-printed JSON document followed by a newline. The top-level contract is versioned and identifies the command result:
+Use `--json` for integrations. Task shapes use `schemaVersion: 2`:
 
 | Command | Envelope |
 |---------|----------|
-| `task list --json` | `{ "schemaVersion": 1, "kind": "task-list", "tasks": [...] }` |
-| `task view <id> --json` and `task <id> --json` | `{ "schemaVersion": 1, "kind": "task-view", "task": {...} }` |
-| `draft list --json` | `{ "schemaVersion": 1, "kind": "draft-list", "drafts": [...] }` |
-| `decision list --json` | `{ "schemaVersion": 1, "kind": "decision-list", "decisions": [...] }` |
-| `search [query] --json` | `{ "schemaVersion": 1, "kind": "search", "results": [...] }` |
+| `task list --json` | `{ "schemaVersion": 2, "kind": "task-list", "tasks": [...] }` |
+| `task view <id> --json` | `{ "schemaVersion": 2, "kind": "task-view", "task": {...} }` |
+| `draft list --json` | `{ "schemaVersion": 2, "kind": "draft-list", "drafts": [...] }` |
+| `draft view <id> --json` | `{ "schemaVersion": 2, "kind": "draft-view", "draft": {...} }` |
+| `search [query] --json` | `{ "schemaVersion": 2, "kind": "search", "results": [...] }` |
+| `schema --json` | `{ "schemaVersion": 2, "kind": "schema", ... }` |
 
-Task list and task search results use these compact fields: `id`, `title`, `status`, `archived`, `type`, `priority`, `project`, `assignees`, `reporter`, `labels`, `milestone`, `parentTaskId`, `acceptanceCriteriaCompleted`, `acceptanceCriteriaCount`, `references`, `modifiedFiles`, `ordinal`, `createdAt`, `updatedAt`, `dueDate`, and `isReady`. `archived` is `true` for a task in the archive, which is read-only, and `false` for a task on the board. `acceptanceCriteriaCompleted` is the number of checked acceptance criteria and `acceptanceCriteriaCount` is the total; both are `0` when the task has no acceptance criteria. `project` reports the task's `project:` frontmatter and is `null` when the task has none. Setting or filtering by it requires a `projects:` list in the project config. `isReady` is derived from the whole visible corpus at read time and never stored: it is `true` when the task is unfinished and every dependency it names resolved to a completed task, and `false` for a finished task or one whose dependencies are unfinished, unknown, or ambiguous. It is the same verdict `task list --ready` filters on. Draft list entries carry the same fields without `isReady`, because readiness is computed against tasks only.
+A compact task has `id`, `title`, `fields`, and `unknownFields`. `fields` contains every schema field with a value, including core fields, keyed by its frontmatter name. `unknownFields` preserves stored keys absent from the active schema. List, draft list, and search task entries use this compact shape. Task and draft view add a project-relative `path`, `sections`, and `other`. Markdown sections are strings; checklists are `[{index, text, checked}]`; log sections are `[{author, date, createdAt, auto?, body}]`. `other` is the preserved Markdown outside configured section markers. Field values are not duplicated as top-level properties.
 
-Task view includes the same progress counts and `archived` alongside the full checklist and adds `path`, `description`, `dependencies`, `dependencyGraph`, `readiness`, `references`, `documentation`, `modifiedFiles`, `subtasks`, `acceptanceCriteria`, `definitionOfDone`, `implementationPlan`, `implementationNotes`, `comments`, and `finalSummary`. `path` is relative to the project root. Checklist entries contain `index`, `text`, and `checked`. Comment entries contain `index`, `body`, `createdAt`, and `author`.
-
-Task view also carries `dependencyGraph`, a property of the task detail that is derived from the whole visible corpus at read time and never stored in the Markdown file. `task.dependencies` stays the task's own list of direct dependency IDs, unchanged. `task.dependencyGraph` contains `root` (the selected task's ID), `nodes`, and `edges`. Each edge is `{ "from": ..., "to": ... }` and always points from the task that declares the dependency to the task it depends on, so `to` blocks `from`. Each node contains `id`, `title`, `status`, `state`, `completed`, `dependencyDepth`, and `dependentDepth`. The two depths are the shortest hop counts from the root: `0` is the root itself, `1` is a direct relationship, anything higher is transitive, and `null` means the node is not reachable in that direction. Nodes are listed root first and then by task ID, edges by `from` and then `to`. See "Dependency Management" for what the graph covers and how it reports identities it cannot resolve.
-
-`readiness` explains the `isReady` field above it and comes from the same derivation. It contains `isReady`, `isBlocked`, `blockingDependencies` (dependencies that resolved to unfinished tasks), and `missingDependencies` (dependency IDs no single visible task claims). Both lists fail closed: an unknown or ambiguous dependency blocks instead of being treated as satisfied.
-
-Search keeps relevance order and discriminates every result with `type` and `data`. Task data uses the compact task fields. Document data contains `id`, `title`, `type`, `path`, `tags`, `createdAt`, and `updatedAt`. Decision data contains `id`, `title`, `status`, and `date`. Search scores are not part of the version 1 public contract.
-
-When `--max-count` or `--skip` cuts a `task list`, `draft list`, `search`, or `decision list` result, the envelope also contains `total`, the number of items before the window, and `nextSkip`, the `--skip` value for the following items or `null` when none follow. Output that is not cut has neither field.
-
-Absent scalar fields are `null`, and absent collections are `[]`. Date-only values remain `YYYY-MM-DD`; UTC date-times use RFC 3339. Internal fields, absolute paths, raw Markdown source objects, branch metadata, and search implementation details are not exposed.
-
-`--json` and `--plain` are mutually exclusive. Explicit JSON mode is always noninteractive, including in a terminal. Without `--json`, existing interactive, explicit plain, and automatic non-TTY plain behavior is unchanged. One-shot errors leave stdout empty, write a concise message to stderr, and exit nonzero. Version 1 may gain backward-compatible fields, but removing, renaming, retyping, or changing documented field semantics requires a new `schemaVersion`.
-
-### Replacing legacy sections without markers
-
-Replacing or clearing an old description, plan, notes, or final summary can be refused when it has no section markers
-and contains another `##` heading. That heading might belong to the section or start a separate section, so Backlog.md
-leaves the file unchanged instead of guessing. Unchanged content and appends remain supported and keep an ambiguous
-section unmarked, so a later replacement still requires a person to choose its boundary.
-
-Agents must stop and ask the user to repair the boundary; they must not edit task or draft files directly. A person
-can add the markers named in the error around the intended body. For example, to replace notes while preserving a
-separate Verification section:
-
-```markdown
-## Implementation Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-Old notes
-<!-- SECTION:NOTES:END -->
-
-## Verification
-
-Evidence to keep
-```
-
-Put the end marker after any headings that belong to the notes, or before a heading that starts a separate section.
-Keep all existing content while adding the markers, then retry the edit. The other marker IDs are `DESCRIPTION`,
-`PLAN`, and `FINAL_SUMMARY`.
-
-### Multi-line input (description/plan/notes/comments/final summary)
-
-The CLI preserves input literally — `\n` sequences are not auto-converted. Use one of the following forms (recommended order for AI agents):
-
-**1. Repeat `--append-*` for each line (works in every shell, including Claude Code / Codex / agent sandboxes):**
+For example:
 
 ```bash
-backlog task edit 7 --notes "First line"
-backlog task edit 7 --append-notes "Second line"
-backlog task edit 7 --append-notes "Third line"
+backlog task list --json | jq '.tasks[] | [.id, .fields.status]'
+backlog task view BACK-7 --json | jq '.task.sections.acceptance'
+backlog search "authentication" --json | jq '.results[] | [.type, .data.id]'
 ```
 
-**2. Real newlines inside double quotes (single command):**
+`backlog task list --json --watch` first emits the complete matching list, then a full replacement whenever the result changes. Each response is a pretty-printed JSON document followed by a newline. Read successive JSON values; do not parse the whole stream as one document. `--watch` requires `--json`; `--json` and `--plain` are mutually exclusive. Explicit JSON mode is noninteractive.
 
-```bash
-backlog task create "Feature" --desc "Line1
-Line2
+When `--max-count` or `--skip` cuts a list or search result, its envelope adds `total` (count before the window) and `nextSkip` (next window offset or `null`). An uncut result has neither field. Document and decision JSON retain their existing record shapes; `decision list --json` remains schema version 1.
 
-Final paragraph"
-```
+### Multi-line section input
 
-The same shape works for `--plan`, `--notes`, `--comment`, `--final-summary`, and the `--append-*` variants.
-
-**3. Shell-specific shorthand (interactive shells only — rejected by tree-sitter-based agent sandboxes, see [#595](https://github.com/MrLesk/Backlog.md/issues/595)):**
-
-- **Bash/Zsh (ANSI-C quoting)**
-
-  ```bash
-  backlog task edit 7 --notes $'Line1\nLine2'
-  ```
-
-- **POSIX sh (printf substitution)**
-
-  ```bash
-  backlog task create "Feature" --desc "$(printf 'Line1\nLine2\n\nFinal paragraph')"
-  ```
-
-- **PowerShell (backtick-n)**
-
-  ```powershell
-  backlog task create "Feature" --desc "Line1`nLine2`n`nFinal paragraph"
-  ```
+The CLI preserves input literally: a backslash followed by `n` is not converted to a newline. Use repeatable `--append-section id=text` for separate paragraphs, or put real newlines inside one quoted argument. Some agent sandboxes reject ANSI-C strings and command substitution; these safe forms work there. A project can define additional Markdown section IDs in `task-schema.yml`.
 
 ### Literal backticks in task text
 
-When task text includes Markdown code spans, quote it so the shell passes the backticks literally. Unescaped backticks in double-quoted or unquoted arguments are command substitution in many shells, and Backlog.md cannot recover the original text after the shell has already executed it.
-
-Use single-quoted CLI arguments for values that contain literal backticks:
+Use single-quoted CLI arguments for text that contains Markdown backticks. Otherwise a shell may execute them as command substitution before the CLI receives the text:
 
 ```bash
-backlog task create 'Document `backlog init` setup' \
-  --ac 'Instructions mention `backlog init --defaults` literally'
+backlog task create 'Document `backlog init` setup' --add-item acceptance='Mention `backlog init --defaults` literally'
 ```
-
-If single quotes are not practical in your shell, escape each literal backtick before running the command. Do not rely on Backlog.md to sanitize accidental command output after substitution.
 
 ## Milestone Management
 
@@ -329,7 +218,7 @@ Manage task dependencies to express execution order:
 
 Task detail shows the whole dependency context around the selected task, under `Dependency Graph`, directly above the description. It is derived and read-only, and it replaces the raw `Dependencies:` ID list in plain output: the graph names the same direct dependencies and resolves their titles, status, and everything behind them.
 
-Every plain task output uses this one layout, so `task create --plain`, `task edit --plain`, `task view --plain`, and the MCP task results all render identically. `--json` is unaffected: `task.dependencies` remains the editable direct list alongside `task.dependencyGraph`.
+CLI plain task output uses this layout for create, edit, and view. JSON version 2 stores the direct dependency list in `task.fields.dependencies`.
 
 ```text
 Dependency Graph:

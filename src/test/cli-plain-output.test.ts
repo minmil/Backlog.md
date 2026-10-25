@@ -32,7 +32,7 @@ describe("CLI plain output for AI agents", () => {
 				createdDate: "2025-06-18",
 				labels: [],
 				dependencies: [],
-				description: "Test description",
+				sections: { description: "Test description" },
 			},
 			false,
 		);
@@ -66,7 +66,7 @@ describe("CLI plain output for AI agents", () => {
 				createdDate: "2025-06-19",
 				labels: [],
 				dependencies: [],
-				description: "Standalone description",
+				sections: { description: "Standalone description" },
 			},
 			false,
 		);
@@ -113,7 +113,8 @@ describe("CLI plain output for AI agents", () => {
 		expect(result.stdout.toString()).toContain("Description:");
 		expect(result.stdout.toString()).toContain("Test description");
 		expect(result.stdout.toString()).toContain("Acceptance Criteria:");
-		expect(result.stdout.toString()).toContain("Definition of Done:");
+		expect(result.stdout.toString()).toContain("Log:");
+		expect(result.stdout.toString()).not.toContain("Definition of Done:");
 		// Should not contain TUI escape codes
 		expect(result.stdout.toString()).not.toContain("[?1049h");
 		expect(result.stdout.toString()).not.toContain("\x1b");
@@ -147,7 +148,7 @@ describe("CLI plain output for AI agents", () => {
 		expect(result.stdout.toString()).toContain("Created: 2025-06-18 (UTC)");
 		expect(result.stdout.toString()).toContain("Description:");
 		expect(result.stdout.toString()).toContain("Test description");
-		expect(result.stdout.toString()).toContain("Definition of Done:");
+		expect(result.stdout.toString()).toContain("Log:");
 		// Should not contain TUI escape codes
 		expect(result.stdout.toString()).not.toContain("[?1049h");
 		expect(result.stdout.toString()).not.toContain("\x1b");
@@ -185,7 +186,7 @@ describe("CLI plain output for AI agents", () => {
 		expect(result.stdout.toString()).toMatch(/Created:\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC\)/);
 		expect(result.stdout.toString()).toContain("Description:");
 		expect(result.stdout.toString()).toContain("Test draft description");
-		expect(result.stdout.toString()).toContain("Definition of Done:");
+		expect(result.stdout.toString()).toContain("Log:");
 		// Should not contain TUI escape codes
 		expect(result.stdout.toString()).not.toContain("[?1049h");
 		expect(result.stdout.toString()).not.toContain("\x1b");
@@ -215,7 +216,7 @@ describe("CLI plain output for AI agents", () => {
 		expect(result.stdout.toString()).toMatch(/Created:\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC\)/);
 		expect(result.stdout.toString()).toContain("Description:");
 		expect(result.stdout.toString()).toContain("Test draft description");
-		expect(result.stdout.toString()).toContain("Definition of Done:");
+		expect(result.stdout.toString()).toContain("Log:");
 		// Should not contain TUI escape codes
 		expect(result.stdout.toString()).not.toContain("[?1049h");
 		expect(result.stdout.toString()).not.toContain("\x1b");

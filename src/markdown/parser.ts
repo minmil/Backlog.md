@@ -1,14 +1,11 @@
+import { FieldRegistry } from "../schema/field-registry.ts";
+import { getDefaultTaskSchema } from "../schema/index.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type { AcceptanceCriterion, Decision, Document, Milestone, ParsedMarkdown, Task } from "../types/index.ts";
 import { normalizeDueDate } from "../utils/due-date.ts";
 import { normalizePriorityValue } from "../utils/priority-config.ts";
 import { parseFrontmatter, preprocessFrontmatter } from "./frontmatter.ts";
-import {
-	AcceptanceCriteriaManager,
-	CommentsManager,
-	DefinitionOfDoneManager,
-	extractStructuredSection,
-	STRUCTURED_SECTION_KEYS,
-} from "./structured-sections.ts";
+import { parseSections } from "./sections.ts";
 
 function normalizeDate(value: unknown): string {
 	if (!value) return "";
@@ -78,9 +75,29 @@ function isStructuredDependency(value: unknown): boolean {
 	return Array.isArray(value) || Object.prototype.toString.call(value) === "[object Object]";
 }
 
-export function parseTask(content: string): Task {
+export function parseTask(content: string, _legacySchema?: unknown, suppliedSchema?: TaskSchema): Task {
 	const { frontmatter, content: rawContent } = parseMarkdown(content, ["created_date", "updated_date"]);
 	const id = String(frontmatter.id || "");
+	const taskSchema = suppliedSchema ?? getDefaultTaskSchema();
+	const fieldValues: Record<string, unknown> = {};
+	const unknownFields: Record<string, unknown> = {};
+	const registry = new FieldRegistry(taskSchema);
+	for (const [key, value] of Object.entries(frontmatter)) {
+		const definition = taskSchema.fields[key];
+		if (!definition) {
+			unknownFields[key] = value;
+			continue;
+		}
+		if (definition.core) continue;
+		fieldValues[key] = value;
+		try {
+			registry.validateValue(key, value);
+		} catch (error) {
+			console.error(
+				`Warning: task ${id || "(missing id)"} has invalid field ${key}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
 	const dependencies = frontmatter.dependencies;
 	if (Array.isArray(dependencies)) {
 		const invalidIndex = dependencies.findIndex(isStructuredDependency);
@@ -91,16 +108,12 @@ export function parseTask(content: string): Task {
 
 	const priority = normalizePriorityValue(frontmatter.priority ? String(frontmatter.priority) : undefined);
 
-	// Parse structured acceptance criteria (checked/text/index) from all sections
-	const structuredCriteria: AcceptanceCriterion[] = AcceptanceCriteriaManager.parseAllCriteria(rawContent);
-	const structuredDefinitionOfDone: AcceptanceCriterion[] = DefinitionOfDoneManager.parseAllCriteria(rawContent);
-	const comments = CommentsManager.parseAllComments(rawContent);
-
-	// Parse other sections
-	const descriptionSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.description) || "";
-	const planSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.implementationPlan) || undefined;
-	const notesSection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.implementationNotes) || undefined;
-	const finalSummarySection = extractStructuredSection(rawContent, STRUCTURED_SECTION_KEYS.finalSummary) || undefined;
+	const parsedSections = parseSections(rawContent, taskSchema);
+	// Legacy read-only projections keep existing browser/TUI callers rendering while those
+	// surfaces migrate. The schema section engine is the only body parser.
+	const descriptionSection = parsedSections.sections.description;
+	const acceptanceSection = parsedSections.sections.acceptance;
+	const logSection = parsedSections.sections.log;
 
 	return {
 		id,
@@ -122,18 +135,29 @@ export function parseTask(content: string): Task {
 		documentation: Array.isArray(frontmatter.documentation) ? frontmatter.documentation.map(String) : [],
 		modifiedFiles: Array.isArray(frontmatter.modified_files) ? frontmatter.modified_files.map(String) : [],
 		rawContent,
-		acceptanceCriteriaItems: structuredCriteria,
-		definitionOfDoneItems: structuredDefinitionOfDone,
-		description: descriptionSection,
-		implementationPlan: planSection,
-		implementationNotes: notesSection,
-		comments,
-		finalSummary: finalSummarySection,
+		sections: parsedSections.sections,
+		other: parsedSections.other,
+		acceptanceCriteriaItems:
+			taskSchema.sections.acceptance?.kind === "checklist" && Array.isArray(acceptanceSection)
+				? (acceptanceSection as AcceptanceCriterion[])
+				: [],
+		definitionOfDoneItems: [],
+		description: typeof descriptionSection === "string" ? descriptionSection : "",
+		comments: Array.isArray(logSection)
+			? logSection.map((entry, index) => ({
+					index: index + 1,
+					body: "body" in entry ? entry.body : "",
+					author: "author" in entry ? entry.author : undefined,
+					createdDate: "createdAt" in entry ? entry.createdAt : "",
+				}))
+			: [],
 		parentTaskId: frontmatter.parent_task_id ? String(frontmatter.parent_task_id) : undefined,
 		subtasks: Array.isArray(frontmatter.subtasks) ? frontmatter.subtasks.map(String) : undefined,
 		priority,
 		type: frontmatter.type ? String(frontmatter.type) : undefined,
 		project: frontmatter.project ? String(frontmatter.project) : undefined,
+		fieldValues,
+		unknownFields,
 		ordinal: frontmatter.ordinal !== undefined ? Number(frontmatter.ordinal) : undefined,
 		onStatusChange: frontmatter.onStatusChange ? String(frontmatter.onStatusChange) : undefined,
 	};

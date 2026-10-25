@@ -1,5 +1,9 @@
 ## Task Execution Guide
 
+### Task fields
+
+Run `backlog schema --json` to inspect field keys, exact values, user handles, and sections. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, `--sort key[:asc|:desc]`, and `--show-fields key1,key2` for declared fields. Copy enum values and user handles exactly. Make writes through the CLI.
+
 Use this guide when you are working on an existing Backlog task.
 
 ### Planning Workflow
@@ -20,18 +24,17 @@ Before writing code for non-trivial work:
 4. Research the current system, including relevant code, tests, conventions, and recent changes. Do not rely on an
    implementation approach proposed when the task was created.
 5. Draft an implementation plan.
-6. Record the current plan in the task before implementation:
-   - `backlog task edit {{TASK_ID:123}} --plan "1. ..."`
+6. Record the current plan in the task before implementation. The built-in schema provides a Markdown `description` section; a project can also configure a dedicated `plan` section:
+   - `backlog task edit {{TASK_ID:123}} --append-section description="Implementation plan: 1. ..."`
 7. If the plan contains a material product, architecture, or workflow decision, or the project or user requires plan
    review, present it and wait for explicit approval before implementation. Routine plans need not block when no review
    was requested and they stay within confirmed scope.
 
-Keep the Backlog task as the plan of record. If the approach changes, replace it with `--plan` or extend it with one
-or more repeatable `--append-plan` values. When both options are provided, `--plan` replaces the existing plan first,
-then each `--append-plan` value is appended in CLI order:
+Keep the Backlog task as the plan of record. Use `--section id=text` to replace a configured Markdown section or
+repeat `--append-section id=text` to extend it. Use the `description` section with the built-in schema:
 
-- `backlog task edit {{TASK_ID:123}} --append-plan "5. Verify the revised approach"`
-- `backlog task edit {{TASK_ID:123}} --plan "1. Revised approach" --append-plan "2. Verify it"`
+- `backlog task edit {{TASK_ID:123}} --append-section description="5. Verify the revised approach"`
+- `backlog task edit {{TASK_ID:123}} --section description="Revised approach" --append-section description="Verify it"`
 
 ### Execution Workflow
 
@@ -39,35 +42,31 @@ Work in short loops:
 
 1. Implement a focused slice.
 2. Run relevant tests or checks.
-3. Record useful progress:
-   - `backlog task edit {{TASK_ID:123}} --append-notes "Implemented parser and added tests."`
-4. Add comments for discussion or review questions:
+3. Record useful progress in the configured log section:
+   - `backlog task log {{TASK_ID:123}} "Implemented parser and added tests." --author @your-name`
+4. Add discussion or review questions to that log:
    - `backlog task edit {{TASK_ID:123}} --comment "Question for review" --comment-author @your-name`
 
 Use `backlog task edit {{TASK_ID:123}} --help` before changing unfamiliar fields.
 
-Replacing or clearing a legacy description, plan, notes, or final summary without section markers is refused if another
-level-two heading makes its boundary ambiguous. The file stays unchanged. Stop and ask the user to add the BEGIN and
-END markers named in the error around the intended section body without removing any content. Do not edit task or
-draft files directly. The user should place the END marker before a separate section, or after headings that belong
-to the body. Retry the CLI edit after the user repairs the boundary. Appends remain supported and keep ambiguous
-sections unmarked, so later replacements remain protected.
+The section engine preserves content outside configured markers as `Other`. Review that content in task view before
+replacing a section. Do not edit task or draft files directly.
 
-Do not check acceptance criteria, write the final summary, or move the task to the terminal status from this guide alone. When implementation appears complete, read the finalization guide and verify each acceptance criterion with objective evidence before checking it.
+Do not check acceptance criteria or move the task to the terminal status from this guide alone. When implementation appears complete, read the finalization guide and verify each acceptance criterion with objective evidence before checking it.
 
 ### Scope Changes
 
 If you discover work that is outside the task's acceptance criteria, stop and ask the user whether to add scope to the current task or create follow-up work. Do not silently expand the task.
 
-### Replacing Acceptance Criteria
+### Editing Acceptance Criteria
 
-`--acceptance-criteria` replaces the full list; repeat it for each item. Matching trimmed text keeps its check state,
-even after reordering. Duplicate text matches old entries in order, once per entry. New or reworded entries start
-unchecked, and omitted entries are removed. Use `--check-ac` or `--uncheck-ac` in a separate edit to change check states.
+Use `--add-item acceptance=text`, `--check acceptance:n`, `--uncheck acceptance:n`, and
+`--remove-item acceptance:n`. Removing an item renumbers the remaining items. Other configured checklist sections
+use the same operations with their own section ID.
 
 ### Working With Subtasks
 
-If the user assigns a parent task and all subtasks, complete subtasks one at a time. Each subtask should have its own plan, notes, checked acceptance criteria, and final summary.
+If the user assigns a parent task and all subtasks, complete subtasks one at a time. Each subtask should have its own plan, log entries, and checked acceptance criteria.
 
 If the user assigns only one subtask, finish that subtask and ask before moving to the next one.
 

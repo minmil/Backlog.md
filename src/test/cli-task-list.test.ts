@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { $ } from "bun";
 import { Core } from "../index.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeTestProject, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, initializeTestProject, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 const CLI_PATH = getTestCliPath();
@@ -120,12 +120,10 @@ describe("CLI Integration", () => {
 			expect(doneTasks.map((t) => t.id)).toEqual(["TASK-2"]); // IDs normalized to uppercase
 		});
 
-		it("should respect config status order", async () => {
+		it("should respect schema status order", async () => {
 			const core = new Core(TEST_DIR);
 
-			// Load and verify default config status order
-			const config = await core.filesystem.loadConfig();
-			expect(config?.statuses).toEqual(["To Do", "In Progress", "Done"]);
+			expect(core.filesystem.taskSchema.fields.status?.values).toEqual(["To Do", "In Progress", "Done"]);
 		});
 
 		it("should filter tasks by status", async () => {
@@ -177,12 +175,13 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					rawContent: "Task with acceptance criteria",
-					acceptanceCriteriaItems: [
-						{ index: 1, text: "First criterion", checked: true },
-						{ index: 2, text: "Second criterion", checked: false },
-						{ index: 3, text: "Third criterion", checked: false },
-					],
+					sections: {
+						acceptance: [
+							{ index: 1, text: "First criterion", checked: true },
+							{ index: 2, text: "Second criterion", checked: false },
+							{ index: 3, text: "Third criterion", checked: false },
+						],
+					},
 				},
 				false,
 			);
@@ -402,7 +401,7 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					description: "Handle invoice payment callbacks.",
+					sections: { description: "Handle invoice payment callbacks." },
 				},
 				false,
 			);
@@ -415,7 +414,7 @@ describe("CLI Integration", () => {
 					createdDate: "2025-06-08",
 					labels: [],
 					dependencies: [],
-					description: "Update account preferences.",
+					sections: { description: "Update account preferences." },
 				},
 				false,
 			);
@@ -468,13 +467,8 @@ describe("CLI Integration", () => {
 
 		it("should use configured custom priorities for create, list, search, and help", async () => {
 			const core = new Core(TEST_DIR);
-			const config = await core.filesystem.loadConfig();
-			if (!config) {
-				throw new Error("Expected test config to exist");
-			}
-			await core.filesystem.saveConfig({
-				...config,
-				priorities: ["Very High", "High", "Medium", "Low", "Very Low"],
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				schema.fields.priority!.values = ["Very High", "High", "Medium", "Low", "Very Low"];
 			});
 
 			await $`bun ${CLI_PATH} task create "Custom priority urgent task" --priority "Very High" --plain`
@@ -771,10 +765,11 @@ describe("CLI Integration", () => {
 			// Publishing the verdict must not cost a second read of the corpus it came from.
 			expect(jsonReady.archiveReads).toBe(plainReady.archiveReads);
 
-			const rows = JSON.parse(jsonReady.stdout).tasks as Array<{ id: string; isReady: boolean }>;
+			const rows = JSON.parse(jsonReady.stdout).tasks as Array<{ id: string; fields: { dependencies?: string[] } }>;
 			expect(rows.map((row) => row.id)).toEqual(["TASK-1"]);
-			// Every serialized row is one the filter selected, with the verdict that selected it.
-			expect(rows.every((row) => row.isReady)).toBe(true);
+			// Version 2 publishes task fields while --ready selects the matching records.
+			expect(rows[0]?.fields.dependencies).toEqual([]);
+			expect(rows[0]).not.toHaveProperty("isReady");
 			expect(plainReady.stdout).toContain("TASK-1 - Ready Work");
 			expect(plainReady.stdout).not.toContain("TASK-2 - Blocked Work");
 		});

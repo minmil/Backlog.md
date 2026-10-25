@@ -5,7 +5,12 @@ import { Core } from "../core/backlog.ts";
 import { ContentStore } from "../core/content-store.ts";
 import { createTaskSearchIndex } from "../utils/task-search.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createUniqueTestDir, initializeFilesystemTestProject, safeCleanup } from "./test-utils.ts";
+import {
+	createUniqueTestDir,
+	initializeFilesystemTestProject,
+	safeCleanup,
+	updateTestTaskSchema,
+} from "./test-utils.ts";
 
 let testDir: string;
 let core: Core;
@@ -19,9 +24,9 @@ describe("task project filtering", () => {
 		core = new Core(testDir);
 
 		await initializeFilesystemTestProject(core, "Task Project Filtering");
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		await core.filesystem.saveConfig({ ...config, projects: ["Web", "API", "Mobile"] });
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.project!.values = ["Web", "API", "Mobile"];
+		});
 
 		await core.createTaskFromInput(
 			{
@@ -145,25 +150,29 @@ describe("task project filtering", () => {
 	it("rejects invalid configured projects clearly", async () => {
 		const list = await $`bun ${cliPath} task list --project desktop --plain`.cwd(testDir).nothrow().quiet();
 		expect(list.exitCode).toBe(1);
-		expect(list.stderr.toString()).toContain("Invalid project: desktop. Valid projects are: Web, API, Mobile");
+		expect(list.stderr.toString()).toContain('Invalid task field "project": allowed values: Web, API, Mobile');
 
 		const search = await $`bun ${cliPath} search --project desktop --plain`.cwd(testDir).nothrow().quiet();
 		expect(search.exitCode).toBe(1);
-		expect(search.stderr.toString()).toContain("Invalid project: desktop. Valid projects are: Web, API, Mobile");
+		expect(search.stderr.toString()).toContain('Invalid task field "project": allowed values: Web, API, Mobile');
 	});
 
 	it("fails closed on project filters when no projects are configured", async () => {
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected test config");
-		await core.filesystem.saveConfig({ ...config, projects: [] });
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.fields.project!.values = [];
+		});
 
 		const list = await $`bun ${cliPath} task list --project web --plain`.cwd(testDir).nothrow().quiet();
 		expect(list.exitCode).toBe(1);
-		expect(list.stderr.toString()).toContain("No projects are configured. Add a 'projects:' list to");
+		expect(list.stderr.toString()).toContain(
+			"no values configured; add values to task-schema.yml fields.project.values",
+		);
 
 		const search = await $`bun ${cliPath} search --project web --plain`.cwd(testDir).nothrow().quiet();
 		expect(search.exitCode).toBe(1);
-		expect(search.stderr.toString()).toContain("No projects are configured. Add a 'projects:' list to");
+		expect(search.stderr.toString()).toContain(
+			"no values configured; add values to task-schema.yml fields.project.values",
+		);
 	});
 
 	it("documents configured project filters and completes their values", async () => {

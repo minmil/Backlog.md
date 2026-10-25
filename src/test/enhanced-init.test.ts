@@ -147,7 +147,7 @@ describe("Enhanced init command", () => {
 		expect(existingConfig?.maxColumnWidth).toBe(30);
 	});
 
-	test("should preserve non-init-managed config fields during re-initialization", async () => {
+	test("re-initialization rejects config keys that moved into task-schema.yml", async () => {
 		const core = new Core(tmpDir);
 
 		const initialConfig: BacklogConfig = {
@@ -171,53 +171,33 @@ describe("Enhanced init command", () => {
 		};
 
 		await core.filesystem.ensureBacklogStructure();
-		await core.filesystem.saveConfig(initialConfig);
+		const legacyConfig = 'project_name: "Preserve Fields Project"\nstatuses: ["To Do", "In Progress", "Done"]\n';
+		await Bun.write(core.filesystem.configFilePath, legacyConfig);
 
-		const existingConfig = await core.filesystem.loadConfig();
-		if (!existingConfig) throw new Error("Expected existing config");
-
-		await initializeProject(core, {
-			projectName: "Preserve Fields Project Updated",
-			integrationMode: "none",
-			existingConfig,
-		});
-
-		const reloaded = await core.filesystem.loadConfig();
-		expect(reloaded?.projectName).toBe("Preserve Fields Project Updated");
-		expect(reloaded?.definitionOfDone).toEqual(["Run tests", "Update docs"]);
-		expect(reloaded?.defaultAssignee).toEqual(["@alex"]);
-		expect(reloaded?.defaultReporter).toBe("@bot");
-		expect(reloaded?.includeDateTimeInDates).toBe(true);
-		expect(reloaded?.onStatusChange).toBe("echo changed");
-		expect(reloaded?.mcp?.http?.host).toBe("127.0.0.1");
-		expect(reloaded?.mcp?.http?.port).toBe(7777);
+		await expect(
+			initializeProject(core, {
+				projectName: "Preserve Fields Project Updated",
+				integrationMode: "none",
+				existingConfig: initialConfig,
+			}),
+		).rejects.toThrow(/Move this config.yml key to task-schema.yml/);
+		expect(await Bun.file(core.filesystem.configFilePath).text()).toBe(legacyConfig);
 	});
 
-	test("initializeProject should persist advanced Definition of Done defaults and allow clearing them", async () => {
+	test("initializeProject keeps body-section configuration in task-schema.yml", async () => {
 		const core = new Core(tmpDir);
 
 		await initializeProject(core, {
-			projectName: "Definition Defaults Init",
+			projectName: "Schema Sections Init",
 			integrationMode: "none",
-			advancedConfig: {
-				definitionOfDone: ["  Run tests  ", "", "Update docs", 1, null] as unknown as string[],
-			},
 		});
 
-		let loaded = await core.filesystem.loadConfig();
-		expect(loaded?.definitionOfDone).toEqual(["Run tests", "Update docs"]);
-
-		await initializeProject(core, {
-			projectName: "Definition Defaults Init",
-			integrationMode: "none",
-			existingConfig: loaded,
-			advancedConfig: {
-				definitionOfDone: [],
-			},
-		});
-
-		loaded = await core.filesystem.loadConfig();
-		expect(loaded?.definitionOfDone).toEqual([]);
+		const loaded = await core.filesystem.loadConfig();
+		expect(loaded?.definitionOfDone).toBeUndefined();
+		expect(await Bun.file(core.filesystem.configFilePath).text()).not.toContain("definition_of_done:");
+		expect(await Bun.file(`${core.filesystem.backlogDir}/task-schema.yml`).text()).toContain(
+			"acceptance: {kind: checklist",
+		);
 	});
 
 	test("should handle zero-padding configuration in init flow", async () => {

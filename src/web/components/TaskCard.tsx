@@ -1,10 +1,9 @@
 import React from 'react';
 import { type Task } from '../../types';
-import { formatPriorityLabel } from '../../utils/priority-config';
 import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from './AcceptanceCriteriaProgress';
-import StoredDate from './StoredDate';
-import ProjectBadge from './ProjectBadge';
-import TaskTypeBadge from './TaskTypeBadge';
+import FieldValue from './schema/FieldValue.tsx';
+import { useSchema } from './schema/SchemaProvider.tsx';
+import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 
 interface TaskCardProps {
   task: Task;
@@ -66,8 +65,6 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onDragEnd,
   status,
   laneId,
-  availableTypes,
-  availableProjects,
   dateFormat,
   isSelected = false,
   selectionCount = 0,
@@ -77,6 +74,17 @@ const TaskCard: React.FC<TaskCardProps> = ({
 }) => {
   const [isDragging, setIsDragging] = React.useState(false);
   const [showBranchTooltip, setShowBranchTooltip] = React.useState(false);
+  const { schema, registry } = useSchema();
+  const cardFields = schema.ui.board.card.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+  const fieldValue = (key: string): RegistryFieldValue | undefined => {
+    const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
+    return supplied?.[key] ?? registry.getField(task, key);
+  };
+  const badgeFields = cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool'));
+  const listFields = cardFields.filter((key) => ['multi-enum', 'string-list', 'task-ref-list'].includes(schema.fields[key]?.type ?? ''));
+  const footerFields = cardFields.filter((key) => !badgeFields.includes(key) && key !== 'priority' && !listFields.includes(key));
+  const adjacentDateFields = footerFields.filter((key) => key === 'created_date' || key === 'updated_date');
+  const trailingFields = footerFields.filter((key) => key !== 'created_date' && key !== 'updated_date');
 
   // Check if task is from another branch (read-only)
   const isFromOtherBranch = Boolean(task.branch);
@@ -142,23 +150,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     }
   };
 
-  const getPriorityBadge = (priority?: string) => {
-    switch (priority) {
-      case 'high': return { bg: 'bg-red-100 dark:bg-red-900/40', text: 'text-red-700 dark:text-red-300', label: 'High' };
-      case 'medium': return { bg: 'bg-yellow-100 dark:bg-yellow-900/40', text: 'text-yellow-700 dark:text-yellow-300', label: 'Med' };
-      case 'low': return { bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-300', label: 'Low' };
-      default:
-        return priority
-          ? {
-              bg: 'bg-gray-100 dark:bg-gray-600',
-              text: 'text-gray-700 dark:text-gray-200',
-              label: formatPriorityLabel(priority),
-            }
-          : null;
-    }
-  };
-
-  const priorityBadge = getPriorityBadge(task.priority);
+  const priorityValue = cardFields.includes('priority') ? fieldValue('priority') : undefined;
 
   return (
     <div className="relative">
@@ -180,7 +172,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           isFromOtherBranch 
             ? 'opacity-75 cursor-not-allowed border-dashed' 
             : 'cursor-pointer hover:shadow-md dark:hover:shadow-lg hover:border-stone-500 dark:hover:border-stone-400'
-        } ${getPriorityClass(task.priority)} ${
+        } ${getPriorityClass(typeof priorityValue === 'string' ? priorityValue : undefined)} ${
           isDragging || (isSelected && isSelectionDragging) ? 'opacity-50 transform rotate-2 scale-105' : ''
         } ${
           isSelected
@@ -233,17 +225,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 font-mono transition-colors duration-200">{task.id}</span>
-            <TaskTypeBadge type={task.type} availableTypes={availableTypes} className="min-w-0" />
-            <ProjectBadge project={task.project} availableProjects={availableProjects} className="min-w-0" />
+            {badgeFields.map((key) => <FieldValue key={key} fieldKey={key} value={fieldValue(key)} variant="card" />)}
           </div>
-          {(acceptanceCriteriaProgress || priorityBadge) && (
+          {(acceptanceCriteriaProgress || priorityValue) && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <AcceptanceCriteriaProgress task={task} density="card" />
-              {priorityBadge && (
-                <span className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${priorityBadge.bg} ${priorityBadge.text} transition-colors duration-200`}>
-                  {priorityBadge.label}
-                </span>
-              )}
+              {priorityValue !== undefined && <FieldValue fieldKey="priority" value={priorityValue} variant="card" />}
             </div>
           )}
         </div>
@@ -257,40 +244,24 @@ const TaskCard: React.FC<TaskCardProps> = ({
           {task.title}
         </h4>
 
-        {/* Labels - limit to 3 */}
-        {task.labels.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {task.labels.slice(0, 3).map(label => (
-              <span
-                key={label}
-                className="inline-block px-1.5 py-0.5 text-[10px] bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded transition-colors duration-200"
-              >
-                {label}
-              </span>
-            ))}
-            {task.labels.length > 3 && (
-              <span className="inline-block px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-gray-500">
-                +{task.labels.length - 3}
-              </span>
-            )}
-          </div>
-        )}
+        {listFields.map((key) => { const value = fieldValue(key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" /></div> : null; })}
 
         {/* Footer with dates and assignee */}
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[10px] text-gray-400 dark:text-gray-500 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-600/50 transition-colors duration-200">
           {/* Grouped so the updated date sits beside the created date on every card, whatever else the footer shows.
               The group uses the same gaps as the footer row (gap-x-2 gap-y-1), so change the two together.
               A new labelled date in the compact style belongs inside this group. */}
-          <span className="flex flex-wrap gap-x-2 gap-y-1">
-            <StoredDate value={task.createdDate} dateFormat={dateFormat} compact />
-            {task.updatedDate && <span>Updated: <StoredDate value={task.updatedDate} dateFormat={dateFormat} compact /></span>}
-          </span>
-          {task.dueDate && <span>Due: <StoredDate value={task.dueDate} dateFormat={dateFormat} /></span>}
-          {task.assignee.length > 0 && (
-            <span className="truncate max-w-[80px]" title={task.assignee.join(', ')}>
-              {task.assignee[0]}
-            </span>
-          )}
+          <span className="flex flex-wrap gap-x-2 gap-y-1">{adjacentDateFields.map((key) => {
+            const value = fieldValue(key);
+            if (value === undefined || value === null || value === '') return null;
+            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} /></span>;
+          })}</span>
+          {trailingFields.map((key) => {
+            const value = fieldValue(key);
+            if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
+            const label = key === 'created_date' ? '' : key === 'updated_date' ? 'Updated: ' : key === 'due_date' ? 'Due: ' : `${schema.fields[key]?.label ?? key}: `;
+            return <span key={key}>{label}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} /></span>;
+          })}
         </div>
       </div>
     </div>

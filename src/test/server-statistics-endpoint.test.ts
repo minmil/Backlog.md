@@ -7,7 +7,7 @@ import { FileSystem } from "../file-system/operations.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Task } from "../types/index.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { archiveTaskFile, createUniqueTestDir, safeCleanup } from "./test-utils.ts";
+import { archiveTaskFile, createUniqueTestDir, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let testDir: string;
 let filesystem: FileSystem;
@@ -30,9 +30,6 @@ function rootConfig(projectName: string, backlogDirectory: string): string {
 	return [
 		`project_name: "${projectName}"`,
 		`backlog_directory: "${backlogDirectory}"`,
-		'statuses: ["Queued", "Done"]',
-		"labels: []",
-		'priorities: ["Urgent", "Low"]',
 		"date_format: YYYY-MM-DD",
 		"remote_operations: false",
 		"check_active_branches: false",
@@ -110,6 +107,9 @@ describe("BacklogServer statistics endpoint", () => {
 			dateFormat: "YYYY-MM-DD",
 			remoteOperations: false,
 			checkActiveBranches: false,
+		});
+		await updateTestTaskSchema(filesystem, (schema) => {
+			if (schema.fields.priority) schema.fields.priority.values = ["Urgent", "Low"];
 		});
 
 		await filesystem.saveTask(createTask({ priority: "Urgent" }));
@@ -214,8 +214,6 @@ describe("BacklogServer statistics endpoint", () => {
 		};
 		const core = serverInternals.core;
 		const store = await serverInternals.getContentStoreInstance();
-		const config = await core.filesystem.loadConfig();
-		if (!config) throw new Error("Expected statistics test config");
 		const originalEnsureConfigWatcher = store.ensureConfigWatcher.bind(store);
 		const originalRefreshTasksForTaskRead = core.refreshTasksForTaskRead.bind(core);
 		(store as unknown as { stopConfigWatcher: () => void }).stopConfigWatcher();
@@ -223,15 +221,14 @@ describe("BacklogServer statistics endpoint", () => {
 		core.refreshTasksForTaskRead = async () => false;
 
 		try {
-			await core.filesystem.saveConfig({
-				...config,
-				priorities: ["Critical", "Urgent", "Low"],
+			await updateTestTaskSchema(core.filesystem, (schema) => {
+				if (schema.fields.priority) schema.fields.priority.values = ["Critical", "Urgent", "Low"];
 			});
 
 			const refreshed = await requestStatistics();
 			expect(refreshed.statusCounts).toEqual({ "To Do": 1, "In Progress": 0, Done: 1 });
 			expect(refreshed.priorityCounts).toMatchObject({ critical: 0, urgent: 1, low: 1 });
-			expect(store.getTaskCorpusSnapshot().config?.priorities).toEqual(["Urgent", "Low"]);
+			expect(store.getTaskCorpusSnapshot().activeTasks.map((task) => task.id)).toContain("TASK-1");
 		} finally {
 			store.ensureConfigWatcher = originalEnsureConfigWatcher;
 			core.refreshTasksForTaskRead = originalRefreshTasksForTaskRead;
@@ -245,6 +242,13 @@ describe("BacklogServer statistics endpoint", () => {
 		const rootB = new FileSystem(testDir);
 		rootB.setBacklogDirectory("root-b");
 		await rootB.ensureBacklogStructure();
+		await updateTestTaskSchema(rootB, (schema) => {
+			if (schema.fields.status) {
+				schema.fields.status.values = ["Queued", "Done"];
+				schema.fields.status.default = "Queued";
+			}
+			if (schema.fields.priority) schema.fields.priority.values = ["Urgent", "Low"];
+		});
 		await rootB.saveTask(createTask({ id: "TASK-10", title: "Root B queued", status: "Queued" }));
 		await rootB.saveTask(createTask({ id: "TASK-11", title: "Root B queued too", status: "Queued" }));
 		await rootB.saveTask(createTask({ id: "TASK-12", title: "Root B done", status: "Done" }));
@@ -286,16 +290,14 @@ describe("BacklogServer statistics endpoint", () => {
 		expect(refreshed).toMatchObject({ totalTasks: 4, statusCounts: { "In Progress": 2 } });
 	});
 
-	it("keeps task and config generations coherent during a same-root config change", async () => {
+	it("keeps task and schema generations coherent during a same-root schema change", async () => {
 		if (!server) throw new Error("Server not started");
 		await requestStatistics();
 		const serverInternals = server as unknown as {
 			core: Core;
 			getContentStoreInstance: () => Promise<ContentStore>;
 		};
-		const store = await serverInternals.getContentStoreInstance();
-		const oldConfig = await serverInternals.core.filesystem.loadConfig();
-		if (!oldConfig) throw new Error("Expected statistics test config");
+		await serverInternals.getContentStoreInstance();
 		const originalRefreshTasksForTaskRead = serverInternals.core.refreshTasksForTaskRead.bind(serverInternals.core);
 		let releaseRefresh: () => void = () => {};
 		let markRefreshStarted: () => void = () => {};
@@ -314,11 +316,9 @@ describe("BacklogServer statistics endpoint", () => {
 		try {
 			const pendingStatistics = requestStatistics();
 			await refreshStarted;
-			(store as unknown as { stopConfigWatcher: () => void }).stopConfigWatcher();
-			await serverInternals.core.filesystem.saveConfig({
-				...oldConfig,
-				statuses: ["Queued", "Done"],
-				priorities: ["Critical"],
+			await updateTestTaskSchema(serverInternals.core.filesystem, (schema) => {
+				if (schema.fields.status) schema.fields.status.values = ["Queued", "To Do", "Done"];
+				if (schema.fields.priority) schema.fields.priority.values = ["Critical", "Urgent", "Low"];
 			});
 			releaseRefresh();
 

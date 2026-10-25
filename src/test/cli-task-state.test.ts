@@ -158,7 +158,7 @@ describe("CLI Integration", () => {
 			const before = await Bun.file(archivedPath).text();
 
 			for (const command of [
-				["task", "edit", "task-4", "--append-notes", "late note"],
+				["task", "edit", "task-4", "--append-section", "description=late note"],
 				["task", "edit", "task-4", "-s", "Done"],
 				["task", "archive", "task-4"],
 				["task", "demote", "task-4"],

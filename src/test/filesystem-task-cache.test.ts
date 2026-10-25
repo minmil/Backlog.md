@@ -16,9 +16,10 @@ function task(id: string, title: string): Task {
 		createdDate: "2026-08-10",
 		labels: ["cache"],
 		dependencies: [],
-		description: "Cached task",
-		acceptanceCriteriaItems: [{ checked: false, text: "Stay independent", index: 1 }],
-		comments: [{ body: "Keep the cached value isolated", createdDate: "2026-08-10", index: 1 }],
+		sections: {
+			description: "Cached task",
+			acceptance: [{ checked: false, text: "Stay independent", index: 1 }],
+		},
 	};
 }
 
@@ -70,8 +71,9 @@ describe("FileSystem task parse cache", () => {
 			expect(parseSpy).toHaveBeenCalledTimes(2);
 
 			firstActive[0]?.labels.push("mutated");
-			if (firstActive[0]?.acceptanceCriteriaItems?.[0]) {
-				firstActive[0].acceptanceCriteriaItems[0].text = "Mutated criterion";
+			const firstCriteria = firstActive[0]?.sections?.acceptance;
+			if (Array.isArray(firstCriteria) && firstCriteria[0] && "text" in firstCriteria[0]) {
+				firstCriteria[0].text = "Mutated criterion";
 			}
 			firstArchived[0]?.assignee.push("@mutated");
 
@@ -82,7 +84,12 @@ describe("FileSystem task parse cache", () => {
 			expect(parseSpy).toHaveBeenCalledTimes(2);
 			expect(secondActive[0]).not.toBe(firstActive[0]);
 			expect(secondActive[0]?.labels).toEqual(["cache"]);
-			expect(secondActive[0]?.acceptanceCriteriaItems?.[0]?.text).toBe("Stay independent");
+			const secondCriteria = secondActive[0]?.sections?.acceptance;
+			expect(
+				Array.isArray(secondCriteria) && secondCriteria[0] && "text" in secondCriteria[0]
+					? secondCriteria[0].text
+					: undefined,
+			).toBe("Stay independent");
 			expect(secondArchived[0]?.assignee).toEqual(["@owner"]);
 		} finally {
 			parseSpy.mockRestore();

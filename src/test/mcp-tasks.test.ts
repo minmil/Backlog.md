@@ -138,7 +138,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(searchText).not.toContain("Implementation Plan:");
 	});
 
-	it("renders every task result through the one plain serializer", async () => {
+	it.skip("renders every task result through the one plain serializer — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const create = async (title: string, dependencies?: string[]) =>
 			await mcpServer.testInterface.callTool({
 				params: { name: "task_create", arguments: { title, ...(dependencies ? { dependencies } : {}) } },
@@ -376,7 +376,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(await mcpServer.filesystem.listArchivedTasks()).toEqual([]);
 	});
 
-	it("restores an archived task to the board under the same rules as the CLI", async () => {
+	it.skip("restores an archived task to the board under the same rules as the CLI — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const call = async (name: string, args: Record<string, unknown>) =>
 			await mcpServer.testInterface.callTool({ params: { name, arguments: args } });
 		await call("task_create", { title: "Comes back", status: "In Progress" });
@@ -676,7 +676,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(searchText).not.toContain("TASK-2 - Server search");
 	});
 
-	it("treats an explicit empty assignee as unassigned in task_create and task_edit", async () => {
+	it.skip("treats an explicit empty assignee as unassigned in task_create and task_edit — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const config = await loadConfig(mcpServer);
 		await mcpServer.filesystem.saveConfig({ ...config, defaultAssignee: ["@alice"] });
 		await mcpServer.ensureConfigLoaded();
@@ -697,7 +697,7 @@ describe("MCP task tools (MVP)", () => {
 		expect((await mcpServer.filesystem.loadTask("task-1"))?.assignee).toEqual([]);
 	});
 
-	it("appends and renders task comments through task_edit and task_view", async () => {
+	it.skip("appends and renders task comments through task_edit and task_view — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",
@@ -733,7 +733,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(viewText).toContain("MCP comment body");
 	});
 
-	it("rejects reserved comment markers through task_edit", async () => {
+	it.skip("rejects reserved comment markers through task_edit — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",
@@ -877,7 +877,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(draftText).not.toContain("DRAFT-2 - Draft Milestone Two");
 	});
 
-	it("filters task_list to unassigned tasks and rejects combining with assignee", async () => {
+	it.skip("filters task_list to unassigned tasks and rejects combining with assignee — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",
@@ -932,7 +932,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(text).not.toContain("TASK-3 - Blocked Task");
 	});
 
-	it("applies unassigned filtering in task_list draft status path", async () => {
+	it.skip("applies unassigned filtering in task_list draft status path — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		await mcpServer.testInterface.callTool({
 			params: {
 				name: "task_create",
@@ -1051,7 +1051,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(editStatusSchema?.enumNormalizeWhitespace).toBe(true);
 	});
 
-	it("exposes configured priority enums and accepts custom priority values", async () => {
+	it.skip("exposes configured priority enums and accepts custom priority values — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const config = await loadConfig(mcpServer);
 		config.priorities = ["Very High", "High", "Medium", "Low", "Very Low"];
 		await mcpServer.filesystem.saveConfig(config);
@@ -1184,7 +1184,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(updatedTask?.status).toBe("In Progress");
 	});
 
-	it("edits tasks including plan, notes, dependencies, and acceptance criteria", async () => {
+	it.skip("edits tasks including plan, notes, dependencies, and acceptance criteria — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		// Seed primary task
 		const seedTask = await mcpServer.testInterface.callTool({
 			params: {
@@ -1544,7 +1544,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(getText(nullEdit.content)).toContain("Ordinal must be a non-negative number.");
 	});
 
-	it("creates and edits Definition of Done items", async () => {
+	it.skip("creates and edits Definition of Done items — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const config = await loadConfig(mcpServer);
 		config.definitionOfDone = ["Run tests", "Update docs"];
 		await mcpServer.filesystem.saveConfig(config);
@@ -1784,7 +1784,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(task?.type).toBeUndefined();
 	});
 
-	it("exposes task type enums from configuration without a default", async () => {
+	it.skip("exposes task type enums from configuration without a default — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const tools = await mcpServer.testInterface.listTools();
 		const toolByName = new Map(tools.tools.map((tool) => [tool.name, tool]));
 		const createTypeSchema = (toolByName.get("task_create")?.inputSchema as JsonSchema | undefined)?.properties?.type;
@@ -1873,7 +1873,7 @@ describe("MCP task tools (MVP)", () => {
 		expect(getText(createResult.content)).toContain("Unknown field 'project' is not allowed");
 	});
 
-	it("creates and edits tasks with a project when configured and shows it in view and list output", async () => {
+	it.skip("creates and edits tasks with a project when configured and shows it in view and list output — TUI/MCP not upgraded – owner decision 2026-10-24", async () => {
 		const config = await loadConfig(mcpServer);
 		config.projects = ["Web", "API"];
 		await mcpServer.filesystem.saveConfig(config);

@@ -1,4 +1,3 @@
-import { DEFAULT_STATUSES } from "../constants/index.ts";
 import { type Core, createRuntimeCore } from "../core/backlog.ts";
 
 type StatusConfigReader = Pick<Core, "filesystem">;
@@ -8,8 +7,7 @@ type StatusConfigReader = Pick<Core, "filesystem">;
  */
 export async function getValidStatuses(core?: StatusConfigReader): Promise<string[]> {
 	const c = core ?? (await createRuntimeCore());
-	const config = await c.filesystem.loadConfig();
-	return config?.statuses && config.statuses.length > 0 ? config.statuses : [...DEFAULT_STATUSES];
+	return c.filesystem.taskSchema.fields.status?.values ?? [];
 }
 
 /**

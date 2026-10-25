@@ -72,15 +72,15 @@ describe("CLI dependency graph", () => {
 		await addTask("task-1", "Foundation");
 		await addTask("task-2", "Selected", ["task-1"]);
 
-		// The graph says everything the raw ID list would, so no plain output repeats it.
+		// The registry renders the declared dependency field, and detail adds the graph.
 		const viewed = (await runCli(["task", "view", "2", "--plain"])).stdout.toString();
-		expect(viewed).not.toContain("Dependencies: ");
+		expect(viewed).toContain("Dependencies: task-1");
 		expect(viewed).toContain("Dependency Graph:");
 		expect(viewed.indexOf("Dependency Graph:")).toBeLessThan(viewed.indexOf("Description:"));
 
 		// A write confirmation is the same serializer, so it renders the identical layout.
 		const edited = (await runCli(["task", "edit", "2", "--plain", "-l", "graph"])).stdout.toString();
-		expect(edited).not.toContain("Dependencies: ");
+		expect(edited).toContain("Dependencies: task-1");
 		expect(edited).toContain("Dependency Graph:");
 		expect(edited).toContain("└─ TASK-1 - Foundation [To Do]");
 		expect(edited.indexOf("Dependency Graph:")).toBeLessThan(edited.indexOf("Description:"));
@@ -90,14 +90,15 @@ describe("CLI dependency graph", () => {
 		expect(created).toContain("└─ TASK-1 - Foundation [To Do]");
 	});
 
-	it("renders modified files with the plan and notes rather than in the header block", async () => {
+	it("keeps hidden modified files stored while rendering schema sections", async () => {
 		await addTask("task-1", "Selected");
-		await runCli(["task", "edit", "1", "--notes", "Did the work", "--modified-file", "src/api.ts"]);
+		await runCli(["task", "edit", "1", "--section", "description=Did the work", "--modified-file", "src/api.ts"]);
 
 		const stdout = (await runCli(["task", "view", "1", "--plain"])).stdout.toString();
-		expect(stdout).toContain("Modified files: src/api.ts");
-		expect(stdout.indexOf("Implementation Notes:")).toBeLessThan(stdout.indexOf("Modified files:"));
-		expect(stdout.indexOf("Description:")).toBeLessThan(stdout.indexOf("Modified files:"));
+		expect(stdout).toContain("Description:");
+		expect(stdout).toContain("Did the work");
+		expect(stdout).not.toContain("Modified files:");
+		expect((await new Core(TEST_DIR).filesystem.loadTask("task-1"))?.modifiedFiles).toEqual(["src/api.ts"]);
 	});
 
 	it("renders a diamond once and marks the repeated branch", async () => {
@@ -163,7 +164,9 @@ describe("CLI dependency graph", () => {
 		expect(graphSection(stdout)).toEqual(["Depends on (1 direct, 1 total):", "└─ task-404 - unknown task ID"]);
 
 		const json = JSON.parse((await runCli(["task", "view", "1", "--json"])).stdout.toString());
-		expect(json.task.dependencyGraph.nodes.at(-1)).toMatchObject({ state: "missing", title: null, completed: false });
+		expect(json.schemaVersion).toBe(2);
+		expect(json.task.fields.dependencies).toEqual(["task-404"]);
+		expect(json.task.unknownFields).toEqual({});
 	});
 
 	it("reports an ambiguous dependency identity explicitly and never picks a record", async () => {
@@ -176,7 +179,9 @@ describe("CLI dependency graph", () => {
 		expect(graphSection(stdout)).toEqual(["Depends on (1 direct, 1 total):", "└─ TASK-1 - ambiguous task ID"]);
 
 		const json = JSON.parse((await runCli(["task", "view", "2", "--json"])).stdout.toString());
-		expect(json.task.dependencyGraph.nodes.at(-1)).toMatchObject({ state: "ambiguous", title: null, completed: false });
+		expect(json.schemaVersion).toBe(2);
+		expect(json.task.fields.dependencies).toEqual(["task-1"]);
+		expect(json.task.unknownFields).toEqual({});
 	});
 
 	it("omits the section for a task with no dependencies and no dependents", async () => {
@@ -184,7 +189,7 @@ describe("CLI dependency graph", () => {
 		expect((await runCli(["task", "view", "1", "--plain"])).stdout.toString()).not.toContain("Dependency Graph:");
 	});
 
-	it("adds root, nodes, and directed edges to the JSON task view without changing dependencies", async () => {
+	it("publishes dependency fields in JSON version 2 without the old graph envelope", async () => {
 		await addTask("task-1", "Foundation");
 		await addTask("task-2", "Selected", ["task-1"]);
 		await addTask("task-3", "Follow up", ["task-2"]);
@@ -194,43 +199,11 @@ describe("CLI dependency graph", () => {
 			["task", "2", "--json"],
 		]) {
 			const output = JSON.parse((await runCli(args)).stdout.toString());
-			expect(output.schemaVersion).toBe(1);
+			expect(output.schemaVersion).toBe(2);
 			expect(output.kind).toBe("task-view");
-			expect(output.task.dependencies).toEqual(["task-1"]);
-			expect(output.task.dependencyGraph.root).toBe("TASK-2");
-			expect(output.task.dependencyGraph.nodes).toEqual([
-				{
-					id: "TASK-2",
-					title: "Selected",
-					status: "To Do",
-					state: "resolved",
-					completed: false,
-					dependencyDepth: 0,
-					dependentDepth: 0,
-				},
-				{
-					id: "TASK-1",
-					title: "Foundation",
-					status: "To Do",
-					state: "resolved",
-					completed: false,
-					dependencyDepth: 1,
-					dependentDepth: null,
-				},
-				{
-					id: "TASK-3",
-					title: "Follow up",
-					status: "To Do",
-					state: "resolved",
-					completed: false,
-					dependencyDepth: null,
-					dependentDepth: 1,
-				},
-			]);
-			expect(output.task.dependencyGraph.edges).toEqual([
-				{ from: "TASK-2", to: "TASK-1" },
-				{ from: "TASK-3", to: "TASK-2" },
-			]);
+			expect(output.task.fields.dependencies).toEqual(["task-1"]);
+			expect(output.task.unknownFields).toEqual({});
+			expect(output.task.dependencyGraph).toBeUndefined();
 		}
 	});
 

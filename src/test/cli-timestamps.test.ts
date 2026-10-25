@@ -6,7 +6,7 @@ import { parseTask } from "../markdown/parser.ts";
 import { formatUtcDateForDisplay } from "../utils/utc-date-display.ts";
 import { formatStoredDateForDisplay } from "../web/utils/date-display.ts";
 import { getTestCliPath } from "./test-cli.ts";
-import { createTestDirOutsideRepository, safeCleanup } from "./test-utils.ts";
+import { createTestDirOutsideRepository, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 const CLI_PATH = getTestCliPath();
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/;
@@ -35,6 +35,9 @@ describe("stored UTC timestamps", () => {
 		testDir = await createTestDirOutsideRepository("cli-timestamps");
 		await cli("init", "UTC timestamps", "--defaults", "--no-git", "--integration-mode", "none");
 		core = new Core(testDir);
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			schema.users = [{ handle: "@reviewer", name: "Reviewer", default: true }];
+		});
 	});
 
 	afterEach(async () => {
@@ -42,7 +45,7 @@ describe("stored UTC timestamps", () => {
 		await safeCleanup(testDir);
 	});
 
-	it("writes explicit UTC through CLI create, edit and comments on a non-UTC host", async () => {
+	it("writes explicit UTC through CLI create, edit and log entries on a non-UTC host", async () => {
 		await cli("task", "create", "Ship release", "--due-date", "2026-10-20", "--plain");
 		await cli("task", "edit", "1", "--comment", "Ready for review", "--plain");
 		const task = await core.filesystem.loadTask("task-1");
@@ -50,16 +53,19 @@ describe("stored UTC timestamps", () => {
 		const raw = await Bun.file(task.filePath).text();
 		expect(task.createdDate).toMatch(UTC_TIMESTAMP);
 		expect(task.updatedDate).toMatch(UTC_TIMESTAMP);
-		expect(task.comments?.[0]?.createdDate).toMatch(UTC_TIMESTAMP);
+		const log = task.sections?.log as Array<{ createdAt: string; date: string; body: string }>;
+		expect(log).toHaveLength(1);
+		expect(log[0]?.createdAt).toMatch(/Z$/);
+		expect(log[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 		expect(raw).toContain(`created_date: '${task.createdDate}'`);
 		expect(raw).toContain(`updated_date: '${task.updatedDate}'`);
-		expect(raw).toContain(`created: ${task.comments?.[0]?.createdDate}`);
+		expect(raw).toContain(`created: ${log[0]?.createdAt}`);
 		expect(raw).toContain("due_date: '2026-10-20'");
 		const { task: json } = JSON.parse(await cli("task", "view", "1", "--json"));
-		expect(json.createdAt).toBe(task.createdDate);
-		expect(json.updatedAt).toBe(task.updatedDate);
-		expect(json.comments[0].createdAt).toBe(task.comments?.[0]?.createdDate);
-		expect(json.dueDate).toBe("2026-10-20");
+		expect(json.fields.created_date).toBe(task.createdDate);
+		expect(json.fields.updated_date).toBe(task.updatedDate);
+		expect(json.sections.log[0].createdAt).toBe(log[0]?.createdAt);
+		expect(json.fields.due_date).toBe("2026-10-20");
 		const plain = await cli("task", "view", "1", "--plain");
 		expect(plain).toContain(`Created: ${formatUtcDateForDisplay(task.createdDate)} (UTC)`);
 		expect(formatStoredDateForDisplay(task.createdDate, { timeZone: "Asia/Taipei" }).title).toBe(
@@ -82,15 +88,15 @@ describe("stored UTC timestamps", () => {
 			const original = `---\nid: TASK-${id}\ntitle: Legacy\nstatus: To Do\ncreated_date: ${created}\ndue_date: '2026-10-20'\n---\n`;
 			await Bun.write(path, original);
 			const { task } = JSON.parse(await cli("task", "view", String(id), "--json"));
-			expect(task.createdAt).toBe(publicDate);
-			expect(task.dueDate).toBe("2026-10-20");
+			expect(task.fields.created_date).toBe(publicDate);
+			expect(task.fields.due_date).toBe("2026-10-20");
 			if (publicDate.includes("T")) {
 				const utcDisplay = publicDate.slice(0, 16).replace("T", " ");
 				expect(await cli("task", "view", String(id), "--plain")).toContain(`Created: ${utcDisplay} (UTC)`);
 				expect(formatStoredDateForDisplay(created, { timeZone: "Asia/Taipei" }).title).toBe(`${utcDisplay} (UTC)`);
 			}
 			expect(await Bun.file(path).text()).toBe(original);
-			await cli("task", "edit", String(id), "--notes", "Reviewed");
+			await cli("task", "edit", String(id), "--section", "description=Reviewed");
 			const raw = await Bun.file(path).text();
 			expect(parseTask(raw).createdDate).toBe(created);
 			expect(parseFrontmatter(raw).data.created_date).toBe(created);
@@ -129,9 +135,9 @@ describe("stored UTC timestamps", () => {
 			const path = join(testDir, "backlog", "tasks", `task-${id} - Commented.md`);
 			const original = `---\nid: TASK-${id}\ntitle: Commented\nstatus: To Do\ncreated_date: # created at\n  ${created}\n---\n`;
 			await Bun.write(path, original);
-			expect(JSON.parse(await cli("task", "view", id, "--json")).task.createdAt).toBe(created);
+			expect(JSON.parse(await cli("task", "view", id, "--json")).task.fields.created_date).toBe(created);
 			expect(await Bun.file(path).text()).toBe(original);
-			await cli("task", "edit", id, "--notes", "Reviewed");
+			await cli("task", "edit", id, "--section", "description=Reviewed");
 			expect(parseTask(await Bun.file(path).text()).createdDate).toBe(created);
 		}
 	});

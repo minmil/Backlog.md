@@ -313,13 +313,13 @@ describe("TaskList labels filter menu", () => {
 		await clickHeader("Ordinal");
 		expect(getRenderedTaskIds(container)).toEqual(taskIds(ORDER_FIXTURE_ORDERS.ordinal));
 
-		// Lowest priority first is a sort only the table has; it keeps breaking ties by newest ID.
+		// Enum order follows the schema; unassigned priorities sort last in ascending order.
 		await clickHeader("Priority");
-		expect(getRenderedTaskIds(container)).toEqual(taskIds([5, 1, 6, 4, 3, 2]));
+		expect(getRenderedTaskIds(container)).toEqual(taskIds([3, 2, 6, 4, 1, 5]));
 
 		await clickHeader("Priority");
 		expect(container.querySelector("th[aria-sort='descending']")?.textContent).toContain("Priority");
-		expect(getRenderedTaskIds(container)).toEqual(taskIds(ORDER_FIXTURE_ORDERS.priority));
+		expect(getRenderedTaskIds(container)).toEqual(taskIds([5, 1, 6, 4, 3, 2]));
 	});
 
 	it("renders the labels menu above the sticky table header", async () => {

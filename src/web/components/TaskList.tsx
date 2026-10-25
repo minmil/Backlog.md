@@ -8,16 +8,18 @@ import type {
 } from "../../types";
 import { DEFAULT_STATUSES } from "../../constants/index.ts";
 import { collectAvailableLabels } from "../../utils/label-filter.ts";
-import { compareTaskIds, compareTaskIdsDescending, sortTasks } from "../../utils/task-sorting.ts";
+import { compareTaskIds, compareTaskIdsDescending } from "../../utils/task-sorting.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { collectArchivedMilestoneKeys, getMilestoneLabel, milestoneKey } from "../utils/milestones";
-import { parseStoredUtcDate } from "../../utils/utc-timestamp.ts";
 import {
 	formatPriorityLabel,
 	getPriorityOptions,
-	getPriorityRank,
 	resolvePriorityValue,
 } from "../../utils/priority-config.ts";
+import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
+import FieldValue from "./schema/FieldValue.tsx";
+import FieldFilter from "./schema/FieldFilter.tsx";
+import { useSchema } from "./schema/SchemaProvider.tsx";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
 import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from "./AcceptanceCriteriaProgress";
@@ -39,30 +41,17 @@ interface TaskListProps {
 	isLoading?: boolean;
 }
 
-type TaskSortColumn = "id" | "title" | "status" | "priority" | "ordinal" | "milestone" | "created";
+type TaskSortColumn = string;
 type SortDirection = "asc" | "desc";
-
-// The table sorts that `backlog task list --sort` also has, with the `--sort` value each one is.
-// Their order comes from sortTasks, so the table and the CLI agree. Every other column and
-// direction is a sort only this table has.
-const SHARED_SORTS: Partial<Record<`${TaskSortColumn}:${SortDirection}`, string>> = {
-	"id:asc": "id",
-	"priority:desc": "priority",
-	"ordinal:asc": "ordinal",
-};
 
 // Column widths in rem, in render order: ID, Title, Status, Priority, Ordinal, Labels,
 // Assignee, Milestone, Created. Each metadata column is sized to the wider of its header
 // label and its cell content; Title is the one flexible column (null) and absorbs whatever
 // the content area has left, so the table fits a laptop viewport instead of overflowing it.
-const TASK_COLUMN_WIDTHS_REM: readonly (number | null)[] = [6, null, 6.5, 6.5, 6, 8, 6.5, 8, 6];
+const FIELD_WIDTHS_REM: Record<string, number> = { status: 6.5, priority: 6.5, ordinal: 6, labels: 8, assignee: 6.5, milestone: 8, created_date: 6 };
 
 // Below this the table scrolls horizontally rather than crushing the columns.
 const TASK_TITLE_MIN_WIDTH_REM = 12;
-const TASK_TABLE_MIN_WIDTH_REM = TASK_COLUMN_WIDTHS_REM.reduce<number>(
-	(total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM),
-	0,
-);
 
 function compareTaskIdsAscending(a: Task, b: Task): number {
 	return compareTaskIds(a.id, b.id);
@@ -133,10 +122,21 @@ const TaskList: React.FC<TaskListProps> = ({
 	dateFormat,
 	isLoading = false,
 }) => {
+	const { schema, registry } = useSchema();
+	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const filterKeys = schema.ui.task_list.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const customFilterKeys = filterKeys.filter((key) => !["status", "priority", "milestone", "labels"].includes(key));
+	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
+	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
+	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
+		const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
+		return supplied?.[key] ?? registry.getField(task, key);
+	};
 	const [searchParams, setSearchParams] = useSearchParams();
+	const priorityOrder = availablePriorities?.length ? availablePriorities : (schema.fields.priority?.values ?? []);
 	const statusOptions = useMemo(
-		() => (availableStatuses.length > 0 ? availableStatuses : [...DEFAULT_STATUSES]),
-		[availableStatuses],
+		() => (availableStatuses.length > 0 ? availableStatuses : schema.fields.status?.values ?? [...DEFAULT_STATUSES]),
+		[availableStatuses, schema],
 	);
 	const [statusFilter, setStatusFilter] = useState<string[]>(() =>
 		normalizeStatusFilters(getStatusFilters(searchParams), statusOptions),
@@ -149,7 +149,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	}, []);
 	const [excludedStatusFilter, setExcludedStatusFilter] = useState<string[]>(initialExcludeStatusParams);
 	const [priorityFilter, setPriorityFilter] = useState<string>(() =>
-		isLoading ? "" : (resolvePriorityValue(searchParams.get("priority"), availablePriorities) ?? ""),
+		isLoading ? "" : (resolvePriorityValue(searchParams.get("priority"), priorityOrder) ?? ""),
 	);
 	const [milestoneFilter, setMilestoneFilter] = useState(() => searchParams.get("milestone") ?? "");
 	const initialLabelParams = useMemo(() => {
@@ -166,8 +166,8 @@ const TaskList: React.FC<TaskListProps> = ({
 	const [sortColumn, setSortColumn] = useState<TaskSortColumn>("id");
 	const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 	const priorityOptions = useMemo(
-		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(availablePriorities)],
-		[availablePriorities],
+		() => [{ label: "All priorities", value: "" }, ...getPriorityOptions(priorityOrder)],
+		[priorityOrder],
 	);
 	const tableHeaderScrollRef = useRef<HTMLDivElement | null>(null);
 	const tableBodyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -315,12 +315,22 @@ const TaskList: React.FC<TaskListProps> = ({
 		const uniqueMilestones = Array.from(new Set([...availableMilestones.map((m) => m.trim()).filter(Boolean)]));
 		return uniqueMilestones;
 	}, [availableMilestones]);
+	const customFilters = Object.fromEntries(customFilterKeys.map((key) => {
+		const raw = searchParams.get(key);
+		const definition = schema.fields[key];
+		if (!raw) return [key, null];
+		if (definition?.type === "multi-enum" || definition?.type === "string-list" || definition?.type === "user-list") return [key, raw.split(",").map((value) => value.trim()).filter(Boolean)];
+		if (definition?.type === "enum") return [key, definition.values?.find((value) => value.toLowerCase() === raw.toLowerCase()) ?? null];
+		if (definition?.type === "number") return [key, Number(raw)];
+		if (definition?.type === "bool") return [key, raw === "true" ? true : raw === "false" ? false : null];
+		return [key, raw];
+	})) as Record<string, RegistryFieldValue | null>;
 	const hasActiveFilters = Boolean(
 		statusFilter.length > 0 ||
 			excludedStatusFilter.length > 0 ||
 			priorityFilter ||
 			labelFilter.length > 0 ||
-			milestoneFilter,
+			milestoneFilter || Object.values(customFilters).some((value) => value !== null && value !== "" && (!Array.isArray(value) || value.length > 0)),
 	);
 	const totalTasks = sortedBaseTasks.length;
 
@@ -335,7 +345,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			.map((status) => status.trim())
 			.filter((status) => status.length > 0);
 		const rawParamPriority = searchParams.get("priority") ?? "";
-		const paramPriority = resolvePriorityValue(rawParamPriority, availablePriorities) ?? "";
+		const paramPriority = resolvePriorityValue(rawParamPriority, priorityOrder) ?? "";
 		const paramMilestone = searchParams.get("milestone") ?? "";
 		const paramLabels = [...searchParams.getAll("label"), ...searchParams.getAll("labels")];
 		const labelsCsv = searchParams.get("labels");
@@ -372,7 +382,26 @@ const TaskList: React.FC<TaskListProps> = ({
 		if (!areEqualStringArrays(normalizedLabels, labelFilter)) {
 			setLabelFilter(normalizedLabels);
 		}
-	}, [availablePriorities, isLoading, searchParams, setSearchParams, statusOptions]);
+	}, [isLoading, priorityOrder, searchParams, setSearchParams, statusOptions]);
+	useEffect(() => {
+		if (isLoading) return;
+		const corrections = customFilterKeys.flatMap((key) => {
+			const field = schema.fields[key];
+			if (field?.type !== "enum") return [];
+			const raw = searchParams.get(key);
+			if (!raw) return [];
+			const canonical = field.values?.find((value) => value.toLowerCase() === raw.toLowerCase());
+			return canonical === raw ? [] : [{ key, canonical }];
+		});
+		if (!corrections.length) return;
+		setSearchParams((params) => {
+			for (const { key, canonical } of corrections) {
+				if (canonical) params.set(key, canonical);
+				else params.delete(key);
+			}
+			return params;
+		}, { replace: true });
+	}, [isLoading, schema, searchParams, setSearchParams]);
 
 	useEffect(() => {
 		if (!hasActiveFilters) {
@@ -463,7 +492,8 @@ const TaskList: React.FC<TaskListProps> = ({
 		nextLabels: string[],
 		nextMilestone: string,
 	) => {
-		const params = new URLSearchParams();
+		const params = new URLSearchParams(searchParams);
+		for (const key of ["status", "excludeStatus", "excludeStatuses", "priority", "label", "labels", "milestone"]) params.delete(key);
 		for (const status of nextStatuses) {
 			if (status.trim()) {
 				params.append("status", status.trim());
@@ -522,9 +552,19 @@ const TaskList: React.FC<TaskListProps> = ({
 		setPriorityFilter("");
 		setLabelFilter([]);
 		setMilestoneFilter("");
-		syncUrl([], [], "", [], "");
+		setSearchParams((params) => {
+			for (const key of [...filterKeys, "excludeStatus", "excludeStatuses", "label", "labels"]) params.delete(key);
+			return params;
+		}, { replace: true });
 		setDisplayTasks(sortedBaseTasks);
 		setError(null);
+	};
+	const handleCustomFilterChange = (key: string, value: RegistryFieldValue | null) => {
+		setSearchParams((params) => {
+			params.delete(key);
+			if (value !== null && value !== "" && (!Array.isArray(value) || value.length > 0)) params.set(key, Array.isArray(value) ? value.join(",") : String(value));
+			return params;
+		}, { replace: true });
 	};
 
 	const handleCleanupSuccess = async (message: string) => {
@@ -600,7 +640,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	};
 
 	const renderSortableHeader = (label: string, column: TaskSortColumn) => (
-		<th className="px-3 py-2" aria-sort={getSortAriaValue(column)}>
+		<th key={column} className="px-3 py-2" aria-sort={getSortAriaValue(column)}>
 			<button
 				type="button"
 				onClick={() => handleSortChange(column)}
@@ -614,88 +654,54 @@ const TaskList: React.FC<TaskListProps> = ({
 
 	const renderColumnGroup = () => (
 		<colgroup>
-			{TASK_COLUMN_WIDTHS_REM.map((width, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: the column order is static
+			{columnWidths.map((width, index) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: the column order follows the schema
 				<col key={index} style={width === null ? undefined : { width: `${width}rem` }} />
 			))}
 		</colgroup>
 	);
 
 	const sortedDisplayTasks = useMemo(() => {
-		const sharedSort = SHARED_SORTS[`${sortColumn}:${sortDirection}`];
-		if (sharedSort) {
-			return sortTasks(displayTasks, sharedSort, availablePriorities);
-		}
-
-		const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-		const compareText = (a: string, b: string) => collator.compare(a, b);
-		const withDirection = (value: number) => (sortDirection === "asc" ? value : -value);
-
 		return [...displayTasks].sort((a, b) => {
-			let result = 0;
-			switch (sortColumn) {
-				case "id": {
-					result = compareTaskIdsDescending(a.id, b.id);
-					break;
-				}
-				case "title": {
-					result = withDirection(compareText(a.title, b.title));
-					break;
-				}
-				case "status": {
-					result = withDirection(compareText(a.status, b.status));
-					break;
-				}
-				case "priority": {
-					const rankA = getPriorityRank(a.priority, availablePriorities);
-					const rankB = getPriorityRank(b.priority, availablePriorities);
-					result = withDirection(rankA - rankB);
-					break;
-				}
-				case "ordinal": {
-					const aOrd = a.ordinal;
-					const bOrd = b.ordinal;
-					if (typeof aOrd === "number" && typeof bOrd === "number") {
-						result = withDirection(aOrd - bOrd);
-					} else if (typeof aOrd === "number") {
-						result = -1;
-					} else if (typeof bOrd === "number") {
-						result = 1;
-					}
-					break;
-				}
-				case "milestone": {
-					const milestoneA = getMilestoneLabel(a.milestone, milestoneEntities);
-					const milestoneB = getMilestoneLabel(b.milestone, milestoneEntities);
-					result = withDirection(compareText(milestoneA, milestoneB));
-					break;
-				}
-				case "created": {
-					const createdA = parseStoredUtcDate(a.createdDate)?.getTime();
-					const createdB = parseStoredUtcDate(b.createdDate)?.getTime();
-					if (createdA === undefined && createdB === undefined) {
-						result = 0;
-					} else if (createdA === undefined) {
-						result = 1;
-					} else if (createdB === undefined) {
-						result = -1;
-					} else {
-						result = withDirection(createdA - createdB);
-					}
-					break;
-				}
+			if (sortColumn === "id") return sortDirection === "asc" ? compareTaskIds(a.id, b.id) : compareTaskIdsDescending(a.id, b.id);
+			const left = fieldValue(a, sortColumn);
+			const right = fieldValue(b, sortColumn);
+			if (sortColumn === "ordinal" && (left === undefined || right === undefined)) {
+				if (left !== right) return left === undefined ? 1 : -1;
 			}
-
-			if (result !== 0) return result;
+			const result = registry.compare(sortColumn, left, right, sortColumn === "priority" ? priorityOrder : undefined);
+			if (result !== 0) return sortDirection === "asc" ? result : -result;
 			if (sortColumn === "ordinal") return compareTaskIdsAscending(a, b);
 			return compareTaskIdsDescending(a.id, b.id);
 		});
-	}, [availablePriorities, displayTasks, milestoneEntities, sortColumn, sortDirection]);
+	}, [displayTasks, priorityOrder, registry, sortColumn, sortDirection]);
+	const renderFieldCell = (task: Task, key: string) => {
+		const value = fieldValue(task, key);
+		if (key === "status") return <td key={key} className="px-3 py-2.5"><span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(String(value ?? ""))}`}>{value}</span></td>;
+		if (key === "priority") return <td key={key} className="px-3 py-2.5">{value ? <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(String(value))}`}>{formatPriorityLabel(String(value), priorityOrder)}</span> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "ordinal") return <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{value ?? <span className="text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "labels" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1 min-w-0">{value.slice(0, 2).map((label) => <span key={label} className="inline-flex max-w-[7rem] truncate rounded-circle bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200" title={label}>{label}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "assignee" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1.5">{value.slice(0, 2).map((assignee) => <span key={assignee} title={assignee} className="inline-flex h-6 w-6 items-center justify-center rounded-circle bg-blue-100 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/50 dark:text-blue-200">{getAssigneeInitials(assignee)}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "milestone") {
+			const label = value ? getMilestoneLabel(String(value), milestoneEntities) : "—";
+			return <td key={key} className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={label}>{label}</td>;
+		}
+		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} /></td>;
+	};
+	const visibleTasks = sortedDisplayTasks.filter((task) => customFilterKeys.every((key) => {
+		const wanted = customFilters[key];
+		if (wanted === null || wanted === undefined || wanted === "" || (Array.isArray(wanted) && !wanted.length)) return true;
+		const actual = fieldValue(task, key);
+		if (wanted === "__unassigned__") return !Array.isArray(actual) || actual.length === 0;
+		if (Array.isArray(wanted)) return Array.isArray(actual) && wanted.some((item) => actual.some((entry) => entry.toLowerCase() === item.toLowerCase()));
+		if (Array.isArray(actual)) return actual.some((item) => item.toLowerCase() === String(wanted).toLowerCase());
+		return String(actual ?? "").toLowerCase() === String(wanted).toLowerCase();
+	}));
 
-	const currentCount = sortedDisplayTasks.length;
+	const currentCount = visibleTasks.length;
 	// Share a slot sized for the largest visible count. Keep the existing 3rem through 99/99;
 	// each extra digit needs space in both checked and total, using the counter's tabular font.
-	const progressSlotDigits = sortedDisplayTasks.reduce((digits, task) => {
+	const progressSlotDigits = visibleTasks.reduce((digits, task) => {
 		const progress = getAcceptanceCriteriaProgressCounts(task);
 		return progress ? Math.max(digits, String(progress.total).length) : digits;
 	}, 0);
@@ -725,6 +731,16 @@ const TaskList: React.FC<TaskListProps> = ({
 			bodyEl.removeEventListener("scroll", handleBodyScroll);
 		};
 	}, [currentCount]);
+	const renderSchemaFilter = (key: string) => {
+		if (key === "status") return <React.Fragment key={key}>
+			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={statusFilter} onChange={handleStatusChange} menuId="task-list-status-menu" label="Status" emptyLabel="All" noOptionsLabel="No statuses" clearLabel="Clear status filter" className="min-w-[180px]" />
+			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={excludedStatusFilter} onChange={handleExcludeStatusChange} menuId="task-list-exclude-status-menu" label="Exclude status" emptyLabel="None" noOptionsLabel="No statuses" clearLabel="Clear excluded statuses" className="min-w-[210px]" />
+		</React.Fragment>;
+		if (key === "priority") return <select key={key} aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)} className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200">{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select>;
+		if (key === "milestone") return <select key={key} aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)} className="min-w-[160px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</select>;
+		if (key === "labels") return <LabelFilterDropdown key={key} availableLabels={mergedAvailableLabels} selectedLabels={labelFilter} onChange={handleLabelChange} menuId="task-list-labels-menu" />;
+		return <FieldFilter key={key} fieldKey={key} value={customFilters[key]} onChange={(value) => handleCustomFilterChange(key, value)} />;
+	};
 
 	return (
 		<div className="page-shell transition-colors duration-200">
@@ -740,94 +756,13 @@ const TaskList: React.FC<TaskListProps> = ({
 				</div>
 
 				<div className="flex flex-wrap items-center gap-3 justify-between">
-						<div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
-							<LabelFilterDropdown
-								availableLabels={statusOptions}
-								selectedLabels={statusFilter}
-								onChange={handleStatusChange}
-								menuId="task-list-status-menu"
-								label="Status"
-								emptyLabel="All"
-								noOptionsLabel="No statuses"
-								clearLabel="Clear status filter"
-								className="min-w-[180px]"
-							/>
-
-							<LabelFilterDropdown
-								availableLabels={statusOptions}
-								selectedLabels={excludedStatusFilter}
-								onChange={handleExcludeStatusChange}
-								menuId="task-list-exclude-status-menu"
-								label="Exclude status"
-								emptyLabel="None"
-							noOptionsLabel="No statuses"
-							clearLabel="Clear excluded statuses"
-							className="min-w-[210px]"
-						/>
-
-						<select
-							value={priorityFilter}
-							onChange={(event) => handlePriorityChange(event.target.value)}
-							className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-						>
-							{priorityOptions.map((option) => (
-								<option key={option.value || "all"} value={option.value}>
-									{option.label}
-								</option>
-							))}
-						</select>
-
-						<select
-							value={milestoneFilter}
-							onChange={(event) => handleMilestoneChange(event.target.value)}
-							className="min-w-[160px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
-						>
-							<option value="">All milestones</option>
-							<option value="__none">No milestone</option>
-							{milestoneOptions.map((milestone) => (
-								<option key={milestone} value={milestone}>
-									{getMilestoneLabel(milestone, milestoneEntities)}
-								</option>
-							))}
-						</select>
-
-						<LabelFilterDropdown
-							availableLabels={mergedAvailableLabels}
-							selectedLabels={labelFilter}
-							onChange={handleLabelChange}
-							menuId="task-list-labels-menu"
-						/>
-
+					<div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+						{filterKeys.map(renderSchemaFilter)}
 					</div>
-
 					<div className="flex items-center gap-3 flex-shrink-0">
-						{isFilteringTerminalStatus && currentCount > 0 && (
-								<button
-									type="button"
-									onClick={() => setShowCleanupModal(true)}
-									className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 flex items-center gap-2 whitespace-nowrap"
-									title="Clean up old completed tasks"
-								>
-									<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-								</svg>
-								Clean Up
-							</button>
-						)}
-
-							{hasActiveFilters && (
-								<button
-									type="button"
-									onClick={handleClearFilters}
-									className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg whitespace-nowrap transition-colors duration-200 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700"
-								>
-									Clear filters
-								</button>
-							)}
-
-						<div className="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap text-right min-w-[170px]">
-							Showing {currentCount} of {totalTasks} tasks
-						</div>
+						{isFilteringTerminalStatus && currentCount > 0 && <button type="button" onClick={() => setShowCleanupModal(true)} className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 flex items-center gap-2 whitespace-nowrap" title="Clean up old completed tasks"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>Clean Up</button>}
+						{hasActiveFilters && <button type="button" onClick={handleClearFilters} className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg whitespace-nowrap transition-colors duration-200 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700">Clear filters</button>}
+						<div className="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap text-right min-w-[170px]">Showing {currentCount} of {totalTasks} tasks</div>
 					</div>
 				</div>
 
@@ -856,35 +791,24 @@ const TaskList: React.FC<TaskListProps> = ({
 				<div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
 					<div className="sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/95 backdrop-blur supports-[backdrop-filter]:bg-gray-50/90 supports-[backdrop-filter]:dark:bg-gray-700/85">
 						<div ref={tableHeaderScrollRef} className="overflow-x-auto" style={{ overflowY: "hidden" }}>
-							<table className="w-full table-fixed border-collapse" style={{ minWidth: `${TASK_TABLE_MIN_WIDTH_REM}rem` }}>
+							<table className="w-full table-fixed border-collapse" style={{ minWidth: `${tableMinWidth}rem` }}>
 								{renderColumnGroup()}
 								<thead>
 									<tr className="text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">
 										{renderSortableHeader("ID", "id")}
 										{renderSortableHeader("Title", "title")}
-										{renderSortableHeader("Status", "status")}
-										{renderSortableHeader("Priority", "priority")}
-										{renderSortableHeader("Ordinal", "ordinal")}
-										<th className="px-3 py-2">Labels</th>
-										<th className="px-3 py-2">Assignee</th>
-										{renderSortableHeader("Milestone", "milestone")}
-										{renderSortableHeader("Created", "created")}
+										{columnKeys.map((key) => renderSortableHeader(schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
 									</tr>
 								</thead>
 							</table>
 						</div>
 					</div>
 					<div ref={tableBodyScrollRef} className="overflow-x-auto" style={{ overflowY: "hidden" }}>
-						<table className="w-full table-fixed border-collapse" style={{ minWidth: `${TASK_TABLE_MIN_WIDTH_REM}rem` }}>
+						<table className="w-full table-fixed border-collapse" style={{ minWidth: `${tableMinWidth}rem` }}>
 							{renderColumnGroup()}
 							<tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-								{sortedDisplayTasks.map((task) => {
+								{visibleTasks.map((task) => {
 									const isFromOtherBranch = Boolean(task.branch);
-									const visibleLabels = task.labels.slice(0, 2);
-									const labelOverflow = Math.max(task.labels.length - visibleLabels.length, 0);
-									const visibleAssignees = task.assignee.slice(0, 2);
-									const assigneeOverflow = Math.max(task.assignee.length - visibleAssignees.length, 0);
-									const milestoneLabel = task.milestone ? getMilestoneLabel(task.milestone, milestoneEntities) : "—";
 
 									return (
 										<tr
@@ -937,71 +861,7 @@ const TaskList: React.FC<TaskListProps> = ({
 													</div>
 												)}
 											</td>
-											<td className="px-3 py-2.5">
-												<span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(task.status)}`}>
-													{task.status}
-												</span>
-											</td>
-											<td className="px-3 py-2.5">
-												{task.priority ? (
-													<span
-														className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(task.priority)}`}
-													>
-														{formatPriorityLabel(task.priority, availablePriorities)}
-													</span>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
-												{task.ordinal !== undefined ? task.ordinal : <span className="text-gray-300 dark:text-gray-600">—</span>}
-											</td>
-											<td className="px-3 py-2.5">
-												{visibleLabels.length > 0 ? (
-													<div className="flex items-center gap-1 min-w-0">
-														{visibleLabels.map((label) => (
-															<span
-																key={label}
-																className="inline-flex max-w-[7rem] truncate rounded-circle bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-																title={label}
-															>
-																{label}
-															</span>
-														))}
-														{labelOverflow > 0 && (
-															<span className="text-[11px] text-gray-500 dark:text-gray-400">+{labelOverflow}</span>
-														)}
-													</div>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5">
-												{visibleAssignees.length > 0 ? (
-													<div className="flex items-center gap-1.5">
-														{visibleAssignees.map((assignee) => (
-															<span
-																key={assignee}
-																title={assignee}
-																className="inline-flex h-6 w-6 items-center justify-center rounded-circle bg-blue-100 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
-															>
-																{getAssigneeInitials(assignee)}
-															</span>
-														))}
-														{assigneeOverflow > 0 && (
-															<span className="text-[11px] text-gray-500 dark:text-gray-400">+{assigneeOverflow}</span>
-														)}
-													</div>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={milestoneLabel}>
-												{milestoneLabel}
-											</td>
-											<td className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-												<StoredDate value={task.createdDate} dateFormat={dateFormat} compact />
-											</td>
+											{columnKeys.map((key) => renderFieldCell(task, key))}
 										</tr>
 									);
 								})}

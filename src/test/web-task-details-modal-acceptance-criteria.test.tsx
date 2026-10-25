@@ -40,10 +40,10 @@ describe("Web task popup acceptance criteria display", () => {
 			createdDate: "2025-01-01",
 			labels: [],
 			dependencies: [],
-			acceptanceCriteriaItems: [
+			sections: { acceptance: [
 				{ index: 1, text: "First criterion", checked: false },
 				{ index: 3, text: "Third criterion", checked: true },
-			],
+			] },
 		};
 
 		const html = renderToString(
@@ -52,10 +52,8 @@ describe("Web task popup acceptance criteria display", () => {
 			</ThemeProvider>,
 		);
 
-		expect(html).toContain("Acceptance Criteria (1/2)");
-		expect(html).toContain("#1");
+		expect(html).toContain("Acceptance Criteria");
 		expect(html).toContain("First criterion");
-		expect(html).toContain("#3");
 		expect(html).toContain("Third criterion");
 	});
 

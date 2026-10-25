@@ -27,7 +27,7 @@ import {
 	type TaskSearchResult,
 } from '../types';
 import { formatDependencyCleanupMessage } from '../utils/dependency-graph';
-import { ApiError, apiClient, readMovedFailureState } from './lib/api';
+import { ApiError, apiClient, readMovedFailureState, type SchemaTaskWrite } from './lib/api';
 import type { TaskDetail } from '../core/task-detail';
 import type { DuplicateRepairPlan } from '../core/duplicate-task-repair';
 import { isValidTaskId } from '../utils/task-id';
@@ -829,10 +829,12 @@ function AppContent() {
 		setLoadingMessage(null);
 		applyLoadError(new Error(loadingState.message));
       } else if (event.data === "tasks-updated") {
+        window.dispatchEvent(new window.Event('backlog-data-updated'));
         void refreshData();
       } else if (event.data === "milestones-updated") {
         void refreshMilestoneData();
       } else if (event.data === "config-updated") {
+        window.dispatchEvent(new window.Event('backlog-data-updated'));
         // Reload statuses when config changes
         loadAllData();
       }
@@ -848,16 +850,13 @@ function AppContent() {
 	};
   }, [refreshData, refreshMilestoneData, fullRefreshData, loadAllData, applyLoadError]);
 
-  const handleSubmitTask = async (taskData: Partial<Task>) => {
+  const handleSubmitTask = async (taskData: SchemaTaskWrite) => {
     // Don't catch errors here - let TaskDetailsModal handle them
-    if (editingTask) {
-      await apiClient.updateTask(editingTask.id, taskData);
-    } else {
-      // Set status to 'Draft' if in draft mode
+    if (!editingTask) {
       const finalTaskData = isDraftMode
-        ? { ...taskData, status: 'Draft' }
+        ? { ...taskData, fields: { ...taskData.fields, status: 'Draft' } }
         : taskData;
-      const createdTask = await apiClient.createTask(finalTaskData as Omit<Task, "id" | "createdDate">);
+      const createdTask = await apiClient.createSchemaTask(finalTaskData);
 
       // Show task creation confirmation
       setTaskConfirmation({ task: createdTask, isDraft: isDraftMode });

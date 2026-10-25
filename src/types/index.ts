@@ -1,5 +1,7 @@
 export type TaskStatus = string;
 
+import type { FieldCondition } from "../schema/field-registry.ts";
+
 /**
  * How a multi-label filter is combined. Interactive multi-select pickers use "any" so adding a
  * label widens the result set; callers that pass an explicitly typed label list (the CLI
@@ -59,6 +61,10 @@ export interface Task {
 	documentation?: string[];
 	modifiedFiles?: string[];
 	readonly rawContent?: string; // Raw markdown content without frontmatter (read-only: do not modify directly)
+	/** Values of body sections declared by task-schema.yml. */
+	sections?: Record<string, import("../markdown/sections.ts").SectionValue>;
+	/** Body content outside configured section markers, in its original order. */
+	other?: string;
 	description?: string;
 	implementationPlan?: string;
 	implementationNotes?: string;
@@ -77,6 +83,10 @@ export interface Task {
 	type?: string;
 	/** Monorepo project/component this task belongs to. Allowed values come from config `projects`; absent config means the field is unusable. */
 	project?: string;
+	/** Values for non-core keys declared in task-schema.yml. */
+	fieldValues?: Record<string, unknown>;
+	/** Undeclared frontmatter retained for read-only JSON output and lossless rewrites. */
+	unknownFields?: Record<string, unknown>;
 	branch?: string;
 	ordinal?: number;
 	filePath?: string;
@@ -124,6 +134,14 @@ export function isReadOnlyTask(task: Task): boolean {
 
 export interface TaskCreateInput {
 	title: string;
+	actingUser?: string;
+	sections?: Record<string, string>;
+	sectionItems?: Record<string, string[]>;
+	sectionChecks?: Record<string, number[]>;
+	appendLog?: { section?: string; body: string; author?: string; date?: string };
+	reporter?: string;
+	onStatusChange?: string;
+	fieldValues?: Record<string, unknown>;
 	dueDate?: string;
 	description?: string;
 	status?: TaskStatus;
@@ -149,6 +167,21 @@ export interface TaskCreateInput {
 }
 
 export interface TaskUpdateInput {
+	actingUser?: string;
+	setSections?: Record<string, string>;
+	appendSections?: Record<string, string[]>;
+	addSectionItems?: Record<string, string[]>;
+	checkSectionItems?: Record<string, number[]>;
+	uncheckSectionItems?: Record<string, number[]>;
+	removeSectionItems?: Record<string, number[]>;
+	replaceSectionItems?: Record<string, AcceptanceCriterion[]>;
+	appendLog?: { section?: string; body: string; author?: string; date?: string };
+	appendLogs?: Array<{ section?: string; body: string; author?: string; date?: string }>;
+	/** Schema field writes, including both core and declared custom keys. */
+	schemaFields?: Record<string, unknown>;
+	clearSchemaFields?: string[];
+	addSchemaFields?: Record<string, unknown>;
+	removeSchemaFields?: Record<string, unknown>;
 	title?: string;
 	dueDate?: string | null;
 	description?: string;
@@ -203,6 +236,7 @@ export interface TaskListFilter {
 	unassigned?: boolean;
 	priority?: string;
 	project?: string | string[];
+	where?: FieldCondition[];
 	milestone?: string;
 	parentTaskId?: string;
 	labels?: string[];

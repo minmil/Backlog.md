@@ -2,6 +2,7 @@ import { type FSWatcher, unwatchFile, watch, watchFile } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { Core } from "../core/backlog.ts";
 import type { FileSystem } from "../file-system/operations.ts";
+import { MOVED_CONFIG_KEYS } from "../schema/index.ts";
 import type { BacklogConfig } from "../types/index.ts";
 
 export interface ConfigWatcherCallbacks {
@@ -26,15 +27,9 @@ const BOOLEAN_CONFIG_KEYS = new Set([
 	"bypass_git_hooks",
 	"check_active_branches",
 ]);
-const ARRAY_CONFIG_KEYS = new Set(["statuses", "labels", "types", "priorities"]);
 const INTEGER_CONFIG_KEYS = new Set(["max_column_width", "default_port", "zero_padded_ids", "active_branch_days"]);
 const RECOGNIZED_CONFIG_KEYS = new Set([
 	"project_name",
-	"default_assignee",
-	"default_reporter",
-	"default_status",
-	...ARRAY_CONFIG_KEYS,
-	"definition_of_done",
 	"date_format",
 	...INTEGER_CONFIG_KEYS,
 	"default_editor",
@@ -46,25 +41,20 @@ const RECOGNIZED_CONFIG_KEYS = new Set([
 	"backlogDirectory",
 ]);
 
-function hasValidExplicitValues(content: string, config: BacklogConfig): boolean {
+function hasValidExplicitValues(content: string): boolean {
 	for (const rawLine of content.split(/\r?\n/)) {
 		const line = rawLine.trim();
 		if (!line || line.startsWith("#")) continue;
 		const colonIndex = line.indexOf(":");
 		if (colonIndex === -1) {
 			const key = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
-			if (key && RECOGNIZED_CONFIG_KEYS.has(key)) return false;
+			if (key && (RECOGNIZED_CONFIG_KEYS.has(key) || key in MOVED_CONFIG_KEYS)) return false;
 			continue;
 		}
 		const key = line.slice(0, colonIndex).trim();
 		const value = line.slice(colonIndex + 1).trim();
+		if (key in MOVED_CONFIG_KEYS) return false;
 		if (!RECOGNIZED_CONFIG_KEYS.has(key)) continue;
-		if (ARRAY_CONFIG_KEYS.has(key) && !(value.startsWith("[") && value.endsWith("]"))) return false;
-		// default_assignee is not in ARRAY_CONFIG_KEYS because it also accepts scalars and block
-		// sequences; the config parser rejects every value it cannot hold, malformed or wrong-typed,
-		// before this check runs, so the last good config stays cached without a rule repeated here.
-		if (key === "definition_of_done" && value.startsWith("[") && !value.endsWith("]")) return false;
-		if (key === "definition_of_done" && config.definitionOfDone === undefined) return false;
 		if ((key === "project_name" || key === "date_format") && !value.replace(/['"]/g, "").trim()) return false;
 		if (BOOLEAN_CONFIG_KEYS.has(key) && !/^(?:true|false)$/i.test(value)) return false;
 		if (INTEGER_CONFIG_KEYS.has(key)) {
@@ -79,13 +69,7 @@ function hasValidExplicitValues(content: string, config: BacklogConfig): boolean
 }
 
 function isUsableConfig(config: BacklogConfig | null, content: string): config is BacklogConfig {
-	return Boolean(
-		config?.projectName.trim() &&
-			Array.isArray(config.statuses) &&
-			Array.isArray(config.labels) &&
-			config.dateFormat.trim() &&
-			hasValidExplicitValues(content, config),
-	);
+	return Boolean(config?.projectName.trim() && config.dateFormat.trim() && hasValidExplicitValues(content));
 }
 
 async function delay(ms: number): Promise<void> {

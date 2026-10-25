@@ -6,7 +6,7 @@ import { Core } from "../core/backlog.ts";
 import { serializeTask } from "../markdown/serializer.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, retry, safeCleanup } from "./test-utils.ts";
+import { createUniqueTestDir, retry, safeCleanup, updateTestTaskSchema } from "./test-utils.ts";
 
 let TEST_DIR: string;
 let server: BacklogServer | null = null;
@@ -48,6 +48,12 @@ describe("BacklogServer cleanup endpoints", () => {
 			milestones: [],
 			dateFormat: "YYYY-MM-DD",
 			remoteOperations: false,
+		});
+		await updateTestTaskSchema(core.filesystem, (schema) => {
+			if (schema.fields.status) {
+				schema.fields.status.values = ["To Do", "Review", "Closed"];
+				schema.fields.status.default = "To Do";
+			}
 		});
 
 		const oldDate = new Date();

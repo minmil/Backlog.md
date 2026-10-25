@@ -66,11 +66,11 @@ describe("backlog task restore", () => {
 
 		const list = await task("list", "--plain");
 		expect(list.stdout).toContain("TASK-1 - Edited after restore");
-		const edit = await task("edit", "1", "-s", "In Progress", "--append-notes", "Back on the board");
+		const edit = await task("edit", "1", "-s", "In Progress", "--append-section", "description=Back on the board");
 		expect(edit.exitCode).toBe(0);
 		const stored = await new Core(TEST_DIR).filesystem.loadTask("task-1");
 		expect(stored?.status).toBe("In Progress");
-		expect(stored?.implementationNotes).toContain("Back on the board");
+		expect(stored?.sections?.description).toContain("Back on the board");
 		// It can be archived again, and its ID is still its own.
 		expect((await task("archive", "1")).exitCode).toBe(0);
 		expect((await task("create", "Next", "--plain")).stdout).toContain("Task TASK-2 - Next");
@@ -262,7 +262,7 @@ describe("backlog task restore", () => {
 		expect(await realpath(linked)).toBe(await realpath(targetPath));
 		expect(await Bun.file(targetPath).text()).toBe(targetContent);
 		// The restored link is an ordinary board task: an edit lands in the file it points to.
-		expect((await task("edit", "1", "--append-notes", "Edited through the link")).exitCode).toBe(0);
+		expect((await task("edit", "1", "--append-section", "description=Edited through the link")).exitCode).toBe(0);
 		expect((await task("view", "1", "--plain")).stdout).toContain("Edited through the link");
 	});
 });

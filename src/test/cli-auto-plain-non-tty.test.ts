@@ -27,7 +27,7 @@ describe("CLI auto-plain behavior in non-TTY runs", () => {
 			createdDate: "2026-01-01 00:00",
 			labels: [],
 			dependencies: [],
-			description: "Seed task description",
+			sections: { description: "Seed task description" },
 		};
 		await core.createTask(seedTask, false);
 	});
