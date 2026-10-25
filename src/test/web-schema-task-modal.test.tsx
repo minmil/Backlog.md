@@ -75,6 +75,21 @@ describe("schema task modal", () => {
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
 		expect(submissions).toEqual([{ title: "New schema task", fields: { status: "To Do", assignee: ["@alice"], reporter: "@alice", side: "Buyer" }, sections: { description: "A schema section" }, checklist: [{ section: "acceptance", op: "add", text: "Ready for review" }], log: { section: "log", body: "Created by Alice", author: "@alice", date: container.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value } }]);
 	});
+
+	it("lets create mode clear the schema default assignee explicitly", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		apiClient.fetchSchema = async () => schema;
+		const submissions: SchemaTaskWrite[] = [];
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal isOpen onClose={() => {}} onSubmit={async (input) => { submissions.push(input); }} /></SchemaProvider></ThemeProvider>); });
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Remove @alice"]')?.click(); });
+		const title = container.querySelector<HTMLInputElement>("#schema-field-title");
+		await act(async () => { if (title) setNativeInputValue(title, "Unassigned task"); });
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
+		expect(submissions[0]?.fields?.assignee).toEqual([]);
+	});
 	it("shows a custom field in the sidebar and saves it through one PATCH", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
