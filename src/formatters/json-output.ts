@@ -85,6 +85,7 @@ export function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 	const fields = Object.fromEntries(
 		Object.keys(registry.schema.fields).flatMap((key) => {
 			const value = registry.getField(task, key);
+			if (key === "dependencies" && value === undefined) return [[key, []]];
 			if (value === undefined) return [];
 			const formatted =
 				registry.schema.fields[key]?.type === "datetime" && typeof value === "string"
