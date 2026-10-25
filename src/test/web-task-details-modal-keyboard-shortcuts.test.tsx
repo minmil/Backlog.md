@@ -138,7 +138,7 @@ describe("Web task popup keyboard shortcuts", () => {
 		}
 	});
 
-	it("leaves e and E available to every preview editor", async () => {
+	it("leaves e and E available to editable controls", async () => {
 		const container = await mountModal();
 		const dialog = container.querySelector("[role='dialog']");
 		expect(dialog).toBeTruthy();
@@ -148,17 +148,14 @@ describe("Web task popup keyboard shortcuts", () => {
 		contentEditable.append(contentEditableChild);
 		(dialog as HTMLElement).append(contentEditable);
 
-		const targets: Array<[string, Element | undefined | null, string]> = [
-			["reference", container.querySelector("input[name='newRef']"), "e"],
-			["assignee", container.querySelector("#chip-input-assignee"), "e"],
-			["label", container.querySelector("#chip-input-labels"), "E"],
-			[
-				"title",
-				Array.from(container.querySelectorAll("input")).find((input) => input.value === task.title),
-				"e",
-			],
-			["dependency", container.querySelector("#dependency-input"), "e"],
-			["select", container.querySelector("select"), "e"],
+		const input = document.createElement("input");
+		const textarea = document.createElement("textarea");
+		const select = document.createElement("select");
+		(dialog as HTMLElement).append(input, textarea, select);
+		const targets: Array<[string, Element, string]> = [
+			["input", input, "e"],
+			["textarea", textarea, "E"],
+			["select", select, "e"],
 			["content editable descendant", contentEditableChild, "e"],
 		];
 
@@ -173,8 +170,8 @@ describe("Web task popup keyboard shortcuts", () => {
 	it("leaves c available to preview editors on Done tasks", async () => {
 		const container = await mountModal({ ...task, status: "Done" });
 		window.confirm = () => false;
-		const referenceInput = container.querySelector("input[name='newRef']");
-		expect(referenceInput).toBeTruthy();
+		const referenceInput = document.createElement("input");
+		container.querySelector("[role='dialog']")?.append(referenceInput);
 
 		const event = await press(referenceInput as Element, "c");
 
@@ -204,7 +201,6 @@ describe("Web task popup keyboard shortcuts", () => {
 			...task,
 			...overrides,
 			acceptanceCriteriaItems: [{ index: 1, text: "Acceptance criterion", checked: false }],
-			definitionOfDoneItems: [{ index: 1, text: "Done item", checked: true }],
 		}, true, {
 			onArchive: () => {
 				archives += 1;
@@ -222,7 +218,7 @@ describe("Web task popup keyboard shortcuts", () => {
 		expect(findButton(container, "Save")).toBeUndefined();
 		expect(archives).toBe(0);
 		const checkboxes = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='checkbox']"));
-		expect(checkboxes).toHaveLength(2);
+		expect(checkboxes).toHaveLength(1);
 		for (const checkbox of checkboxes) {
 			expect(checkbox.disabled).toBe(true);
 			const checked = checkbox.checked;

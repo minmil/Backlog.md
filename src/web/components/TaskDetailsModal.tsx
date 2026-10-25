@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isReadOnlyTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
+import { isReadOnlyTask, isWorkingCopyTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
 import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/task-detail";
 import Modal from "./Modal";
 import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState, type SchemaTaskWrite } from "../lib/api";
@@ -11,6 +11,7 @@ import SchemaSections from "./schema/SchemaSections.tsx";
 import FieldInput from "./schema/FieldInput.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import { formatReadinessBlockers } from "../../utils/readiness";
+import { buildTaskIdIndex, resolveTaskReference } from "../utils/task-id-links";
 import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "../../utils/task-subtasks.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
@@ -232,6 +233,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [schemaSections, setSchemaSections] = useState(schemaSectionBaseline.sections);
   const schemaSectionBaselineRef = useRef(schemaSectionBaseline.sections);
   const [pendingLog, setPendingLog] = useState<{ section: string; entry: LogInput } | null>(null);
+  const [logDrafts, setLogDrafts] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
   const isReadOnly = task ? isReadOnlyTask(task) : false;
@@ -302,11 +304,18 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const shownReadiness =
     readiness &&
     (readiness.isReady || readiness.isBlocked) &&
-    dependencies.length > 0 &&
-    dependencies.join(",") === (task?.dependencies ?? []).join(",") &&
-    status === (task?.status ?? "")
+    Array.isArray(schemaFields.dependencies) &&
+    schemaFields.dependencies.length > 0 &&
+    schemaFields.dependencies.join(",") === (task?.dependencies ?? []).join(",") &&
+    schemaFields.status === (task?.status ?? "")
       ? readiness
       : null;
+
+  const localAvailableTasks = useMemo(() => {
+    const local = availableTasks.filter(isWorkingCopyTask);
+    const index = buildTaskIdIndex(local);
+    return local.filter((candidate) => resolveTaskReference(index, candidate.id) === candidate);
+  }, [availableTasks]);
 
   // Hierarchy is derived from the shared corpus rather than the task payload: the single-task
   // API does not carry parent/subtask fields, while the list the modal already receives does.
@@ -486,6 +495,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setSchemaSections(schemaSectionBaseline.sections);
     schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
     setPendingLog(null);
+    setLogDrafts({});
     setFieldErrors({});
     setDescription(nextFormState.description);
     setPlan(nextFormState.plan);
@@ -540,7 +550,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       references.length > 0 ||
       modifiedFiles.length > 0);
   const hasUnsavedEdits =
-    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || hasCreateModeEntries);
+    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
 
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
@@ -573,6 +583,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       setSchemaFields(schemaFieldBaseline);
       setSchemaSections(schemaSectionBaseline.sections);
       setPendingLog(null);
+      setLogDrafts({});
       setFieldErrors({});
       setDescription(task?.description || "");
       setPlan(task?.implementationPlan || "");
@@ -926,6 +937,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
             mode={mode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
             onAppendLog={handleAppendLog}
+            onLogDraftChange={(id, hasDraft) => setLogDrafts((current) => ({ ...current, [id]: hasDraft }))}
           />
 
           {subtasks.length > 0 && (
@@ -1000,7 +1012,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
             readOnly={isReadOnly}
             draft={isOpenDraft}
             errors={fieldErrors}
-            availableTasks={availableTasks}
+            availableTasks={localAvailableTasks}
             milestones={milestoneEntities}
             dateFormat={dateFormat}
           />

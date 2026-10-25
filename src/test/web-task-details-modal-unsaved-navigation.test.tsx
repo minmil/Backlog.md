@@ -208,13 +208,13 @@ describe("Task details modal navigation with unsaved edits", () => {
 		expect(currentPath).toBe("/tasks/BACK-2");
 	});
 
-	it("protects a comment draft that is the only unsaved work", async () => {
+	it("protects a log draft that is the only unsaved work", async () => {
 		const container = await mountModal();
 		await startEditing(container);
 
-		const commentBox = container.querySelector('textarea[placeholder="Add a comment..."]');
-		expect(commentBox).toBeTruthy();
-		await typeInto(commentBox as HTMLTextAreaElement, "Draft comment nobody has submitted yet");
+		const logBox = container.querySelector('textarea[aria-label="Log entry"]');
+		expect(logBox).toBeTruthy();
+		await typeInto(logBox as HTMLTextAreaElement, "Draft log entry nobody has submitted yet");
 
 		const prompts = declineOnConfirm();
 		const event = await click(findChipLink(container));
@@ -260,9 +260,9 @@ describe("Task details modal navigation with unsaved edits", () => {
 			return false;
 		};
 
-		await click(findChipLink(container));
+		const event = await click(findCommentLink(container));
 
 		expect(prompts).toBe(0);
-		expect(currentPath).toBe("/tasks/BACK-2");
+		expect(event.defaultPrevented).toBe(false);
 	});
 });

@@ -17,16 +17,17 @@ interface Props {
 	mode: "view" | "edit";
 	onChange: (id: string, value: string | ChecklistItem[]) => void;
 	onAppendLog?: (id: string, entry: LogInput) => void | Promise<void>;
+	onLogDraftChange?: (id: string, hasDraft: boolean) => void;
 }
 
-export default function SchemaSections({ values, other, mode, onChange, onAppendLog }: Props) {
+export default function SchemaSections({ values, other, mode, onChange, onAppendLog, onLogDraftChange }: Props) {
 	const { schema } = useSchema();
 	return <>
 		{sectionOrder(schema).map((id) => {
 			const section = schema.sections[id];
 			return <div key={id}>
 				{section?.lang ? <span className="text-xs text-gray-500 dark:text-gray-400">{section.lang}</span> : null}
-				<SectionBlock sectionId={id} value={values[id]} mode={mode} onChange={(value) => onChange(id, value)} onAppendLog={(entry) => onAppendLog?.(id, entry)} />
+				<SectionBlock sectionId={id} value={values[id]} mode={mode} onChange={(value) => onChange(id, value)} onAppendLog={(entry) => onAppendLog?.(id, entry)} onLogDraftChange={(hasDraft) => onLogDraftChange?.(id, hasDraft)} />
 			</div>;
 		})}
 		<OtherContent other={other} />
