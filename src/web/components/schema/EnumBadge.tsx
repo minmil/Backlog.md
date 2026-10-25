@@ -1,4 +1,5 @@
 import type React from "react";
+import { formatPriorityLabel } from "../../../utils/priority-config.ts";
 
 const PALETTES = [
 	"bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
@@ -33,6 +34,11 @@ export default function EnumBadge({
 	className?: string;
 }): React.ReactElement | null {
 	if (!value.trim()) return null;
+	const priorityStyle: Record<string, string> = {
+		high: "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300",
+		medium: "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300",
+		low: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
+	};
 	const configuredIndex = options.findIndex((option) => option.toLowerCase() === value.toLowerCase());
 	const index = fieldKey === "type" && DEFAULT_TYPE_INDICES[value.toLowerCase()] !== undefined
 		? DEFAULT_TYPE_INDICES[value.toLowerCase()]
@@ -42,10 +48,14 @@ export default function EnumBadge({
 	return (
 		<span
 			data-field={fieldKey}
+			data-task-type={fieldKey === "type" ? value : undefined}
+			data-task-project={fieldKey === "project" ? value : undefined}
 			title={`${fieldKey}: ${value}`}
-			className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ${PALETTES[index ?? 0]} ${className}`}
+			className={fieldKey === "priority"
+				? `inline-flex max-w-full items-center rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors duration-200 ${priorityStyle[value.toLowerCase()] ?? "bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200"} ${className}`
+				: `inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ${PALETTES[index ?? 0]} ${className}`}
 		>
-			<span className="truncate">{value}</span>
+			<span className="truncate">{fieldKey === "priority" ? value.toLowerCase() === "medium" ? "Med" : formatPriorityLabel(value) : value}</span>
 		</span>
 	);
 }

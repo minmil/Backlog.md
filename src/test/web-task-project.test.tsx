@@ -112,16 +112,24 @@ afterEach(() => {
 
 describe("Web task project UI", () => {
 	it("shows a project badge on cards and no badge for unprojected tasks", () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.project!.values = ["Web"];
+		schema.fields.project!.hidden = false;
+		schema.ui.board.card = ["project", ...schema.ui.board.card];
 		const webHtml = renderToString(
-			<TaskCard
+			<SchemaProvider initialSchema={schema}>
+				<TaskCard
 				task={createTask({ project: "Web" })}
 				onUpdate={() => {}}
 				onEdit={() => {}}
 				availableProjects={["Web"]}
-			/>,
+				/>
+			</SchemaProvider>,
 		);
 		const untaggedHtml = renderToString(
-			<TaskCard task={createTask()} onUpdate={() => {}} onEdit={() => {}} availableProjects={["Web"]} />,
+			<SchemaProvider initialSchema={schema}>
+				<TaskCard task={createTask()} onUpdate={() => {}} onEdit={() => {}} availableProjects={["Web"]} />
+			</SchemaProvider>,
 		);
 
 		expect(webHtml).toContain('data-task-project="Web"');

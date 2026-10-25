@@ -22,7 +22,7 @@ export default function FieldValue({ fieldKey, value, variant, dateFormat }: Pro
 		return <span aria-label={value ? "Yes" : "No"}>{value ? "✓" : "–"}</span>;
 	}
 	if (definition.type === "date" || definition.type === "datetime") {
-		return <StoredDate value={String(value)} compact={variant !== "detail"} dateFormat={dateFormat} />;
+		return <StoredDate value={String(value)} compact={variant !== "detail" && fieldKey !== "due_date"} dateFormat={dateFormat} />;
 	}
 	if (definition.type === "enum" && variant === "card") {
 		return <EnumBadge fieldKey={fieldKey} value={String(value)} options={definition.values} />;
@@ -31,6 +31,8 @@ export default function FieldValue({ fieldKey, value, variant, dateFormat }: Pro
 	const display = (item: string) => definition.type === "user" || definition.type === "user-list" ? displayUser(item) : item;
 	if (Array.isArray(value)) {
 		if (variant === "cell") return <span>{value.map(display).join(", ")}</span>;
+		if (variant === "card" && definition.type === "user-list") return <span className="truncate max-w-[80px]" title={value.map(display).join(", ")}>{display(value[0] ?? "")}</span>;
+		if (variant === "card") return <span className="flex flex-wrap gap-1">{value.slice(0, 3).map((item) => <span key={item} className="inline-block px-1.5 py-0.5 text-[10px] bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded transition-colors duration-200">{display(item)}</span>)}{value.length > 3 ? <span className="inline-block px-1.5 py-0.5 text-[10px] text-gray-400 dark:text-gray-500">+{value.length - 3}</span> : null}</span>;
 		return (
 			<span className="flex flex-wrap gap-2">
 				{value.map((item) => (

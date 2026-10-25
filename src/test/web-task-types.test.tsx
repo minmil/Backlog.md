@@ -171,6 +171,8 @@ describe("Web task type UI", () => {
 	});
 
 	it("shows distinct type badges on cards and no badge for untyped tasks", () => {
+		const schema = typeSchema();
+		schema.fields.type!.values = ["Bug", "Customer Request", "Docs"];
 		const bugHtml = renderToString(
 			<TaskCard task={createTask({ type: "bug" })} onUpdate={() => {}} onEdit={() => {}} />,
 		);
@@ -178,20 +180,24 @@ describe("Web task type UI", () => {
 			<TaskCard task={createTask({ type: "feature" })} onUpdate={() => {}} onEdit={() => {}} />,
 		);
 		const customHtml = renderToString(
+			<SchemaProvider initialSchema={schema}>
 			<TaskCard
 				task={createTask({ type: "Customer Request" })}
 				onUpdate={() => {}}
 				onEdit={() => {}}
 				availableTypes={["Bug", "Customer Request", "Docs"]}
-			/>,
+			/>
+			</SchemaProvider>,
 		);
 		const docsHtml = renderToString(
+			<SchemaProvider initialSchema={schema}>
 			<TaskCard
 				task={createTask({ type: "Docs" })}
 				onUpdate={() => {}}
 				onEdit={() => {}}
 				availableTypes={["Bug", "Customer Request", "Docs"]}
-			/>,
+			/>
+			</SchemaProvider>,
 		);
 		const untypedHtml = renderToString(<TaskCard task={createTask()} onUpdate={() => {}} onEdit={() => {}} />);
 		const datedHtml = renderToString(
