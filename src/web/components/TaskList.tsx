@@ -8,16 +8,17 @@ import type {
 } from "../../types";
 import { DEFAULT_STATUSES } from "../../constants/index.ts";
 import { collectAvailableLabels } from "../../utils/label-filter.ts";
-import { compareTaskIds, compareTaskIdsDescending, sortTasks } from "../../utils/task-sorting.ts";
+import { compareTaskIds, compareTaskIdsDescending } from "../../utils/task-sorting.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { collectArchivedMilestoneKeys, getMilestoneLabel, milestoneKey } from "../utils/milestones";
-import { parseStoredUtcDate } from "../../utils/utc-timestamp.ts";
 import {
 	formatPriorityLabel,
 	getPriorityOptions,
-	getPriorityRank,
 	resolvePriorityValue,
 } from "../../utils/priority-config.ts";
+import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
+import FieldValue from "./schema/FieldValue.tsx";
+import { useSchema } from "./schema/SchemaProvider.tsx";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
 import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from "./AcceptanceCriteriaProgress";
@@ -39,30 +40,17 @@ interface TaskListProps {
 	isLoading?: boolean;
 }
 
-type TaskSortColumn = "id" | "title" | "status" | "priority" | "ordinal" | "milestone" | "created";
+type TaskSortColumn = string;
 type SortDirection = "asc" | "desc";
-
-// The table sorts that `backlog task list --sort` also has, with the `--sort` value each one is.
-// Their order comes from sortTasks, so the table and the CLI agree. Every other column and
-// direction is a sort only this table has.
-const SHARED_SORTS: Partial<Record<`${TaskSortColumn}:${SortDirection}`, string>> = {
-	"id:asc": "id",
-	"priority:desc": "priority",
-	"ordinal:asc": "ordinal",
-};
 
 // Column widths in rem, in render order: ID, Title, Status, Priority, Ordinal, Labels,
 // Assignee, Milestone, Created. Each metadata column is sized to the wider of its header
 // label and its cell content; Title is the one flexible column (null) and absorbs whatever
 // the content area has left, so the table fits a laptop viewport instead of overflowing it.
-const TASK_COLUMN_WIDTHS_REM: readonly (number | null)[] = [6, null, 6.5, 6.5, 6, 8, 6.5, 8, 6];
+const FIELD_WIDTHS_REM: Record<string, number> = { status: 6.5, priority: 6.5, ordinal: 6, labels: 8, assignee: 6.5, milestone: 8, created_date: 6 };
 
 // Below this the table scrolls horizontally rather than crushing the columns.
 const TASK_TITLE_MIN_WIDTH_REM = 12;
-const TASK_TABLE_MIN_WIDTH_REM = TASK_COLUMN_WIDTHS_REM.reduce<number>(
-	(total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM),
-	0,
-);
 
 function compareTaskIdsAscending(a: Task, b: Task): number {
 	return compareTaskIds(a.id, b.id);
@@ -133,6 +121,14 @@ const TaskList: React.FC<TaskListProps> = ({
 	dateFormat,
 	isLoading = false,
 }) => {
+	const { schema, registry } = useSchema();
+	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
+	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
+	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
+		const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
+		return supplied?.[key] ?? registry.getField(task, key);
+	};
 	const [searchParams, setSearchParams] = useSearchParams();
 	const statusOptions = useMemo(
 		() => (availableStatuses.length > 0 ? availableStatuses : [...DEFAULT_STATUSES]),
@@ -600,7 +596,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	};
 
 	const renderSortableHeader = (label: string, column: TaskSortColumn) => (
-		<th className="px-3 py-2" aria-sort={getSortAriaValue(column)}>
+		<th key={column} className="px-3 py-2" aria-sort={getSortAriaValue(column)}>
 			<button
 				type="button"
 				onClick={() => handleSortChange(column)}
@@ -614,83 +610,40 @@ const TaskList: React.FC<TaskListProps> = ({
 
 	const renderColumnGroup = () => (
 		<colgroup>
-			{TASK_COLUMN_WIDTHS_REM.map((width, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: the column order is static
+			{columnWidths.map((width, index) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: the column order follows the schema
 				<col key={index} style={width === null ? undefined : { width: `${width}rem` }} />
 			))}
 		</colgroup>
 	);
 
 	const sortedDisplayTasks = useMemo(() => {
-		const sharedSort = SHARED_SORTS[`${sortColumn}:${sortDirection}`];
-		if (sharedSort) {
-			return sortTasks(displayTasks, sharedSort, availablePriorities);
-		}
-
-		const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-		const compareText = (a: string, b: string) => collator.compare(a, b);
-		const withDirection = (value: number) => (sortDirection === "asc" ? value : -value);
-
 		return [...displayTasks].sort((a, b) => {
-			let result = 0;
-			switch (sortColumn) {
-				case "id": {
-					result = compareTaskIdsDescending(a.id, b.id);
-					break;
-				}
-				case "title": {
-					result = withDirection(compareText(a.title, b.title));
-					break;
-				}
-				case "status": {
-					result = withDirection(compareText(a.status, b.status));
-					break;
-				}
-				case "priority": {
-					const rankA = getPriorityRank(a.priority, availablePriorities);
-					const rankB = getPriorityRank(b.priority, availablePriorities);
-					result = withDirection(rankA - rankB);
-					break;
-				}
-				case "ordinal": {
-					const aOrd = a.ordinal;
-					const bOrd = b.ordinal;
-					if (typeof aOrd === "number" && typeof bOrd === "number") {
-						result = withDirection(aOrd - bOrd);
-					} else if (typeof aOrd === "number") {
-						result = -1;
-					} else if (typeof bOrd === "number") {
-						result = 1;
-					}
-					break;
-				}
-				case "milestone": {
-					const milestoneA = getMilestoneLabel(a.milestone, milestoneEntities);
-					const milestoneB = getMilestoneLabel(b.milestone, milestoneEntities);
-					result = withDirection(compareText(milestoneA, milestoneB));
-					break;
-				}
-				case "created": {
-					const createdA = parseStoredUtcDate(a.createdDate)?.getTime();
-					const createdB = parseStoredUtcDate(b.createdDate)?.getTime();
-					if (createdA === undefined && createdB === undefined) {
-						result = 0;
-					} else if (createdA === undefined) {
-						result = 1;
-					} else if (createdB === undefined) {
-						result = -1;
-					} else {
-						result = withDirection(createdA - createdB);
-					}
-					break;
-				}
+			if (sortColumn === "id") return sortDirection === "asc" ? compareTaskIds(a.id, b.id) : compareTaskIdsDescending(a.id, b.id);
+			const left = fieldValue(a, sortColumn);
+			const right = fieldValue(b, sortColumn);
+			if (sortColumn === "ordinal" && (left === undefined || right === undefined)) {
+				if (left !== right) return left === undefined ? 1 : -1;
 			}
-
-			if (result !== 0) return result;
+			const result = registry.compare(sortColumn, left, right, sortColumn === "priority" ? availablePriorities : undefined);
+			if (result !== 0) return sortDirection === "asc" ? result : -result;
 			if (sortColumn === "ordinal") return compareTaskIdsAscending(a, b);
 			return compareTaskIdsDescending(a.id, b.id);
 		});
-	}, [availablePriorities, displayTasks, milestoneEntities, sortColumn, sortDirection]);
+	}, [availablePriorities, displayTasks, registry, sortColumn, sortDirection]);
+	const renderFieldCell = (task: Task, key: string) => {
+		const value = fieldValue(task, key);
+		if (key === "status") return <td key={key} className="px-3 py-2.5"><span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(String(value ?? ""))}`}>{value}</span></td>;
+		if (key === "priority") return <td key={key} className="px-3 py-2.5">{value ? <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(String(value))}`}>{formatPriorityLabel(String(value), availablePriorities)}</span> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "ordinal") return <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{value ?? <span className="text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "labels" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1 min-w-0">{value.slice(0, 2).map((label) => <span key={label} className="inline-flex max-w-[7rem] truncate rounded-circle bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200" title={label}>{label}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "assignee" && Array.isArray(value)) return <td key={key} className="px-3 py-2.5">{value.length ? <div className="flex items-center gap-1.5">{value.slice(0, 2).map((assignee) => <span key={assignee} title={assignee} className="inline-flex h-6 w-6 items-center justify-center rounded-circle bg-blue-100 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/50 dark:text-blue-200">{getAssigneeInitials(assignee)}</span>)}{value.length > 2 && <span className="text-[11px] text-gray-500 dark:text-gray-400">+{value.length - 2}</span>}</div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
+		if (key === "milestone") {
+			const label = value ? getMilestoneLabel(String(value), milestoneEntities) : "—";
+			return <td key={key} className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={label}>{label}</td>;
+		}
+		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} /></td>;
+	};
 
 	const currentCount = sortedDisplayTasks.length;
 	// Share a slot sized for the largest visible count. Keep the existing 3rem through 99/99;
@@ -856,35 +809,24 @@ const TaskList: React.FC<TaskListProps> = ({
 				<div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
 					<div className="sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/95 backdrop-blur supports-[backdrop-filter]:bg-gray-50/90 supports-[backdrop-filter]:dark:bg-gray-700/85">
 						<div ref={tableHeaderScrollRef} className="overflow-x-auto" style={{ overflowY: "hidden" }}>
-							<table className="w-full table-fixed border-collapse" style={{ minWidth: `${TASK_TABLE_MIN_WIDTH_REM}rem` }}>
+							<table className="w-full table-fixed border-collapse" style={{ minWidth: `${tableMinWidth}rem` }}>
 								{renderColumnGroup()}
 								<thead>
 									<tr className="text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">
 										{renderSortableHeader("ID", "id")}
 										{renderSortableHeader("Title", "title")}
-										{renderSortableHeader("Status", "status")}
-										{renderSortableHeader("Priority", "priority")}
-										{renderSortableHeader("Ordinal", "ordinal")}
-										<th className="px-3 py-2">Labels</th>
-										<th className="px-3 py-2">Assignee</th>
-										{renderSortableHeader("Milestone", "milestone")}
-										{renderSortableHeader("Created", "created")}
+										{columnKeys.map((key) => renderSortableHeader(schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
 									</tr>
 								</thead>
 							</table>
 						</div>
 					</div>
 					<div ref={tableBodyScrollRef} className="overflow-x-auto" style={{ overflowY: "hidden" }}>
-						<table className="w-full table-fixed border-collapse" style={{ minWidth: `${TASK_TABLE_MIN_WIDTH_REM}rem` }}>
+						<table className="w-full table-fixed border-collapse" style={{ minWidth: `${tableMinWidth}rem` }}>
 							{renderColumnGroup()}
 							<tbody className="divide-y divide-gray-200 dark:divide-gray-700">
 								{sortedDisplayTasks.map((task) => {
 									const isFromOtherBranch = Boolean(task.branch);
-									const visibleLabels = task.labels.slice(0, 2);
-									const labelOverflow = Math.max(task.labels.length - visibleLabels.length, 0);
-									const visibleAssignees = task.assignee.slice(0, 2);
-									const assigneeOverflow = Math.max(task.assignee.length - visibleAssignees.length, 0);
-									const milestoneLabel = task.milestone ? getMilestoneLabel(task.milestone, milestoneEntities) : "—";
 
 									return (
 										<tr
@@ -937,71 +879,7 @@ const TaskList: React.FC<TaskListProps> = ({
 													</div>
 												)}
 											</td>
-											<td className="px-3 py-2.5">
-												<span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(task.status)}`}>
-													{task.status}
-												</span>
-											</td>
-											<td className="px-3 py-2.5">
-												{task.priority ? (
-													<span
-														className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(task.priority)}`}
-													>
-														{formatPriorityLabel(task.priority, availablePriorities)}
-													</span>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
-												{task.ordinal !== undefined ? task.ordinal : <span className="text-gray-300 dark:text-gray-600">—</span>}
-											</td>
-											<td className="px-3 py-2.5">
-												{visibleLabels.length > 0 ? (
-													<div className="flex items-center gap-1 min-w-0">
-														{visibleLabels.map((label) => (
-															<span
-																key={label}
-																className="inline-flex max-w-[7rem] truncate rounded-circle bg-gray-100 px-2 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-																title={label}
-															>
-																{label}
-															</span>
-														))}
-														{labelOverflow > 0 && (
-															<span className="text-[11px] text-gray-500 dark:text-gray-400">+{labelOverflow}</span>
-														)}
-													</div>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5">
-												{visibleAssignees.length > 0 ? (
-													<div className="flex items-center gap-1.5">
-														{visibleAssignees.map((assignee) => (
-															<span
-																key={assignee}
-																title={assignee}
-																className="inline-flex h-6 w-6 items-center justify-center rounded-circle bg-blue-100 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/50 dark:text-blue-200"
-															>
-																{getAssigneeInitials(assignee)}
-															</span>
-														))}
-														{assigneeOverflow > 0 && (
-															<span className="text-[11px] text-gray-500 dark:text-gray-400">+{assigneeOverflow}</span>
-														)}
-													</div>
-												) : (
-													<span className="text-xs text-gray-300 dark:text-gray-600">—</span>
-												)}
-											</td>
-											<td className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={milestoneLabel}>
-												{milestoneLabel}
-											</td>
-											<td className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-												<StoredDate value={task.createdDate} dateFormat={dateFormat} compact />
-											</td>
+											{columnKeys.map((key) => renderFieldCell(task, key))}
 										</tr>
 									);
 								})}

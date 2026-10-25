@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import type { Task } from "../types/index.ts";
 import TaskList from "../web/components/TaskList.tsx";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
 import { pinTimeZone } from "./pin-timezone.ts";
 
 // jsdom performs no layout, so these tests cannot show that the rendered table fits a
@@ -51,7 +53,7 @@ const setupDom = () => {
 	globalThis.localStorage = dom.window.localStorage as unknown as Storage;
 };
 
-const renderTaskList = (): HTMLElement => {
+const renderTaskList = (customSchema = getDefaultTaskSchema()): HTMLElement => {
 	setupDom();
 	const container = document.getElementById("root");
 	expect(container).toBeTruthy();
@@ -59,6 +61,7 @@ const renderTaskList = (): HTMLElement => {
 	act(() => {
 		activeRoot?.render(
 			<MemoryRouter>
+				<SchemaProvider initialSchema={customSchema}>
 				<TaskList
 					tasks={[
 						createTask({
@@ -66,6 +69,7 @@ const renderTaskList = (): HTMLElement => {
 							title: "Fit the task table",
 							dueDate: "2026-08-10",
 							labels: ["ui"],
+							fieldValues: { effort: 3 },
 							assignee: ["@alex"],
 						}),
 					]}
@@ -77,6 +81,7 @@ const renderTaskList = (): HTMLElement => {
 					onEditTask={() => {}}
 					onNewTask={() => {}}
 				/>
+				</SchemaProvider>
 			</MemoryRouter>,
 		);
 	});
@@ -152,5 +157,15 @@ describe("TaskList table width budget", () => {
 		expect(minWidthRem).toBeLessThanOrEqual(CONTENT_BUDGET_REM);
 		// The minimum has to come from the columns themselves, plus room for the title.
 		expect(minWidthRem).toBeGreaterThan(fixedTotalRem);
+	});
+
+	it("uses schema columns and renders custom field values", () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.effort = { type: "number", label: "Effort" };
+		schema.ui.task_list.columns = ["effort", "status"];
+		const container = renderTaskList(schema);
+		const headers = Array.from(container.querySelectorAll("thead th")).map((th) => th.textContent?.replace(/[↕▲▼]/g, "").trim());
+		expect(headers).toEqual(["ID", "Title", "Effort", "Status"]);
+		expect(Array.from(container.querySelectorAll("tbody tr td")).map((cell) => cell.textContent?.trim())).toEqual(["task-101", expect.stringContaining("Fit the task table"), "3", "To Do"]);
 	});
 });
