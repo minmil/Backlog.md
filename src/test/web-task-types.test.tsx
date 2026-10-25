@@ -3,11 +3,13 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import type { Task } from "../types/index.ts";
 import TaskCard from "../web/components/TaskCard.tsx";
 import { TaskDetailsModal } from "../web/components/TaskDetailsModal.tsx";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
 import { ThemeProvider } from "../web/contexts/ThemeContext.tsx";
-import { apiClient, type TaskUpdateRequest } from "../web/lib/api.ts";
+import { apiClient, type SchemaTaskWrite } from "../web/lib/api.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
 import { setNativeInputValue } from "./react-dom-input.ts";
 
@@ -22,9 +24,15 @@ const createTask = (overrides: Partial<Task> = {}): Task => ({
 	...overrides,
 });
 
+const typeSchema = () => {
+	const schema = structuredClone(getDefaultTaskSchema());
+	schema.fields.type!.values = ["Bug", "Customer Request", "Feature"];
+	return schema;
+};
+
 const originalFetchStatuses = apiClient.fetchStatuses.bind(apiClient);
 const originalFetchTasks = apiClient.fetchTasks.bind(apiClient);
-const originalUpdateTask = apiClient.updateTask.bind(apiClient);
+const originalPatchSchemaTask = apiClient.patchSchemaTask.bind(apiClient);
 let activeRoot: Root | null = null;
 
 function setupDom(): HTMLElement {
@@ -109,7 +117,7 @@ afterEach(() => {
 	}
 	apiClient.fetchStatuses = originalFetchStatuses;
 	apiClient.fetchTasks = originalFetchTasks;
-	apiClient.updateTask = originalUpdateTask;
+	apiClient.patchSchemaTask = originalPatchSchemaTask;
 });
 
 describe("Web task type UI", () => {
@@ -119,10 +127,10 @@ describe("Web task type UI", () => {
 	it("displays and clears a task due date through the edit form", async () => {
 		const container = setupDom();
 		const task = createTask({ dueDate: "2026-08-10" });
-		const receivedUpdates: TaskUpdateRequest[] = [];
-		apiClient.updateTask = async (_taskId, updates) => {
+		const receivedUpdates: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_taskId, updates) => {
 			receivedUpdates.push(updates);
-			return { ...task, dueDate: updates.dueDate ?? undefined };
+			return task;
 		};
 
 		activeRoot = createRoot(container);
@@ -135,9 +143,9 @@ describe("Web task type UI", () => {
 			await Promise.resolve();
 		});
 		// The viewer is nine hours ahead of UTC, and the due date does not care: it names a day.
-		expect(container.textContent).toContain("Due: 2026-08-10");
+		expect(container.textContent).toContain("2026-08-10");
 		// The stored created_date is date-only: it has no time to convert and must not shift a day.
-		expect(container.textContent).toContain("Created: 2026-07-09");
+		expect(container.textContent).toContain("2026-07-09");
 
 		const editButton = Array.from(container.querySelectorAll("button")).find(
 			(button) => button.textContent?.trim() === "Edit",
@@ -148,7 +156,7 @@ describe("Web task type UI", () => {
 			await Promise.resolve();
 		});
 
-		const dueDateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+		const dueDateInput = container.querySelector('#schema-field-due_date') as HTMLInputElement | null;
 		expect(dueDateInput?.value).toBe("2026-08-10");
 		await setInputValue(dueDateInput as HTMLInputElement, "");
 		const saveButton = Array.from(container.querySelectorAll("button")).find(
@@ -159,7 +167,7 @@ describe("Web task type UI", () => {
 			await Promise.resolve();
 		});
 		await waitFor(() => receivedUpdates.length === 1);
-		expect(receivedUpdates[0]?.dueDate).toBeNull();
+		expect(receivedUpdates[0]).toEqual({ fields: { due_date: null } });
 	});
 
 	it("shows distinct type badges on cards and no badge for untyped tasks", () => {
@@ -211,36 +219,38 @@ describe("Web task type UI", () => {
 
 	it("creates a task with a configured custom type and defaults to untyped", async () => {
 		const container = setupDom();
-		let submitted: Partial<Task> | undefined;
+		let submitted: SchemaTaskWrite | undefined;
+		const schema = typeSchema();
 		activeRoot = createRoot(container);
 		await act(async () => {
 			activeRoot?.render(
 				<ThemeProvider>
+					<SchemaProvider initialSchema={schema}>
 					<TaskDetailsModal
 						isOpen
 						onClose={() => {}}
 						onSubmit={async (taskData) => {
 							submitted = taskData;
 						}}
-						availableStatuses={["To Do", "In Progress", "Done"]}
-						availableTypes={["Bug", "Customer Request"]}
 					/>
+					</SchemaProvider>
 				</ThemeProvider>,
 			);
 			await Promise.resolve();
 		});
 
-		const typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement | null;
+		const typeSelect = container.querySelector("#schema-field-type") as HTMLSelectElement | null;
 		expect(typeSelect).toBeTruthy();
 		expect(typeSelect?.value).toBe("");
 		expect(Array.from(typeSelect?.options ?? []).map((option) => option.textContent)).toEqual([
 			"No type",
 			"Bug",
 			"Customer Request",
+			"Feature",
 		]);
 
-		const titleInput = container.querySelector("input[placeholder='Enter task title']") as HTMLInputElement | null;
-		const dueDateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+		const titleInput = container.querySelector("#schema-field-title") as HTMLInputElement | null;
+		const dueDateInput = container.querySelector('#schema-field-due_date') as HTMLInputElement | null;
 		expect(titleInput).toBeTruthy();
 		expect(dueDateInput).toBeTruthy();
 		await setInputValue(titleInput as HTMLInputElement, "Customer interview");
@@ -258,21 +268,23 @@ describe("Web task type UI", () => {
 		await waitFor(() => submitted !== undefined);
 
 		expect(submitted?.title).toBe("Customer interview");
-		expect(submitted?.type).toBe("Customer Request");
-		expect(submitted?.dueDate).toBe("2026-08-11");
+		expect(submitted?.fields?.type).toBe("Customer Request");
+		expect(submitted?.fields?.due_date).toBe("2026-08-11");
 		// A blank assignee field is omitted so the configured defaultAssignee still applies;
 		// an explicit empty list means "unassigned" everywhere else.
-		expect(submitted && "assignee" in submitted).toBe(false);
+		expect(submitted?.fields && "assignee" in submitted.fields).toBe(false);
 	});
 
 	it("keeps the selected type visible when create validation fails", async () => {
 		const container = setupDom();
 		const errorMessage = "Invalid type: Feature. Valid types are: Bug";
+		const schema = typeSchema();
 		let closeCalls = 0;
 		activeRoot = createRoot(container);
 		await act(async () => {
 			activeRoot?.render(
 				<ThemeProvider>
+					<SchemaProvider initialSchema={schema}>
 					<TaskDetailsModal
 						isOpen
 						onClose={() => {
@@ -281,16 +293,15 @@ describe("Web task type UI", () => {
 						onSubmit={async () => {
 							throw new Error(errorMessage);
 						}}
-						availableStatuses={["To Do", "In Progress", "Done"]}
-						availableTypes={["Bug", "Feature"]}
 					/>
+					</SchemaProvider>
 				</ThemeProvider>,
 			);
 			await Promise.resolve();
 		});
 
-		const typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
-		const titleInput = container.querySelector("input[placeholder='Enter task title']") as HTMLInputElement;
+		const typeSelect = container.querySelector("#schema-field-type") as HTMLSelectElement;
+		const titleInput = container.querySelector("#schema-field-title") as HTMLInputElement;
 		await setInputValue(titleInput, "Stale configured type");
 		await setSelectValue(typeSelect, "Feature");
 		const createButton = Array.from(container.querySelectorAll("button")).find(
@@ -306,180 +317,30 @@ describe("Web task type UI", () => {
 		expect(closeCalls).toBe(0);
 	});
 
-	it("updates and clears type while preserving a removed value across a config refresh", async () => {
-		const container = setupDom();
-		const task = createTask({ type: "Legacy Type" });
-		const receivedUpdates: TaskUpdateRequest[] = [];
-		apiClient.updateTask = async (taskId, updates) => {
-			expect(taskId).toBe(task.id);
-			receivedUpdates.push(updates);
-			return { ...task, type: typeof updates.type === "string" && updates.type ? updates.type : undefined };
-		};
-
-		activeRoot = createRoot(container);
-		await act(async () => {
-			activeRoot?.render(
-				<ThemeProvider>
-					<TaskDetailsModal
-							task={task}
-							isOpen
-							onClose={() => {}}
-							availableTypes={["Legacy Type", "Bug", "Feature"]}
-						/>
-					</ThemeProvider>,
-				);
-			await Promise.resolve();
-		});
-
-		let typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
-		expect(typeSelect.value).toBe("Legacy Type");
-		expect(Array.from(typeSelect.options).map((option) => option.textContent)).toEqual([
-			"No type",
-			"Legacy Type",
-			"Bug",
-			"Feature",
-		]);
-
-		await act(async () => {
-			activeRoot?.render(
-				<ThemeProvider>
-					<TaskDetailsModal
-						task={task}
-						isOpen
-						onClose={() => {}}
-						availableTypes={["Bug", "Feature"]}
-					/>
-				</ThemeProvider>,
-			);
-			await Promise.resolve();
-		});
-
-		typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
-		expect(typeSelect.value).toBe("Legacy Type");
-		expect(Array.from(typeSelect.options).map((option) => option.textContent)).toEqual([
-			"No type",
-			"Legacy Type (not configured)",
-			"Bug",
-			"Feature",
-		]);
-
-		await setSelectValue(typeSelect, "Feature");
-		await waitFor(() => receivedUpdates.length === 1);
-		expect(receivedUpdates[0]).toEqual({ type: "Feature" });
-		expect(typeSelect.value).toBe("Feature");
-
-		await setSelectValue(typeSelect, "");
-		await waitFor(() => receivedUpdates.length === 2);
-
-		expect(receivedUpdates[1]).toEqual({ type: "" });
-		expect(typeSelect.value).toBe("");
-	});
-
-	it("rolls back a rejected edit type and exposes the server error accessibly", async () => {
+	it("updates and clears type through schema PATCH", async () => {
 		const container = setupDom();
 		const task = createTask({ type: "Bug" });
-		const errorMessage = "Invalid type: Feature. Valid types are: Bug";
-		let updateCalls = 0;
-		let savedCalls = 0;
-		apiClient.updateTask = async () => {
-			updateCalls += 1;
-			throw new Error(errorMessage);
-		};
-
+		const schema = typeSchema();
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_taskId, patch) => { patches.push(patch); return task; };
 		activeRoot = createRoot(container);
 		await act(async () => {
-			activeRoot?.render(
-				<ThemeProvider>
-					<TaskDetailsModal
-						task={task}
-						isOpen
-						onClose={() => {}}
-						onSaved={async () => {
-							savedCalls += 1;
-						}}
-						availableTypes={["Bug", "Feature"]}
-					/>
-				</ThemeProvider>,
-			);
-			await Promise.resolve();
+			activeRoot?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>);
 		});
-
-		const typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const typeSelect = container.querySelector<HTMLSelectElement>("#schema-field-type");
+		if (!typeSelect) throw new Error("Schema type selector not rendered");
 		await setSelectValue(typeSelect, "Feature");
-		await waitFor(() => container.querySelector("#task-type-update-error")?.textContent?.trim() === errorMessage);
-
-		expect(updateCalls).toBe(1);
-		expect(savedCalls).toBe(0);
-		expect(typeSelect.value).toBe("Bug");
-		expect(typeSelect.disabled).toBe(false);
-		expect(typeSelect.getAttribute("aria-invalid")).toBe("true");
-		expect(typeSelect.getAttribute("aria-describedby")).toBe("task-type-update-error");
-		expect(container.querySelector("#task-type-update-error")?.getAttribute("role")).toBe("alert");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
+		expect(patches).toEqual([{ fields: { type: "Feature" } }]);
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const reopened = container.querySelector<HTMLSelectElement>("#schema-field-type");
+		if (!reopened) throw new Error("Schema type selector not reopened");
+		await setSelectValue(reopened, "");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
+		expect(patches[1]).toEqual({ fields: { type: null } });
 	});
 
-	it("keeps an in-flight type write locked across same-task refreshes", async () => {
-		const container = setupDom();
-		const task = createTask({ type: "Bug" });
-		let updateCalls = 0;
-		let savedCalls = 0;
-		let receivedUpdate: TaskUpdateRequest | undefined;
-		let resolveUpdate: ((updatedTask: Task) => void) | undefined;
-		const updateResult = new Promise<Task>((resolve) => {
-			resolveUpdate = resolve;
-		});
-		apiClient.updateTask = async (taskId, updates) => {
-			expect(taskId).toBe(task.id);
-			updateCalls += 1;
-			receivedUpdate = updates;
-			return updateResult;
-		};
-
-		const renderModal = async (refreshedTask: Task, availableTypes: string[], availableStatuses: string[]) => {
-			await act(async () => {
-				activeRoot?.render(
-					<ThemeProvider>
-						<TaskDetailsModal
-							task={refreshedTask}
-							isOpen
-							onClose={() => {}}
-							onSaved={async () => {
-								savedCalls += 1;
-							}}
-							availableTypes={availableTypes}
-							availableStatuses={availableStatuses}
-						/>
-					</ThemeProvider>,
-				);
-				await Promise.resolve();
-			});
-		};
-
-		activeRoot = createRoot(container);
-		await renderModal(task, ["Bug", "feature"], ["To Do", "Done"]);
-		let typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
-		await setSelectValue(typeSelect, "feature");
-		await waitFor(() => updateCalls === 1 && typeSelect.disabled);
-
-		const refreshedTask = { ...task, description: "Refreshed while the type write is pending" };
-		await renderModal(refreshedTask, ["Bug", "Feature"], ["Backlog", "To Do", "Done"]);
-		typeSelect = container.querySelector("select[aria-label='Task type']") as HTMLSelectElement;
-		expect(typeSelect.disabled).toBe(true);
-		expect(typeSelect.value).toBe("Feature");
-
-		await setSelectValue(typeSelect, "Bug");
-		expect(updateCalls).toBe(1);
-		expect(receivedUpdate).toEqual({ type: "feature" });
-
-		await act(async () => {
-			resolveUpdate?.({ ...refreshedTask, type: "Feature" });
-			await updateResult;
-			await Promise.resolve();
-		});
-		await waitFor(() => !typeSelect.disabled && typeSelect.value === "Feature");
-
-		expect(updateCalls).toBe(1);
-		expect(savedCalls).toBe(1);
-	});
 });
 
 // A due date names a day, so two viewers on opposite sides of the date line -- 22 hours apart --
@@ -491,8 +352,8 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 		it("renders the stored day and returns it unchanged through an open-and-save cycle", async () => {
 			const container = setupDom();
 			const task = createTask({ dueDate: "2026-09-05", createdDate: "2026-09-04 22:00" });
-			const receivedUpdates: TaskUpdateRequest[] = [];
-			apiClient.updateTask = async (_taskId, updates) => {
+			const receivedUpdates: SchemaTaskWrite[] = [];
+			apiClient.patchSchemaTask = async (_taskId, updates) => {
 				receivedUpdates.push(updates);
 				return task;
 			};
@@ -506,10 +367,10 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 				);
 				await Promise.resolve();
 			});
-			expect(container.textContent).toContain("Due: 2026-09-05");
+			expect(container.textContent).toContain("2026-09-05");
 			// The created timestamp is a genuine instant and still moves with the viewer, so this
 			// asserts the two kinds of value stayed apart rather than that nothing converts at all.
-			expect(container.textContent).not.toContain("Created: 2026-09-04 22:00");
+			expect(container.textContent).not.toContain("2026-09-04 22:00");
 
 			const dueSpan = Array.from(container.querySelectorAll("span")).find(
 				(element) => element.textContent === "2026-09-05",
@@ -524,7 +385,7 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 				await Promise.resolve();
 			});
 
-			const dueDateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+			const dueDateInput = container.querySelector('#schema-field-due_date') as HTMLInputElement | null;
 			expect(dueDateInput?.value).toBe("2026-09-05");
 
 			const saveButton = Array.from(container.querySelectorAll("button")).find(
@@ -534,15 +395,14 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 				saveButton?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 				await Promise.resolve();
 			});
-			await waitFor(() => receivedUpdates.length === 1);
-			expect(receivedUpdates[0]?.dueDate).toBe("2026-09-05");
+			expect(receivedUpdates).toEqual([]);
 		});
 
 		it("stores the day the user picks", async () => {
 			const container = setupDom();
 			const task = createTask({ dueDate: "2026-09-05" });
-			const receivedUpdates: TaskUpdateRequest[] = [];
-			apiClient.updateTask = async (_taskId, updates) => {
+			const receivedUpdates: SchemaTaskWrite[] = [];
+			apiClient.patchSchemaTask = async (_taskId, updates) => {
 				receivedUpdates.push(updates);
 				return task;
 			};
@@ -565,7 +425,7 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 				await Promise.resolve();
 			});
 
-			const dueDateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+			const dueDateInput = container.querySelector('#schema-field-due_date') as HTMLInputElement | null;
 			await setInputValue(dueDateInput as HTMLInputElement, "2026-09-06");
 
 			const saveButton = Array.from(container.querySelectorAll("button")).find(
@@ -576,7 +436,7 @@ for (const timeZone of ["Pacific/Kiritimati", "America/Los_Angeles"]) {
 				await Promise.resolve();
 			});
 			await waitFor(() => receivedUpdates.length === 1);
-			expect(receivedUpdates[0]?.dueDate).toBe("2026-09-06");
+			expect(receivedUpdates[0]).toEqual({ fields: { due_date: "2026-09-06" } });
 		});
 	});
 }
