@@ -1,5 +1,6 @@
 import { taskFrontmatter } from "../markdown/task-frontmatter.ts";
 import type { Task } from "../types/index.ts";
+import { parseSequenceReference } from "./sequence.ts";
 import type { FieldType, SchemaCondition, SchemaField, TaskSchema } from "./types.ts";
 
 export type FieldValue = string | number | boolean | string[];
@@ -158,8 +159,11 @@ export class FieldRegistry {
 		switch (field.type) {
 			case "id":
 			case "text":
-			case "sequence":
 				return typeof raw === "string" ? raw : fail("expected text");
+			case "sequence":
+				return parseSequenceReference(raw, field)
+					? (raw as string)
+					: fail("expected a configured PREFIX-number reference with canonical padding");
 			case "bool": {
 				if (typeof raw === "boolean") return raw;
 				const value = String(raw).trim().toLowerCase();
@@ -202,6 +206,11 @@ export class FieldRegistry {
 	setField(task: Task, key: string, value: unknown, options: { allowManaged?: boolean } = {}): Task {
 		const field = this.definition(key);
 		if (field.managed && !options.allowManaged) throw new Error(`Task field "${key}" is managed by Backlog`);
+		if (field.type === "sequence") {
+			const existing = this.getField(task, key);
+			if (existing !== undefined && existing !== value)
+				throw new Error(`Task field "${key}" is a permanent reference and cannot be reassigned`);
+		}
 		const normalized =
 			key === "status" && /^DRAFT-/i.test(task.id) && typeof value === "string" && value.toLowerCase() === "draft"
 				? "Draft"
@@ -317,6 +326,14 @@ export class FieldRegistry {
 		if (b === undefined) return -1;
 		if (key === "id" && typeof a === "string" && typeof b === "string")
 			return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+		if (field.type === "sequence" && typeof a === "string" && typeof b === "string") {
+			const left = parseSequenceReference(a, field);
+			const right = parseSequenceReference(b, field);
+			if (left && right) {
+				const prefixOrder = left.prefix.localeCompare(right.prefix);
+				return prefixOrder || (left.number < right.number ? -1 : left.number > right.number ? 1 : 0);
+			}
+		}
 		if (field.type === "enum" && typeof a === "string" && typeof b === "string") {
 			const order = (value: string) => {
 				const index = (enumOrder ?? field.values ?? []).indexOf(value);

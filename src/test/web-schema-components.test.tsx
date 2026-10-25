@@ -9,6 +9,7 @@ import { ThemeProvider } from "../web/contexts/ThemeContext.tsx";
 import { apiClient } from "../web/lib/api.ts";
 import FieldInput from "../web/components/schema/FieldInput.tsx";
 import FieldValue from "../web/components/schema/FieldValue.tsx";
+import SchemaSidebar from "../web/components/schema/SchemaSidebar.tsx";
 import OtherContent from "../web/components/schema/OtherContent.tsx";
 import { SchemaProvider, useSchema } from "../web/components/schema/SchemaProvider.tsx";
 import SectionBlock from "../web/components/schema/SectionBlock.tsx";
@@ -85,6 +86,20 @@ describe("schema field components", () => {
 		const html = renderToStaticMarkup(<SchemaProvider initialSchema={schemaWithField("date")}><FieldValue fieldKey="sample" value="2026-10-24" variant="cell" overdue /></SchemaProvider>);
 		expect(html).toContain("text-red-600 dark:text-red-400");
 		expect(html).toContain("overdue");
+	});
+
+	it("shows sequence references as read-only and previews assignment on create", () => {
+		const schema = schemaWithField("sequence");
+		schema.fields.sample = { type: "sequence", label: "Client ref", scope: "project", prefixes: { Client 1: "C1" }, pad: 3, assign_when: { client_facing: true } };
+		schema.fields.project = { ...schema.fields.project!, hidden: false, values: ["Client 1"] };
+		schema.fields.client_facing = { type: "bool" };
+		const badge = renderToStaticMarkup(<SchemaProvider initialSchema={schema}><FieldValue fieldKey="sample" value="C1-007" variant="card" /></SchemaProvider>);
+		expect(badge).toContain("C1-007");
+		expect(badge).toContain("bg-gray-100 dark:bg-gray-600");
+		const input = renderToStaticMarkup(<SchemaProvider initialSchema={schema}><FieldInput fieldKey="sample" value="C1-007" onChange={() => {}} /></SchemaProvider>);
+		expect(input).not.toContain("<input");
+		const create = renderToStaticMarkup(<SchemaProvider initialSchema={schema}><SchemaSidebar values={{ project: "Client 1", client_facing: true, sample: null }} onChange={() => {}} mode="create" /></SchemaProvider>);
+		expect(create).toContain("Assigned on save");
 	});
 
 	it("renders a markdown section", () => {

@@ -28,6 +28,9 @@ export default function FieldValue({ fieldKey, value, variant, dateFormat, overd
 	if (definition.type === "enum" && variant === "card") {
 		return <EnumBadge fieldKey={fieldKey} value={String(value)} options={definition.values} />;
 	}
+	if (definition.type === "sequence" && variant === "card") {
+		return <EnumBadge fieldKey={fieldKey} value={String(value)} neutral />;
+	}
 	const displayUser = (handle: string) => schema.users.find((user) => user.handle === handle)?.name ?? handle;
 	const display = (item: string) => definition.type === "user" || definition.type === "user-list" ? displayUser(item) : item;
 	if (Array.isArray(value)) {

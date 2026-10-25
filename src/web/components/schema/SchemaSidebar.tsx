@@ -35,7 +35,14 @@ export default function SchemaSidebar({ values, onChange, mode, readOnly, draft,
 		{detailFieldOrder(schema).filter((key) => mode !== "create" || key !== "title").map((key) => {
 			const field = schema.fields[key];
 			if (!field) return null;
-			const editable = mode !== "view" && !readOnly && !(draft && key === "status");
+			const editable = mode !== "view" && !readOnly && field.type !== "sequence" && !(draft && key === "status");
+			const willAssign = field.type === "sequence" && mode === "create" && !draft && !values[key] &&
+				Boolean(field.scope && typeof values[field.scope] === "string" && field.prefixes?.[values[field.scope] as string]) &&
+				(!field.assign_when || Object.entries(field.assign_when).every(([conditionKey, allowed]) => {
+					const actual = values[conditionKey];
+					const candidates = Array.isArray(allowed) ? allowed : [allowed];
+					return Array.isArray(actual) ? actual.some((item) => candidates.includes(item)) : candidates.includes(actual as string | boolean);
+				}));
 			return editable ? (
 				<div key={key}>
 					{field.lang ? <span className="text-xs text-gray-500 dark:text-gray-400">{field.lang}</span> : null}
@@ -44,7 +51,7 @@ export default function SchemaSidebar({ values, onChange, mode, readOnly, draft,
 			) : (
 				<div key={key} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
 					<div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{field.label ?? key}{field.lang ? <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{field.lang}</span> : null}</div>
-					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} overdue={overdueFields?.includes(key)} /></div>
+					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} overdue={overdueFields?.includes(key)} />{willAssign ? <span className="text-xs text-gray-500 dark:text-gray-400">Assigned on save</span> : null}</div>
 				</div>
 			);
 		})}

@@ -70,6 +70,7 @@ export interface TaskSchema {
 export interface SchemaIssue {
 	key: string;
 	message: string;
+	severity?: "warning";
 }
 
 export class TaskSchemaError extends Error {

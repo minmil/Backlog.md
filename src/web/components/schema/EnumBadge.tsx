@@ -27,11 +27,13 @@ export default function EnumBadge({
 	value,
 	options = [],
 	className = "",
+	neutral = false,
 }: {
 	fieldKey: string;
 	value: string;
 	options?: string[];
 	className?: string;
+	neutral?: boolean;
 }): React.ReactElement | null {
 	if (!value.trim()) return null;
 	const priorityStyle: Record<string, string> = {
@@ -53,7 +55,7 @@ export default function EnumBadge({
 			title={`${fieldKey}: ${value}`}
 			className={fieldKey === "priority"
 				? `inline-flex max-w-full items-center rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors duration-200 ${priorityStyle[value.toLowerCase()] ?? "bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200"} ${className}`
-				: `inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ${PALETTES[index ?? 0]} ${className}`}
+				: `inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold leading-4 ${neutral ? "bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-200" : PALETTES[index ?? 0]} ${className}`}
 		>
 			<span className="truncate">{fieldKey === "priority" ? value.toLowerCase() === "medium" ? "Med" : formatPriorityLabel(value) : value}</span>
 		</span>

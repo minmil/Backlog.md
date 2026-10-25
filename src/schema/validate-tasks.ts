@@ -1,6 +1,7 @@
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseMarkdown } from "../markdown/parser.ts";
+import { parseSequenceReference } from "./sequence.ts";
 import type { SchemaIssue, TaskSchema } from "./types.ts";
 
 function markdownFiles(directory: string): string[] {
@@ -37,6 +38,7 @@ function valueIssue(type: string, value: unknown, values: string[] | undefined, 
 	switch (type) {
 		case "id":
 		case "text":
+		case "sequence":
 		case "task-ref":
 		case "milestone-ref":
 			return typeof value === "string" ? null : "Expected text";
@@ -108,6 +110,7 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 	const ids = new Set(tasks.map(({ data }) => data.id).filter((id): id is string => typeof id === "string"));
 	const users = new Set(schema.users.map((user) => user.handle));
 	const references = new Map<string, string[]>();
+	const seenSequences = new Map<string, string>();
 	for (const { path, data, isDraft } of tasks) {
 		const taskRefs: string[] = [];
 		for (const [key, field] of Object.entries(schema.fields)) {
@@ -120,6 +123,28 @@ export function validateTaskFiles(backlogDir: string, schema: TaskSchema): Schem
 			const problem =
 				key === "status" && isDraft && value === "Draft" ? null : valueIssue(field.type, value, field.values, users);
 			if (problem) issues.push({ key: `${path}:${key}`, message: problem });
+			if (field.type === "sequence") {
+				const parsed = parseSequenceReference(value, field);
+				if (!parsed) issues.push({ key: `${path}:${key}`, message: "Malformed sequence reference" });
+				else {
+					const identity = `${key}:${value}`;
+					const first = seenSequences.get(identity);
+					if (first)
+						issues.push({
+							key: `${path}:${key}`,
+							message: `Duplicate sequence reference ${value}; first used in ${first}`,
+						});
+					else seenSequences.set(identity, path);
+					const scopedValue = field.scope ? data[field.scope] : undefined;
+					if (field.prefixes?.[String(scopedValue ?? "")] !== parsed.prefix)
+						issues.push({
+							key: `${path}:${key}`,
+							message: `Reference prefix ${parsed.prefix} no longer matches ${field.scope}=${scopedValue}`,
+							severity: "warning",
+						});
+				}
+				if (isDraft) issues.push({ key: `${path}:${key}`, message: "Drafts cannot have sequence references" });
+			}
 			const refs =
 				field.type === "task-ref" ? [value] : field.type === "task-ref-list" && Array.isArray(value) ? value : [];
 			for (const ref of refs) {

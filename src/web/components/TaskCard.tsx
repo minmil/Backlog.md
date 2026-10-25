@@ -80,7 +80,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
     return supplied?.[key] ?? registry.getField(task, key);
   };
-  const badgeFields = cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool'));
+  const badgeFields = [...new Set([...cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool')), ...Object.keys(schema.fields).filter((key) => schema.fields[key]?.type === 'sequence' && !schema.fields[key]?.hidden)])];
   const listFields = cardFields.filter((key) => ['multi-enum', 'string-list', 'task-ref-list'].includes(schema.fields[key]?.type ?? ''));
   const footerFields = cardFields.filter((key) => !badgeFields.includes(key) && key !== 'priority' && !listFields.includes(key));
   const adjacentDateFields = footerFields.filter((key) => key === 'created_date' || key === 'updated_date');

@@ -29,6 +29,7 @@ import {
 	setMarkdown,
 } from "../markdown/sections.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
+import { nextSequenceReference, parseSequenceReference } from "../schema/sequence.ts";
 import {
 	type AcceptanceCriterion,
 	type BacklogConfig,
@@ -2015,6 +2016,56 @@ export class Core {
 		}
 	}
 
+	/** Called while the allocator lock is held for a task write. */
+	private async prepareSequenceFields(task: Task, original?: Task | null): Promise<void> {
+		const schema = this.fs.taskSchema;
+		const sequences = Object.entries(schema.fields).filter(([, field]) => field.type === "sequence");
+		if (!sequences.length) return;
+		const registry = new FieldRegistry(schema);
+		const corpus = (await Promise.all([this.fs.listTasks(), this.fs.listDrafts(), this.fs.listArchivedTasks()])).flat();
+		for (const [key, definition] of sequences) {
+			const previous = original ? registry.getField(original, key) : undefined;
+			const current = registry.getField(task, key);
+			if (previous !== undefined && previous !== current)
+				throw new Error(`Task field "${key}" is a permanent reference and cannot be reassigned`);
+			if (task.status === "Draft") {
+				if (current !== undefined)
+					throw new Error(`Drafts cannot have a ${key} reference; it is assigned on promotion`);
+				continue;
+			}
+			const scope = definition.scope ? registry.getField(task, definition.scope) : undefined;
+			const prefix = typeof scope === "string" ? definition.prefixes?.[scope] : undefined;
+			if (current !== undefined) {
+				const parsed = parseSequenceReference(current, definition);
+				if (!parsed) throw new Error(`Invalid task field "${key}": expected a configured PREFIX-number reference`);
+				if (previous === undefined) {
+					if (!prefix || parsed.prefix !== prefix)
+						throw new Error(
+							`Task field "${key}" must use the prefix for ${definition.scope}: ${prefix ?? "set the scope first"}`,
+						);
+					if (corpus.some((record) => registry.getField(record, key) === current))
+						throw new Error(`Task field "${key}" value ${current} is already used`);
+				}
+				continue;
+			}
+			if (!prefix || (definition.assign_when && !registry.conditionMatches(task, definition.assign_when))) continue;
+			let highest = 0n;
+			for (const record of corpus) {
+				const parsed = parseSequenceReference(registry.getField(record, key), definition);
+				if (parsed?.prefix === prefix && parsed.number > highest) highest = parsed.number;
+			}
+			Object.assign(task, registry.setField(task, key, nextSequenceReference(prefix, highest, definition.pad ?? 1)));
+		}
+	}
+
+	private assertCanDemoteSequence(task: Task): void {
+		const registry = new FieldRegistry(this.fs.taskSchema);
+		for (const [key, field] of Object.entries(this.fs.taskSchema.fields)) {
+			if (field.type === "sequence" && registry.getField(task, key) !== undefined)
+				throw new Error(`Task field "${key}" is a permanent reference; referenced tasks cannot become drafts`);
+		}
+	}
+
 	private async writePreparedTask(task: Task, isDraft: boolean): Promise<string> {
 		if (isDraft) {
 			task.status = "Draft";
@@ -2257,6 +2308,7 @@ export class Core {
 					acceptanceCriteriaItems: createdSections.sections.acceptance as AcceptanceCriterion[],
 				}),
 			};
+			await this.prepareSequenceFields(task);
 			const trackedLogId = Object.entries(taskSchema.sections).find(([, section]) => section.kind === "log")?.[0];
 			if (trackedLogId) {
 				for (const [key, definition] of Object.entries(taskSchema.fields)) {
@@ -2335,7 +2387,10 @@ export class Core {
 		}
 
 		const autoCommitEnabled = await this.shouldAutoCommit(autoCommit);
-		const filepath = await this.writePreparedTask(task, false);
+		const filepath = await this.withCreateLock(async () => {
+			await this.prepareSequenceFields(task);
+			return await this.writePreparedTask(task, false);
+		});
 		await this.finalizeCreatedTask(task, filepath, false, autoCommitEnabled);
 
 		return filepath;
@@ -2364,22 +2419,23 @@ export class Core {
 	 */
 	async updateTask(task: Task, autoCommit?: boolean): Promise<string> {
 		normalizeAssignee(task);
-
-		// The stored record also tells whether the status changed, for the status callback.
-		const originalTask = await this.loadStoredTaskForWrite(task.id);
-		const oldStatus = originalTask?.status ?? "";
-		const newStatus = task.status ?? "";
-		const statusChanged = oldStatus !== newStatus;
-
-		if (hasUpdatedDateRelevantChanges(originalTask, task)) {
-			task.updatedDate = formatUtcTimestamp();
-		} else if (originalTask?.updatedDate) {
-			task.updatedDate = originalTask.updatedDate;
-		} else {
-			delete task.updatedDate;
-		}
-
-		const filePath = await this.fs.saveTask(task);
+		const write = async () => {
+			// The stored record also tells whether the status changed, for the status callback.
+			const originalTask = await this.loadStoredTaskForWrite(task.id);
+			await this.prepareSequenceFields(task, originalTask);
+			const oldStatus = originalTask?.status ?? "";
+			const newStatus = task.status ?? "";
+			if (hasUpdatedDateRelevantChanges(originalTask, task)) {
+				task.updatedDate = formatUtcTimestamp();
+			} else if (originalTask?.updatedDate) {
+				task.updatedDate = originalTask.updatedDate;
+			} else {
+				delete task.updatedDate;
+			}
+			return { filePath: await this.fs.saveTask(task), oldStatus, newStatus };
+		};
+		const hasSequence = Object.values(this.fs.taskSchema.fields).some((field) => field.type === "sequence");
+		const { filePath, oldStatus, newStatus } = hasSequence ? await this.withCreateLock(write) : await write();
 		// Keep any in-process ContentStore in sync for immediate UI/search freshness.
 
 		if (await this.shouldAutoCommit(autoCommit)) {
@@ -2387,7 +2443,7 @@ export class Core {
 		}
 
 		// Fire status change callback if status changed
-		if (statusChanged) {
+		if (oldStatus !== newStatus) {
 			await this.executeStatusChangeCallback(task, oldStatus, newStatus);
 		}
 
@@ -2869,6 +2925,7 @@ export class Core {
 		// Drafts always keep status Draft
 		task.status = "Draft";
 		normalizeAssignee(task);
+		await this.prepareSequenceFields(task);
 		task.updatedDate = formatUtcTimestamp();
 
 		const previousPath = task.filePath;
@@ -2997,6 +3054,7 @@ export class Core {
 				};
 
 				normalizeAssignee(promotedTask);
+				await this.prepareSequenceFields(promotedTask);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(current.filePath).text());
 
 				if (draftPath) {
@@ -3039,6 +3097,7 @@ export class Core {
 			if (!current) {
 				throw new Error(`Task not found: ${task.id}`);
 			}
+			this.assertCanDemoteSequence(current);
 
 			const { mutated } = await this.applyTaskUpdateInput(current, { ...input, status: undefined }, async (status) => {
 				if (status.trim().toLowerCase() === "draft") {
@@ -3925,6 +3984,7 @@ export class Core {
 				};
 
 				normalizeAssignee(promotedTask);
+				await this.prepareSequenceFields(promotedTask);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(sourcePath).text());
 				await unlink(sourcePath);
 
@@ -3951,6 +4011,7 @@ export class Core {
 	async demoteTask(taskId: string, autoCommit?: boolean, options: TaskReadOptions = {}): Promise<VacatedTaskResult> {
 		const task = await this.loadTaskForMutation(taskId, options);
 		if (!task) return { success: false, cleanedTaskIds: [] };
+		this.assertCanDemoteSequence(task);
 		// Direct demotion is a read-modify-write too. Hold the task lock across the
 		// filesystem read and move so an in-flight task update cannot recreate the
 		// active file after this operation has written the draft. The record demoted here also

@@ -1219,8 +1219,9 @@ schemaCommand
 		const schema = loadTaskSchema(filesystem.backlogDir, filesystem.configFilePath);
 		const issues = validateTaskFiles(filesystem.backlogDir, schema);
 		if (issues.length) {
-			for (const issue of issues) console.error(`${issue.key}: ${issue.message}`);
-			process.exitCode = 1;
+			for (const issue of issues)
+				console.error(`${issue.severity === "warning" ? "Warning: " : ""}${issue.key}: ${issue.message}`);
+			if (issues.some((issue) => issue.severity !== "warning")) process.exitCode = 1;
 			return;
 		}
 		console.log("Task schema and stored task fields are valid.");

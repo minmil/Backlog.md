@@ -216,7 +216,9 @@ function validateCondition(
 				field.type === "bool"
 					? typeof item === "boolean"
 					: typeof item === "string" &&
-						(field.type === "user-list" ? users.some((user) => user.handle === item) : field.values?.includes(item));
+						(field.type === "user-list"
+							? USER_HANDLE.test(item) && (users.length === 0 || users.some((user) => user.handle === item))
+							: field.values?.includes(item));
 			if (!valid) issues.push({ key: `${path}.${key}`, message: `Invalid condition value: ${String(item)}` });
 		}
 	}
@@ -313,6 +315,11 @@ function validateFields(value: unknown, users: SchemaUser[], issues: SchemaIssue
 			validateCondition(field.overdue_when, `fields.${key}.overdue_when`, fields, users, issues);
 		}
 		if (field.type === "sequence") {
+			if (field.default !== undefined)
+				issues.push({
+					key: `fields.${key}.default`,
+					message: "Sequence references are assigned on save and cannot have a default",
+				});
 			const scope = typeof field.scope === "string" ? fields[field.scope] : undefined;
 			if (!scope || scope.type !== "enum")
 				issues.push({ key: `fields.${key}.scope`, message: "Scope must name an enum field" });
