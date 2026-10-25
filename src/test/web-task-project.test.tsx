@@ -4,12 +4,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { BrowserRouter } from "react-router-dom";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import type { Task } from "../types/index.ts";
 import BoardPage from "../web/components/BoardPage.tsx";
 import TaskCard from "../web/components/TaskCard.tsx";
 import { TaskDetailsModal } from "../web/components/TaskDetailsModal.tsx";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
 import { ThemeProvider } from "../web/contexts/ThemeContext.tsx";
-import { apiClient, type TaskUpdateRequest } from "../web/lib/api.ts";
+import { apiClient, type SchemaTaskWrite } from "../web/lib/api.ts";
 import { setNativeInputValue } from "./react-dom-input.ts";
 
 const createTask = (overrides: Partial<Task> = {}): Task => ({
@@ -25,7 +27,7 @@ const createTask = (overrides: Partial<Task> = {}): Task => ({
 
 const originalFetchStatuses = apiClient.fetchStatuses.bind(apiClient);
 const originalFetchTasks = apiClient.fetchTasks.bind(apiClient);
-const originalUpdateTask = apiClient.updateTask.bind(apiClient);
+const originalPatchSchemaTask = apiClient.patchSchemaTask.bind(apiClient);
 let activeRoot: Root | null = null;
 
 function setupDom(url = "http://localhost"): HTMLElement {
@@ -98,14 +100,6 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 	}
 }
 
-const getSelectByFirstOption = (container: HTMLElement, firstOptionText: string): HTMLSelectElement => {
-	const select = Array.from(container.querySelectorAll("select")).find(
-		(element) => element.options[0]?.textContent === firstOptionText,
-	);
-	expect(select).toBeTruthy();
-	return select as HTMLSelectElement;
-};
-
 afterEach(() => {
 	if (activeRoot) {
 		act(() => activeRoot?.unmount());
@@ -113,7 +107,7 @@ afterEach(() => {
 	}
 	apiClient.fetchStatuses = originalFetchStatuses;
 	apiClient.fetchTasks = originalFetchTasks;
-	apiClient.updateTask = originalUpdateTask;
+	apiClient.patchSchemaTask = originalPatchSchemaTask;
 });
 
 describe("Web task project UI", () => {
@@ -162,47 +156,49 @@ describe("Web task project UI", () => {
 		expect(projectSelect).toBeUndefined();
 	});
 
-	it("shows a project select with a No Project default and immediately saves changes", async () => {
+	it("shows configured project values and saves through the schema PATCH", async () => {
 		const container = setupDom();
 		const task = createTask({ project: undefined });
-		const receivedUpdates: TaskUpdateRequest[] = [];
-		apiClient.updateTask = async (_taskId, updates) => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.project!.values = ["Web", "API"];
+		schema.fields.project!.hidden = false;
+		const receivedUpdates: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_taskId, updates) => {
 			receivedUpdates.push(updates);
-			return { ...task, project: typeof updates.project === "string" && updates.project ? updates.project : undefined };
+			return task;
 		};
 
 		activeRoot = createRoot(container);
 		await act(async () => {
 			activeRoot?.render(
 				<ThemeProvider>
-					<TaskDetailsModal task={task} isOpen onClose={() => {}} availableProjects={["Web", "API"]} />
+					<SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider>
 				</ThemeProvider>,
 			);
 			await Promise.resolve();
 		});
 
-		const projectSelect = getSelectByFirstOption(container, "No Project");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const projectSelect = container.querySelector<HTMLSelectElement>("#schema-field-project");
+		if (!projectSelect) throw new Error("Schema project selector not rendered");
 		expect(Array.from(projectSelect.options).map((option) => option.textContent)).toEqual([
-			"No Project",
+			"No project",
 			"Web",
 			"API",
 		]);
 		expect(projectSelect.value).toBe("");
 
 		await setSelectValue(projectSelect, "Web");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
 		await waitFor(() => receivedUpdates.length === 1);
-		expect(receivedUpdates[0]).toEqual({ project: "Web" });
+		expect(receivedUpdates[0]).toEqual({ fields: { project: "Web" } });
 	});
 
-	// The project select only renders when projects are configured, so an edit-mode Save must
-	// not carry project at all: otherwise saving a task in a repo with no projects: silently
-	// cleared a stored value the form never showed, and a value no longer in the config list
-	// failed the whole save with "Invalid project".
-	it("omits project from an edit-mode save so an unshown value survives", async () => {
+	it("does not write a hidden project on an unchanged edit", async () => {
 		const container = setupDom();
 		const task = createTask({ project: "Retired" });
-		const receivedUpdates: TaskUpdateRequest[] = [];
-		apiClient.updateTask = async (_taskId, updates) => {
+		const receivedUpdates: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_taskId, updates) => {
 			receivedUpdates.push(updates);
 			return task;
 		};
@@ -230,37 +226,38 @@ describe("Web task project UI", () => {
 
 		await clickButton("Edit");
 		await clickButton("Save");
-		await waitFor(() => receivedUpdates.length === 1);
-
-		expect(receivedUpdates[0]).not.toHaveProperty("project");
+		expect(receivedUpdates).toEqual([]);
 	});
 
 	it("creates a task with a configured project", async () => {
 		const container = setupDom();
-		let submitted: Partial<Task> | undefined;
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.project!.values = ["Web", "API"];
+		schema.fields.project!.hidden = false;
+		let submitted: SchemaTaskWrite | undefined;
 		activeRoot = createRoot(container);
 		await act(async () => {
 			activeRoot?.render(
 				<ThemeProvider>
+					<SchemaProvider initialSchema={schema}>
 					<TaskDetailsModal
 						isOpen
 						onClose={() => {}}
 						onSubmit={async (taskData) => {
 							submitted = taskData;
 						}}
-						availableStatuses={["To Do", "In Progress", "Done"]}
-						availableProjects={["Web", "API"]}
 					/>
+					</SchemaProvider>
 				</ThemeProvider>,
 			);
 			await Promise.resolve();
 		});
 
-		const projectSelect = getSelectByFirstOption(container, "No Project");
-		const titleInput = container.querySelector("input[placeholder='Enter task title']") as HTMLInputElement | null;
+		const projectSelect = container.querySelector<HTMLSelectElement>("#schema-field-project");
+		const titleInput = container.querySelector("#schema-field-title") as HTMLInputElement | null;
 		expect(titleInput).toBeTruthy();
 		await setInputValue(titleInput as HTMLInputElement, "API onboarding");
-		await setSelectValue(projectSelect, "API");
+		await setSelectValue(projectSelect as HTMLSelectElement, "API");
 
 		const createButton = Array.from(container.querySelectorAll("button")).find(
 			(button) => button.textContent?.trim() === "Create",
@@ -273,7 +270,7 @@ describe("Web task project UI", () => {
 		await waitFor(() => submitted !== undefined);
 
 		expect(submitted?.title).toBe("API onboarding");
-		expect(submitted?.project).toBe("API");
+		expect(submitted?.fields?.project).toBe("API");
 	});
 });
 
