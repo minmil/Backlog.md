@@ -101,13 +101,13 @@ are found, the commit will be blocked until fixed.
 - **PR titles**: Use `{taskId} - {taskTitle}` (e.g. `BACK-123 - Title of the task`)
 - **Github CLI**: Use `gh` whenever possible for PRs and issues
 
-### Releases
+### Fork releases
 
-1. Merge the reviewed changes after required CI checks pass.
-2. Create and publish a GitHub Release from the merged commit with a new `vMAJOR.MINOR.PATCH` tag.
-3. Monitor the Release workflow until platform packages, the npm launcher, and release assets are published. The workflow prepares the tagged source and bumps `package.json` automatically.
+1. Merge reviewed changes into the fork's `main` after the relevant checks pass.
+2. Create a new annotated `vMAJOR.MINOR.PATCH-cf.N` tag at that commit and push the tag to `origin`.
+3. Verify the Release workflow succeeds and the GitHub Release contains all six standalone executables.
 
-Do not manually bump the root `package.json` version or start a release with a raw tag push.
+The workflow embeds the tag version in each executable. Keep `package.json` at the upstream base version; the release does not rewrite source or tags.
 
 <!-- BACKLOG.MD GUIDELINES START -->
 <CRITICAL_INSTRUCTION>

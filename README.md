@@ -7,20 +7,20 @@
 <p align="center">AI agents write the code. You review the tasks: before, during, and after.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/backlog.md"><img src="https://img.shields.io/npm/v/backlog.md?color=brightgreen" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/backlog.md"><img src="https://img.shields.io/npm/dm/backlog.md" alt="npm downloads"></a>
   <a href="https://github.com/MrLesk/Backlog.md/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MrLesk/Backlog.md" alt="MIT license"></a>
-  <a href="https://github.com/MrLesk/Backlog.md"><img src="https://img.shields.io/github/stars/MrLesk/Backlog.md?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/MrLesk/Backlog.md">Original project</a>
 </p>
 
 <p align="center">
-<code>npm i -g backlog.md</code>
+<a href="https://github.com/minmil/Backlog.md/releases">Download the fork's executable</a>
 </p>
 
 ![Backlog demo GIF using: backlog board](./.github/backlog-v1.40.gif)
 
 
 ---
+
+> **Fork distribution:** This fork's schema-driven tracker is distributed as standalone executables through [GitHub Releases](https://github.com/minmil/Backlog.md/releases). See [INSTALL-FORK.md](INSTALL-FORK.md) for the platform downloads. Existing npm, Bun package, Homebrew, and Nix installation examples in this README describe the upstream project.
 
 > **Backlog.md** turns any folder into a **self‑contained project board**
 > powered by plain Markdown files and a zero‑config CLI.
@@ -75,22 +75,15 @@ Backlog.md itself. The full task ledger lives in this repo's [backlog folder](ba
 
 ## <img src="./.github/5-minute-tour-256.png" alt="Getting started" width="28" height="28" align="center"> Getting started
 
-```bash
-# Install
-npm i -g backlog.md
-# or: bun add -g backlog.md
-# or: brew install backlog-md
-# or: nix run github:MrLesk/Backlog.md
+Download the matching executable from [Releases](https://github.com/minmil/Backlog.md/releases) using [the fork install guide](INSTALL-FORK.md), then initialize your data repository:
 
+```bash
 # Initialize in any Git repo
 backlog init "My Awesome Project"
 
 # Or initialize without Git for local/non-code projects
 backlog init "Personal Planning" --no-git
 ```
-
-> [!TIP]
-> **Trying it without installing?** Use the full package name: `npx backlog.md init "My Project"`, `npx backlog.md board`.
 
 ### Run with Nix
 

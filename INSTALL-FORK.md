@@ -1,18 +1,16 @@
-# Install the custom fields fork
+# Install the fork
 
-This fork builds a standalone `backlog` executable from Bun 1.4.3. Run these commands in the fork checkout on the target machine. The example uses the Linux system CA bundle; on another platform, substitute a trusted PEM bundle.
+After a fork release is published, download the standalone executable for your computer from the fork's GitHub Releases page:
 
-```sh
-CF_CA_DIR=$(mktemp -d)
-node scripts/filter-trusted-cas.cjs /etc/ssl/certs/ca-certificates.crt "$CF_CA_DIR"
-bun install --cafile "$CF_CA_DIR/ca-bundle.crt" --frozen-lockfile --linker=isolated
-BACKLOG_BUILD_VERSION=1.55.1-cf.1 bun run build
-./dist/backlog --version
-./dist/backlog fields --help
-mkdir -p "$HOME/.local/bin"
-install -m 755 dist/backlog "$HOME/.local/bin/backlog"
-```
+| Computer | Release asset |
+| --- | --- |
+| Windows x64 | `backlog-bun-windows-x64.exe` |
+| Windows ARM64 | `backlog-bun-windows-arm64.exe` |
+| Linux x64 / ARM64 | `backlog-bun-linux-x64` / `backlog-bun-linux-arm64` |
+| macOS Intel / Apple silicon | `backlog-bun-darwin-x64` / `backlog-bun-darwin-arm64` |
 
-Ensure `$HOME/.local/bin` is on `PATH`. Then run `backlog --version` and `backlog fields` inside the tracker repository. The executable reads that repository's `<backlog-dir>/fields.yml`; there is no global schema.
+Rename the download to `backlog.exe` on Windows or `backlog` on Linux/macOS. On Linux/macOS, run `chmod +x backlog` after downloading it. Put the executable on your `PATH` or in the directory where you want to run it. The executable contains its runtime, so the computer using it needs no Node.js or Bun installation.
 
-For a machine that already has a filtered CA bundle, skip the first line and pass its path to `bun install --cafile`. See [DEVELOPMENT.md](DEVELOPMENT.md) for the pinned runtime and certificate details.
+Run `backlog --version` to check the download. In a new data repository, run `backlog init` to create the editable `backlog/task-schema.yml` boilerplate and the other Backlog data folders. Existing projects without a schema file use the built-in default schema. A legacy `backlog/fields.yml` is rejected; migrate its definitions into `backlog/task-schema.yml` and remove the old file.
+
+To build from source instead, install Bun, run `bun install --frozen-lockfile`, then `bun run build`. The output is `dist/backlog` (or `dist/backlog.exe` on Windows).

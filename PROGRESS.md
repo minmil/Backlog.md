@@ -1,5 +1,11 @@
 # Schema-driven tracker progress
 
+## Fork release delivery (2026-10-25)
+
+The prototype branches were merged into the fork's `main` at `329a37fa`. The fork's release workflow now runs only for new `vMAJOR.MINOR.PATCH-cf.N` tags, builds six standalone executables, and attaches them to a GitHub Release. The npm publishing, package installation checks, tag rewriting, and `package.json` version-sync jobs were removed. Fork installation and agent release instructions now describe the binary download path. No new tag or GitHub Release has been created for this workflow yet.
+
+Validation: the workflow parses, its six artifact paths produce the expected release names, and the certificate workflow tests pass 3/3. `bun run check`, `bun run check:types`, and a versioned `bun run build` pass. The prior post-merge full suite reported 3,343 pass / 46 skip / 22 fail: 19 documented baseline failures and three upstream Nix tests requiring Node 26.12.1 on this Node 24 host.
+
 ## Task-by-task summary
 
 This is the current state of the schema-driven prototype. The chronological checkpoints and gate details remain below. Implementation followed the owner-directed order **1 → combined 2–3 → 4 → 5 → 6 → 9 → 7 → 8 → reduced 10 → reduced 12 → slim 13**; Task 11 was deferred.
