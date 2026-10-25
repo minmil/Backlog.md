@@ -80,7 +80,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
     const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
     return supplied?.[key] ?? registry.getField(task, key);
   };
-  const badgeFields = cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool'));
+  const badgeFields = [...new Set([...cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool')), ...Object.keys(schema.fields).filter((key) => schema.fields[key]?.type === 'sequence' && !schema.fields[key]?.hidden)])];
   const listFields = cardFields.filter((key) => ['multi-enum', 'string-list', 'task-ref-list'].includes(schema.fields[key]?.type ?? ''));
   const footerFields = cardFields.filter((key) => !badgeFields.includes(key) && key !== 'priority' && !listFields.includes(key));
   const adjacentDateFields = footerFields.filter((key) => key === 'created_date' || key === 'updated_date');
@@ -225,7 +225,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 font-mono transition-colors duration-200">{task.id}</span>
-            {badgeFields.map((key) => <FieldValue key={key} fieldKey={key} value={fieldValue(key)} variant="card" />)}
+            {badgeFields.map((key) => <FieldValue key={key} fieldKey={key} value={fieldValue(key)} variant="card" overdue={task.overdue?.includes(key)} />)}
           </div>
           {(acceptanceCriteriaProgress || priorityValue) && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -244,7 +244,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           {task.title}
         </h4>
 
-        {listFields.map((key) => { const value = fieldValue(key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" /></div> : null; })}
+        {listFields.map((key) => { const value = fieldValue(key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" overdue={task.overdue?.includes(key)} /></div> : null; })}
 
         {/* Footer with dates and assignee */}
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[10px] text-gray-400 dark:text-gray-500 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-600/50 transition-colors duration-200">
@@ -254,13 +254,13 @@ const TaskCard: React.FC<TaskCardProps> = ({
           <span className="flex flex-wrap gap-x-2 gap-y-1">{adjacentDateFields.map((key) => {
             const value = fieldValue(key);
             if (value === undefined || value === null || value === '') return null;
-            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} /></span>;
+            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></span>;
           })}</span>
           {trailingFields.map((key) => {
             const value = fieldValue(key);
             if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
             const label = key === 'created_date' ? '' : key === 'updated_date' ? 'Updated: ' : key === 'due_date' ? 'Due: ' : `${schema.fields[key]?.label ?? key}: `;
-            return <span key={key}>{label}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} /></span>;
+            return <span key={key}>{label}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></span>;
           })}
         </div>
       </div>

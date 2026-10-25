@@ -9,9 +9,10 @@ interface Props {
 	value: RegistryFieldValue | null | undefined;
 	variant: "card" | "cell" | "detail";
 	dateFormat?: string;
+	overdue?: boolean;
 }
 
-export default function FieldValue({ fieldKey, value, variant, dateFormat }: Props): React.ReactElement | null {
+export default function FieldValue({ fieldKey, value, variant, dateFormat, overdue = false }: Props): React.ReactElement | null {
 	const { schema } = useSchema();
 	const definition = schema.fields[fieldKey];
 	if (!definition || value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) {
@@ -22,10 +23,13 @@ export default function FieldValue({ fieldKey, value, variant, dateFormat }: Pro
 		return <span aria-label={value ? "Yes" : "No"}>{value ? "✓" : "–"}</span>;
 	}
 	if (definition.type === "date" || definition.type === "datetime") {
-		return <StoredDate value={String(value)} compact={variant !== "detail" && fieldKey !== "due_date"} dateFormat={dateFormat} />;
+		return <span className={overdue ? "text-red-600 dark:text-red-400" : undefined}><StoredDate value={String(value)} compact={variant !== "detail" && fieldKey !== "due_date"} dateFormat={dateFormat} />{overdue ? <span className="ml-1 text-xs">overdue</span> : null}</span>;
 	}
 	if (definition.type === "enum" && variant === "card") {
 		return <EnumBadge fieldKey={fieldKey} value={String(value)} options={definition.values} />;
+	}
+	if (definition.type === "sequence" && variant === "card") {
+		return <EnumBadge fieldKey={fieldKey} value={String(value)} neutral />;
 	}
 	const displayUser = (handle: string) => schema.users.find((user) => user.handle === handle)?.name ?? handle;
 	const display = (item: string) => definition.type === "user" || definition.type === "user-list" ? displayUser(item) : item;

@@ -4,6 +4,8 @@
 
 Run `backlog schema --json` to inspect field keys, exact values, user handles, and sections. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, `--sort key[:asc|:desc]`, and `--show-fields key1,key2` for declared fields. Copy enum values and user handles exactly. Make writes through the CLI.
 
+When a date field declares `overdue_when`, `task list --overdue <fieldKey>` selects overdue tasks; several `--overdue` flags combine with OR and also work with `--where`.
+
 Use this guide when you are working on an existing Backlog task.
 
 ### Planning Workflow

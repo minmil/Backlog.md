@@ -26,7 +26,7 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 	const errorId = `${inputId}-error`;
 	const current = value ?? "";
 	let control: React.ReactNode;
-	if (field.managed) {
+	if (field.managed || field.type === "sequence") {
 		control = <FieldValue fieldKey={fieldKey} value={value} variant="detail" />;
 	} else if (field.type === "bool") {
 		control = (

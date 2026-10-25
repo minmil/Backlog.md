@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { execFile } = require("node:child_process");
+const { execFile, execFileSync } = require("node:child_process");
 const { X509Certificate } = require("node:crypto");
 const { mkdtemp, mkdir, readFile, writeFile, rm } = require("node:fs/promises");
 const https = require("node:https");
@@ -8,6 +8,8 @@ const path = require("node:path");
 const { it } = require("node:test");
 const { promisify } = require("node:util");
 const execute = promisify(execFile);
+// This suite exercises Node's native TLS and npm behavior even when Bun discovers the .cjs test.
+const nodeExecutable = execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim();
 const script = path.join(__dirname, "update-nix.cjs");
 const fixture = path.join(__dirname, "../src/test/fixtures/certificate-trust");
 
@@ -17,7 +19,7 @@ async function temporary(t) {
 	return root;
 }
 async function run(root, env = {}, args = [script]) {
-	return execute(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, timeout: 15000 }).then(
+	return execute(nodeExecutable, args, { cwd: root, env: { ...process.env, ...env }, timeout: 15000 }).then(
 		(value) => ({ ...value, code: 0 }),
 		(error) => error,
 	);
@@ -25,7 +27,7 @@ async function run(root, env = {}, args = [script]) {
 async function localGenerator(root, version) {
 	await writeFile(
 		path.join(root, "bun2nix"),
-		`#!${process.execPath}\nconst fs=require('node:fs'); if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else fs.writeFileSync('generated.json',JSON.stringify({args:process.argv.slice(2),bypass:process.env.GIT_SSL_NO_VERIFY}));`,
+		`#!${nodeExecutable}\nconst fs=require('node:fs'); if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else fs.writeFileSync('generated.json',JSON.stringify({args:process.argv.slice(2),bypass:process.env.GIT_SSL_NO_VERIFY}));`,
 		{ mode: 0o755 },
 	);
 }
@@ -70,7 +72,7 @@ it("runs pinned npm resolution on the same Node with strict TLS while retaining 
 	const root = await temporary(t);
 	const globalRoot = path.join(root, "modules");
 	await mkdir(path.join(globalRoot, "npm/bin"), { recursive: true });
-	await writeFile(path.join(root, "npm"), `#!${process.execPath}\nconsole.log(${JSON.stringify(globalRoot)});`, {
+	await writeFile(path.join(root, "npm"), `#!${nodeExecutable}\nconsole.log(${JSON.stringify(globalRoot)});`, {
 		mode: 0o755,
 	});
 	await writeFile(
@@ -88,7 +90,7 @@ it("runs pinned npm resolution on the same Node with strict TLS while retaining 
 	});
 	assert.equal(result.code, 0, result.stderr);
 	assert.deepEqual(JSON.parse(await readFile(path.join(root, "npm.json"), "utf8")), {
-		node: process.execPath,
+		node: nodeExecutable,
 		args: [
 			"exec",
 			"--yes",

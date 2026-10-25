@@ -20,6 +20,8 @@ For scripts, `task list`, `task view`, `task <id>`, `draft list`, `decision list
 
 Run `backlog schema --json` first in a project to read its field keys, exact enum values, configured user handles, and sections. Use `--field key=value` for any editable field, `task list --where 'key=value'` to filter, `--sort key[:asc|:desc]` to order, and `--show-fields key1,key2` to add fields to plain list rows. Shortcut flags such as `--priority` use the same field validation. Copy enum values and user handles exactly from the schema. Use `--section`, `--check`, and `task log` for sections; make task changes through the CLI.
 
+For a date field with an `overdue_when` rule, use `backlog task list --overdue due_date --json`; repeat `--overdue` to include tasks overdue on any named date field.
+
 ### Required Guides
 
 Read the matching guide before taking these actions; this overview does not replace it:

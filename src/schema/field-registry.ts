@@ -1,6 +1,7 @@
 import { taskFrontmatter } from "../markdown/task-frontmatter.ts";
 import type { Task } from "../types/index.ts";
-import type { FieldType, SchemaField, TaskSchema } from "./types.ts";
+import { parseSequenceReference } from "./sequence.ts";
+import type { FieldType, SchemaCondition, SchemaField, TaskSchema } from "./types.ts";
 
 export type FieldValue = string | number | boolean | string[];
 export type FieldOperator = "=" | "!=" | "<" | "<=" | ">" | ">=";
@@ -50,6 +51,7 @@ const FILTERABLE_TYPES = new Set<FieldType>([
 	"user-list",
 	"string-list",
 	"milestone-ref",
+	"sequence",
 ]);
 const USER_HANDLE = /^@[A-Za-z0-9._-]+$/;
 
@@ -158,6 +160,10 @@ export class FieldRegistry {
 			case "id":
 			case "text":
 				return typeof raw === "string" ? raw : fail("expected text");
+			case "sequence":
+				return parseSequenceReference(raw, field)
+					? (raw as string)
+					: fail("expected a configured PREFIX-number reference with canonical padding");
 			case "bool": {
 				if (typeof raw === "boolean") return raw;
 				const value = String(raw).trim().toLowerCase();
@@ -200,6 +206,11 @@ export class FieldRegistry {
 	setField(task: Task, key: string, value: unknown, options: { allowManaged?: boolean } = {}): Task {
 		const field = this.definition(key);
 		if (field.managed && !options.allowManaged) throw new Error(`Task field "${key}" is managed by Backlog`);
+		if (field.type === "sequence") {
+			const existing = this.getField(task, key);
+			if (existing !== undefined && existing !== value)
+				throw new Error(`Task field "${key}" is a permanent reference and cannot be reassigned`);
+		}
 		const normalized =
 			key === "status" && /^DRAFT-/i.test(task.id) && typeof value === "string" && value.toLowerCase() === "draft"
 				? "Draft"
@@ -218,6 +229,8 @@ export class FieldRegistry {
 
 	clearField(task: Task, key: string): Task {
 		const field = this.definition(key);
+		if (field.type === "sequence")
+			throw new Error(`Task field "${key}" is a permanent reference and cannot be cleared`);
 		if (field.managed || field.required) throw new Error(`Task field "${key}" cannot be cleared`);
 		const next: Task = { ...task };
 		if (field.core)
@@ -282,12 +295,45 @@ export class FieldRegistry {
 		}
 	}
 
+	conditionMatches(task: Task, conditions: SchemaCondition): boolean {
+		return Object.entries(conditions).every(([key, raw]) => {
+			const actual = this.getField(task, key);
+			const allowed = Array.isArray(raw) ? raw : [raw];
+			return Array.isArray(actual)
+				? actual.some((value) => allowed.includes(value))
+				: actual !== undefined && allowed.includes(actual as string | boolean);
+		});
+	}
+
+	isOverdue(task: Task, fieldKey: string, today = new Date()): boolean {
+		const field = this.definition(fieldKey);
+		if (field.type !== "date" || !field.overdue_when) return false;
+		const value = this.getField(task, fieldKey);
+		return (
+			typeof value === "string" &&
+			value < relativeDay("today", today) &&
+			this.conditionMatches(task, field.overdue_when)
+		);
+	}
+
+	overdueFields(task: Task, today = new Date()): string[] {
+		return Object.keys(this.schema.fields).filter((key) => this.isOverdue(task, key, today));
+	}
+
 	compare(key: string, a: FieldValue | undefined, b: FieldValue | undefined, enumOrder?: readonly string[]): number {
 		const field = this.definition(key);
 		if (a === undefined) return b === undefined ? 0 : 1;
 		if (b === undefined) return -1;
 		if (key === "id" && typeof a === "string" && typeof b === "string")
 			return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+		if (field.type === "sequence" && typeof a === "string" && typeof b === "string") {
+			const left = parseSequenceReference(a, field);
+			const right = parseSequenceReference(b, field);
+			if (left && right) {
+				const prefixOrder = left.prefix.localeCompare(right.prefix);
+				return prefixOrder || (left.number < right.number ? -1 : left.number > right.number ? 1 : 0);
+			}
+		}
 		if (field.type === "enum" && typeof a === "string" && typeof b === "string") {
 			const order = (value: string) => {
 				const index = (enumOrder ?? field.values ?? []).indexOf(value);

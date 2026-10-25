@@ -13,10 +13,12 @@ export const FIELD_TYPES = [
 	"task-ref-list",
 	"milestone-ref",
 	"number",
+	"sequence",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 export type SectionKind = "markdown" | "checklist" | "log";
+export type SchemaCondition = Record<string, string | boolean | Array<string | boolean>>;
 
 export interface SchemaUser {
 	handle: string;
@@ -37,6 +39,11 @@ export interface SchemaField {
 	lang?: string;
 	translation_of?: string;
 	track_changes?: boolean;
+	overdue_when?: SchemaCondition;
+	scope?: string;
+	prefixes?: Record<string, string>;
+	pad?: number;
+	assign_when?: SchemaCondition;
 }
 
 export interface SchemaSection {
@@ -63,6 +70,7 @@ export interface TaskSchema {
 export interface SchemaIssue {
 	key: string;
 	message: string;
+	severity?: "warning";
 }
 
 export class TaskSchemaError extends Error {

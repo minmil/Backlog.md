@@ -23,10 +23,31 @@ describe("schema task API", () => {
 		await updateTestTaskSchema(core.filesystem, (schema) => {
 			schema.users = [{ handle: "@alice", name: "Alice", default: true }];
 			schema.fields.side = { type: "enum", values: ["Buyer", "Seller"], label: "Side" };
+			schema.fields.due_date = { ...schema.fields.due_date!, overdue_when: { status: ["To Do", "In Progress"] } };
 		});
 		server = new BacklogServer(directory);
 		await server.start(0, false);
 		baseUrl = `http://127.0.0.1:${server.getPort()}`;
+	});
+
+	it("returns overdue arrays and filters the task API by an overdue date field", async () => {
+		const yesterday = new Date();
+		yesterday.setDate(yesterday.getDate() - 1);
+		const day = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+		const create = (title: string, status: string) =>
+			fetch(`${baseUrl}/api/tasks`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ title, fields: { status, due_date: day } }),
+			});
+		expect((await create("Late", "To Do")).status).toBe(201);
+		expect((await create("Finished", "Done")).status).toBe(201);
+		const all = await (await fetch(`${baseUrl}/api/tasks`)).json();
+		expect(all.find((task: { title: string }) => task.title === "Late").overdue).toEqual(["due_date"]);
+		expect(all.find((task: { title: string }) => task.title === "Finished").overdue).toEqual([]);
+		const overdue = await (await fetch(`${baseUrl}/api/tasks?overdue=due_date`)).json();
+		expect(overdue.map((task: { title: string }) => task.title)).toEqual(["Late"]);
+		expect((await fetch(`${baseUrl}/api/tasks?overdue=unknown`)).status).toBe(400);
 	});
 
 	afterEach(async () => {
