@@ -3,8 +3,11 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import type { TaskSchema } from "../schema/types.ts";
 import type { Task } from "../types/index.ts";
 import BoardPage from "../web/components/BoardPage.tsx";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
 import { apiClient } from "../web/lib/api.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
 
@@ -100,6 +103,7 @@ const renderBoardPage = (
 		availableLabels?: string[];
 		availablePriorities?: string[];
 		availableTypes?: string[];
+		schema?: TaskSchema;
 		dateFormat?: string;
 		onRefreshData?: () => Promise<void>;
 		onTasksUpdated?: (tasks: Task[], requestTask: Task) => void;
@@ -110,10 +114,14 @@ const renderBoardPage = (
 	expect(container).toBeTruthy();
 	const renderedTasks = options.tasks ?? tasks;
 	const renderedStatuses = options.statuses ?? ["To Do", "In Progress", "Done"];
+	const schema = structuredClone(options.schema ?? getDefaultTaskSchema());
+	if (options.availablePriorities) schema.fields.priority!.values = options.availablePriorities;
+	if (options.availableTypes) schema.fields.type!.values = options.availableTypes;
 	activeRoot = createRoot(container as HTMLElement);
 	act(() => {
 		activeRoot?.render(
 			<BrowserRouter>
+				<SchemaProvider initialSchema={schema}>
 				<BoardPage
 					tasks={renderedTasks}
 					statuses={renderedStatuses}
@@ -130,6 +138,7 @@ const renderBoardPage = (
 					onRefreshData={options.onRefreshData}
 					onTasksUpdated={options.onTasksUpdated}
 				/>
+				</SchemaProvider>
 			</BrowserRouter>,
 		);
 	});
@@ -265,6 +274,35 @@ afterEach(() => {
 });
 
 describe("Web board filters", () => {
+	it("builds a custom enum filter from the schema and persists its field key in the URL", async () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.side = { type: "enum", label: "Side", values: ["Buyer", "Seller"] };
+		schema.ui.board.filters = ["side"];
+		const container = renderBoardPage(undefined, { schema, tasks: [
+			createTask({ id: "task-301", title: "Buyer review", fieldValues: { side: "Buyer" } }),
+			createTask({ id: "task-302", title: "Seller review", fieldValues: { side: "Seller" } }),
+		] });
+		const select = container.querySelector<HTMLSelectElement>('select[aria-label="Filter board by side"]');
+		expect(select).toBeTruthy();
+		expect(container.querySelector('select[aria-label="Filter board by priority"]')).toBeNull();
+		await setSelectValue(select as HTMLSelectElement, "Buyer");
+		expect(new URLSearchParams(window.location.search).get("side")).toBe("Buyer");
+		expect(container.textContent).toContain("Buyer review");
+		expect(container.textContent).not.toContain("Seller review");
+	});
+
+	it("canonicalizes a custom enum URL filter through the schema", async () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.side = { type: "enum", label: "Side", values: ["Buyer", "Seller"] };
+		schema.ui.board.filters = ["side"];
+		const container = renderBoardPage("http://localhost/board?side=buyer", { schema, tasks: [
+			createTask({ id: "task-301", title: "Buyer review", fieldValues: { side: "Buyer" } }),
+			createTask({ id: "task-302", title: "Seller review", fieldValues: { side: "Seller" } }),
+		] });
+		await waitFor(() => new URLSearchParams(window.location.search).get("side") === "Buyer");
+		expect(container.textContent).toContain("Buyer review");
+		expect(container.textContent).not.toContain("Seller review");
+	});
 	// The cleanup preview renders stored timestamps in the viewer's timezone, so pin one.
 	pinTimeZone("Asia/Tokyo");
 
@@ -328,11 +366,11 @@ describe("Web board filters", () => {
 
 		await clickElement(getBoardLabelsButton(container));
 		await toggleCheckbox(getBoardLabelCheckbox(container, "bug"));
-		expect(new URLSearchParams(window.location.search).getAll("label")).toEqual(["bug"]);
+		expect(new URLSearchParams(window.location.search).get("labels")).toBe("bug");
 		expectVisibleTasks(container, ["Fix login bug"]);
 
 		await toggleCheckbox(getBoardLabelCheckbox(container, "enhancement"));
-		expect(new URLSearchParams(window.location.search).getAll("label")).toEqual(["bug", "enhancement"]);
+		expect(new URLSearchParams(window.location.search).get("labels")).toBe("bug,enhancement");
 		expect(getBoardLabelsButton(container).textContent).toContain("2 selected");
 		expectVisibleTasks(container, ["Fix login bug", "Improve board"]);
 
@@ -369,9 +407,9 @@ describe("Web board filters", () => {
 			"Very Low",
 		]);
 
-		await setSelectValue(prioritySelect, "very high");
+		await setSelectValue(prioritySelect, "Very High");
 		const text = container.textContent ?? "";
-		expect(new URLSearchParams(window.location.search).get("priority")).toBe("very high");
+		expect(new URLSearchParams(window.location.search).get("priority")).toBe("Very High");
 		expect(text).toContain("Escalate production incident");
 		expect(text).toContain("Very High");
 		expect(text).not.toContain("Fix login bug");
@@ -427,9 +465,9 @@ describe("Web board filters", () => {
 			availablePriorities: ["Very High", "High", "Medium", "Low"],
 		});
 
-		await waitFor(() => new URLSearchParams(window.location.search).get("priority") === "very high");
+		await waitFor(() => new URLSearchParams(window.location.search).get("priority") === "Very High");
 
-		expect(getSelectByFirstOption(container, "All priorities").value).toBe("very high");
+		expect(getSelectByFirstOption(container, "All priorities").value).toBe("Very High");
 		expect(container.textContent).toContain("Escalate production incident");
 		expect(container.textContent).not.toContain("Fix login bug");
 	});
@@ -451,7 +489,7 @@ describe("Web board filters", () => {
 		await clickElement(getBoardLabelsButton(container));
 		await toggleCheckbox(getBoardLabelCheckbox(container, "Bug"));
 
-		expect(new URLSearchParams(window.location.search).getAll("label")).toEqual(["Bug"]);
+		expect(new URLSearchParams(window.location.search).get("labels")).toBe("Bug");
 		expect(getBoardLabelsButton(container).textContent).toContain("Bug");
 		expectVisibleTasks(container, ["Fix login bug", "Triage unassigned issue"]);
 	});

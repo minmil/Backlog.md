@@ -291,10 +291,18 @@ describe("Web board project filter", () => {
 
 	const renderBoardPage = (url: string | undefined, availableProjects: string[] | undefined): HTMLElement => {
 		const container = setupDom(url ?? "http://localhost/board");
+		const schema = structuredClone(getDefaultTaskSchema());
+		if (availableProjects?.length) {
+			schema.fields.project!.values = availableProjects;
+			schema.fields.project!.hidden = false;
+			schema.ui.board.filters.push("project");
+			schema.ui.board.card.push("project");
+		}
 		activeRoot = createRoot(container);
 		act(() => {
 			activeRoot?.render(
 				<BrowserRouter>
+					<SchemaProvider initialSchema={schema}>
 					<BoardPage
 						tasks={tasks}
 						statuses={["To Do", "In Progress", "Done"]}
@@ -307,6 +315,7 @@ describe("Web board project filter", () => {
 						onNewTask={() => {}}
 						availableProjects={availableProjects}
 					/>
+					</SchemaProvider>
 				</BrowserRouter>,
 			);
 		});

@@ -13,6 +13,9 @@ import TaskColumn from './TaskColumn';
 import { BoardLoadingSkeleton } from './BoardLoadingSkeleton';
 import CleanupModal from './CleanupModal';
 import LabelFilterDropdown from './LabelFilterDropdown';
+import FieldFilter from './schema/FieldFilter.tsx';
+import { useSchema } from './schema/SchemaProvider.tsx';
+import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import { SuccessToast } from './SuccessToast';
 
 interface BoardProps {
@@ -42,6 +45,9 @@ interface BoardProps {
   filterProject?: string;
   availableProjects?: string[];
   onFiltersChange?: (filters: { assignee: string; labels: string[]; priority: string; taskType: string; project: string }) => void;
+  schemaFilters?: Record<string, RegistryFieldValue | null>;
+  onSchemaFilterChange?: (key: string, value: RegistryFieldValue | null) => void;
+  onSchemaFiltersClear?: () => void;
   hideEmptyColumns?: boolean;
   dateFormat?: string;
 }
@@ -78,9 +84,14 @@ const Board: React.FC<BoardProps> = ({
   filterProject = '',
   availableProjects,
   onFiltersChange,
+  schemaFilters,
+  onSchemaFilterChange,
+  onSchemaFiltersClear,
   hideEmptyColumns = false,
   dateFormat,
 }) => {
+  const { schema, registry } = useSchema();
+  const schemaFilterKeys = schema.ui.board.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
@@ -260,7 +271,7 @@ const Board: React.FC<BoardProps> = ({
     [filterLabels]
   );
 
-  const hasActiveFilters =
+  const hasActiveFilters = schemaFilters ? Object.values(schemaFilters).some((value) => value !== null && value !== '' && (!Array.isArray(value) || value.length > 0)) :
     filterAssignee !== '' ||
     normalizedFilterLabels.length > 0 ||
     filterPriority !== '' ||
@@ -272,6 +283,20 @@ const Board: React.FC<BoardProps> = ({
     let result = tasks;
     if (milestoneFilter) {
       result = result.filter(task => canonicalizeMilestone(task.milestone) === canonicalMilestoneFilter);
+    }
+    if (schemaFilters) {
+      for (const [key, wanted] of Object.entries(schemaFilters)) {
+        if (wanted === null || wanted === '' || (Array.isArray(wanted) && wanted.length === 0)) continue;
+        result = result.filter((task) => {
+          const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
+          const actual = supplied?.[key] ?? registry.getField(task, key);
+          if (wanted === '__unassigned__') return !Array.isArray(actual) || actual.length === 0;
+          if (Array.isArray(wanted)) return Array.isArray(actual) && wanted.some((item) => actual.some((entry) => entry.toLowerCase() === item.toLowerCase()));
+          if (Array.isArray(actual)) return actual.some((item) => item.toLowerCase() === String(wanted).toLowerCase());
+          return String(actual ?? '').toLowerCase() === String(wanted).toLowerCase();
+        });
+      }
+      return result;
     }
     if (filterAssignee === '__unassigned__') {
       result = result.filter(task => !task.assignee || task.assignee.length === 0 || task.assignee.every(a => !a.trim()));
@@ -293,7 +318,7 @@ const Board: React.FC<BoardProps> = ({
       result = result.filter(task => matchesProjectFilter(task.project, filterProject));
     }
     return result;
-  }, [tasks, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, filterAssignee, normalizedFilterLabels, filterPriority, filterType, filterProject]);
+  }, [tasks, milestoneFilter, canonicalMilestoneFilter, milestoneAliasToCanonical, filterAssignee, normalizedFilterLabels, filterPriority, filterType, filterProject, schemaFilters, registry]);
 
   // Handle highlighting a task (opening its edit popup)
   useEffect(() => {
@@ -739,7 +764,10 @@ const Board: React.FC<BoardProps> = ({
                 Milestone
               </button>
             </div>
-            {onFiltersChange && (
+            {onSchemaFilterChange && schemaFilters ? <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">
+              {schemaFilterKeys.map((key) => <FieldFilter key={key} fieldKey={key} value={schemaFilters[key]} onChange={(value) => onSchemaFilterChange(key, value)} options={key === 'assignee' ? uniqueAssignees : key === 'labels' ? uniqueLabels : undefined} />)}
+              {hasActiveFilters && <button type="button" onClick={onSchemaFiltersClear} className={BOARD_FILTER_BUTTON_CLASS}>Clear filters</button>}
+            </div> : onFiltersChange && (
               <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">
                 <select
                   aria-label="Filter board by assignee"
