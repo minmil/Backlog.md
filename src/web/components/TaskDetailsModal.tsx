@@ -124,6 +124,17 @@ const preserveDirtyRefreshValue = <T,>(
   isEqual: (first: T, second: T) => boolean = Object.is,
 ): T => (isEqual(current, previous) ? next : current);
 
+const preserveDirtyRecord = <T,>(current: Record<string, T>, previous: Record<string, T>, next: Record<string, T>): Record<string, T> => {
+  const merged: Record<string, T> = { ...next };
+  for (const key of new Set([...Object.keys(current), ...Object.keys(previous)])) {
+    if (areJsonEqual(current[key], previous[key])) continue;
+    const value = current[key];
+    if (value === undefined) delete merged[key];
+    else merged[key] = value;
+  }
+  return merged;
+};
+
 const buildTaskDetailsFormState = ({
   task,
   isCreateMode,
@@ -403,9 +414,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
       (modeRef.current === "edit" || preserveEditModeAfterCommentRefresh.current);
 
     if (sameOpenModalRefresh && previousFormState) {
-      setSchemaFields((current) => preserveDirtyRefreshValue(current, schemaFieldBaselineRef.current, schemaFieldBaseline, areJsonEqual));
+      const previousFields = schemaFieldBaselineRef.current;
+      const previousSections = schemaSectionBaselineRef.current;
+      setSchemaFields((current) => preserveDirtyRecord(current, previousFields, schemaFieldBaseline));
       schemaFieldBaselineRef.current = schemaFieldBaseline;
-      setSchemaSections((current) => preserveDirtyRefreshValue(current, schemaSectionBaselineRef.current, schemaSectionBaseline.sections, areJsonEqual));
+      setSchemaSections((current) => preserveDirtyRecord(current, previousSections, schemaSectionBaseline.sections));
       schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
       setTitle((current) => preserveDirtyRefreshValue(current, previousFormState.title, nextFormState.title));
       setDescription((current) =>

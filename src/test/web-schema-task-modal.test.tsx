@@ -122,6 +122,23 @@ describe("schema task modal", () => {
 		expect(patches).toEqual([{ fields: { side: "Seller" } }]);
 	});
 
+	it("preserves dirty schema fields while applying clean same-task refresh values", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.side = { type: "enum", label: "Side", values: ["Buyer", "Seller"] };
+		apiClient.fetchSchema = async () => schema;
+		const task = { id: "TASK-4", title: "Refresh task", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25", fields: { side: "Buyer", status: "To Do" }, sections: { description: "Old description", acceptance: [], log: [] } } as Task;
+		root = createRoot(container);
+		const render = async (value: Task) => { await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={value} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); }); };
+		await render(task);
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const side = container.querySelector<HTMLSelectElement>("#schema-field-side");
+		await act(async () => { const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set; setter?.call(side, "Seller"); side?.dispatchEvent(new window.Event("change", { bubbles: true })); });
+		await render({ ...task, sections: { description: "Fresh description", acceptance: [], log: [] } } as Task);
+		expect(container.querySelector<HTMLSelectElement>("#schema-field-side")?.value).toBe("Seller");
+		expect(container.querySelector<HTMLTextAreaElement>("textarea.w-md-editor-text-input")?.value).toBe("Fresh description");
+	});
+
 	it("renders configured sections and saves checklist edits through one PATCH", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
