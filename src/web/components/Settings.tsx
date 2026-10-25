@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { apiClient } from '../lib/api';
 import { SuccessToast } from './SuccessToast';
 import type { BacklogConfig } from '../../types';
+import { useSchema } from './schema/SchemaProvider.tsx';
 
 const Settings: React.FC = () => {
+	const { schema } = useSchema();
 	const [config, setConfig] = useState<BacklogConfig | null>(null);
 	const [originalConfig, setOriginalConfig] = useState<BacklogConfig | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -371,6 +373,17 @@ const Settings: React.FC = () => {
 									Set during initialization. Cannot be changed to avoid breaking existing task IDs.
 								</p>
 							</div>
+						</div>
+					</div>
+
+					{/* Read-only schema summary */}
+					<div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+						<h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Task schema</h2>
+						<p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Edit fields, users, and sections in <code>task-schema.yml</code>.</p>
+						<div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
+							<div><h3 className="font-medium text-gray-900 dark:text-gray-100">Users</h3><p>{schema.users.length ? schema.users.map((user) => `${user.name} (${user.handle})${user.default ? ' · default' : ''}`).join(', ') : 'None configured'}</p></div>
+							<div><h3 className="font-medium text-gray-900 dark:text-gray-100">Fields</h3><ul className="space-y-1">{Object.entries(schema.fields).map(([key, field]) => <li key={key}><span className="font-medium">{field.label ?? key}</span> <span className="text-gray-500 dark:text-gray-400">({key} · {field.type}{field.values?.length ? ` · ${field.values.join(', ')}` : ''})</span></li>)}</ul></div>
+							<div><h3 className="font-medium text-gray-900 dark:text-gray-100">Sections</h3><ul className="space-y-1">{Object.entries(schema.sections).map(([key, section]) => <li key={key}>{section.title} <span className="text-gray-500 dark:text-gray-400">({key} · {section.kind})</span></li>)}</ul></div>
 						</div>
 					</div>
 
