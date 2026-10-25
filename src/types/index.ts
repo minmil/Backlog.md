@@ -174,6 +174,7 @@ export interface TaskUpdateInput {
 	checkSectionItems?: Record<string, number[]>;
 	uncheckSectionItems?: Record<string, number[]>;
 	removeSectionItems?: Record<string, number[]>;
+	replaceSectionItems?: Record<string, AcceptanceCriterion[]>;
 	appendLog?: { section?: string; body: string; author?: string; date?: string };
 	appendLogs?: Array<{ section?: string; body: string; author?: string; date?: string }>;
 	/** Schema field writes, including both core and declared custom keys. */

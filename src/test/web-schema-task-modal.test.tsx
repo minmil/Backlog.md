@@ -8,6 +8,7 @@ import { TaskDetailsModal } from "../web/components/TaskDetailsModal.tsx";
 import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
 import { ThemeProvider } from "../web/contexts/ThemeContext.tsx";
 import { apiClient, type SchemaTaskWrite } from "../web/lib/api.ts";
+import { setNativeInputValue } from "./react-dom-input.ts";
 
 const originalFetchSchema = apiClient.fetchSchema;
 const originalPatch = apiClient.patchSchemaTask;
@@ -26,6 +27,9 @@ function setupDom(): HTMLElement {
 	globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => window.setTimeout(callback, 0);
 	globalThis.cancelAnimationFrame = (handle: number) => window.clearTimeout(handle);
 	window.matchMedia = () => ({ matches: false }) as MediaQueryList;
+	const prototype = window.HTMLElement.prototype as unknown as { attachEvent?: () => void; detachEvent?: () => void };
+	prototype.attachEvent ??= () => {};
+	prototype.detachEvent ??= () => {};
 	return document.getElementById("root") as HTMLElement;
 }
 
@@ -68,4 +72,34 @@ describe("schema task modal", () => {
 		});
 		expect(patches).toEqual([{ fields: { side: "Seller" } }]);
 	});
+
+	it("renders configured sections and saves checklist edits through one PATCH", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.sections.delivery_notes = { kind: "markdown", title: "Delivery Notes" };
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "TASK-2", title: "Section task", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25",
+			fields: { status: "To Do" },
+			sections: { description: "Description from schema", acceptance: [], log: [], delivery_notes: "UAT details" },
+			other: "Preserved loose note",
+		} as Task;
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_id, patch) => { patches.push(patch); return task; };
+		root = createRoot(container);
+		await act(async () => {
+			root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>);
+		});
+		expect(container.textContent).toContain("UAT details");
+		expect(container.textContent).toContain("Preserved loose note");
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const input = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		expect(input).toBeTruthy();
+		await act(async () => { if (input) setNativeInputValue(input, "Ready for review"); });
+		const section = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
+		await act(async () => { Array.from(section?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
+		expect(patches).toEqual([{ checklist: [{ section: "acceptance", op: "replace", items: [{ index: 1, text: "Ready for review", checked: false }] }] }]);
+	});
+
 });

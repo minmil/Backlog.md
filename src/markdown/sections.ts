@@ -241,6 +241,22 @@ export function checklistRemove(parsed: ParsedSections, id: string, n: number, s
 	});
 }
 
+export function checklistReplace(
+	parsed: ParsedSections,
+	id: string,
+	replacement: ChecklistItem[],
+	schema: TaskSchema,
+): void {
+	definitionFor(parsed, id, schema, "checklist");
+	parsed.sections[id] = replacement.map((item, index) => {
+		if (typeof item.text !== "string" || !item.text.trim() || /\r|\n/.test(item.text))
+			throw new Error(`Section '${id}' item #${index + 1} must be one nonempty line.`);
+		if (typeof item.checked !== "boolean")
+			throw new Error(`Section '${id}' item #${index + 1} needs checked true or false.`);
+		return { index: index + 1, text: item.text, checked: item.checked };
+	});
+}
+
 export interface LogInput {
 	author?: string;
 	date?: string;

@@ -11,7 +11,7 @@ interface Props {
 	value: SectionValue | undefined;
 	mode: "view" | "edit";
 	onChange?: (value: string | ChecklistItem[]) => void;
-	onAppendLog?: (entry: LogInput) => void;
+	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 }
 
 export default function SectionBlock({ sectionId, value, mode, onChange, onAppendLog }: Props): ReactElement | null {
@@ -21,6 +21,7 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onAppen
 	const [author, setAuthor] = useState(() => schema.users.find((user) => user.default)?.handle ?? schema.users[0]?.handle ?? "");
 	const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
 	const [body, setBody] = useState("");
+	const [appendError, setAppendError] = useState<string | null>(null);
 	if (!section) return null;
 	const title = section.title;
 	let content: ReactElement | null = null;
@@ -42,11 +43,17 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onAppen
 		const entries = Array.isArray(value) ? value.filter((item): item is LogEntry => "body" in item) : [];
 		content = (
 			<div className="space-y-4">
-				{entries.map((entry) => <div key={entry.createdAt} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
+				{entries.map((entry, index) => <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
 				{mode === "edit" ? <div className="space-y-2">
 					<div className="flex gap-2"><select aria-label="Log author" className="w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name}</option>)}</select><input aria-label="Log date" type="date" className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} /></div>
 					<textarea aria-label="Log entry" value={body} onChange={(event) => setBody(event.target.value)} className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-					<button type="button" disabled={!body.trim() || !author} onClick={() => { onAppendLog?.({ author, date, body: body.trim() }); setBody(""); }} className="px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700">Add</button>
+					{appendError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{appendError}</p> : null}
+					<button type="button" disabled={!body.trim() || !author || !onAppendLog} onClick={() => {
+						void (async () => {
+							try { await onAppendLog?.({ author, date, body: body.trim() }); setBody(""); setAppendError(null); }
+							catch (error) { setAppendError(error instanceof Error ? error.message : String(error)); }
+						})();
+					}} className="px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700">Add</button>
 				</div> : null}
 			</div>
 		);

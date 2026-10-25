@@ -22,6 +22,7 @@ import {
 	checklistAdd,
 	checklistCheck,
 	checklistRemove,
+	checklistReplace,
 	checklistUncheck,
 	logAppend,
 	parseSections,
@@ -2725,6 +2726,7 @@ export class Core {
 			...(input.removeAcceptanceCriteria?.length && { acceptance: input.removeAcceptanceCriteria }),
 			...input.removeSectionItems,
 		};
+		const replaceSectionItems = input.replaceSectionItems ?? {};
 		const appendLogs: NonNullable<TaskUpdateInput["appendLogs"]> = [
 			...(input.appendLogs ?? []),
 			...(input.appendComments ?? []).map((item) =>
@@ -2766,6 +2768,7 @@ export class Core {
 				Object.keys(checkSectionItems).length ||
 				Object.keys(uncheckSectionItems).length ||
 				Object.keys(removeSectionItems).length ||
+				Object.keys(replaceSectionItems).length ||
 				input.acceptanceCriteria !== undefined ||
 				input.appendLog ||
 				appendLogs.length ||
@@ -2775,6 +2778,7 @@ export class Core {
 			const parsed = parseSections(task.rawContent ?? "", taskSchema);
 			const before = JSON.stringify(parsed.sections);
 			for (const [id, value] of Object.entries(setSections)) setMarkdown(parsed, id, value, taskSchema);
+			for (const [id, items] of Object.entries(replaceSectionItems)) checklistReplace(parsed, id, items, taskSchema);
 			if (input.acceptanceCriteria !== undefined) {
 				parsed.sections.acceptance = [];
 				for (const criterion of input.acceptanceCriteria) {

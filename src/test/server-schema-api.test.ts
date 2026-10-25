@@ -97,6 +97,17 @@ describe("schema task API", () => {
 		expect(updated.sections.description).toBe("Updated description");
 		expect(updated.sections.acceptance[0].text).toBe("Verify");
 		expect(updated.sections.log[0].body).toBe("Reviewed");
+		const replacedResponse = await patch({
+			checklist: [{ section: "acceptance", op: "replace", items: [{ text: "Edited in browser", checked: true }] }],
+		});
+		expect(replacedResponse.status).toBe(200);
+		const replaced = await replacedResponse.json();
+		expect(replaced.sections.acceptance).toEqual([{ index: 1, text: "Edited in browser", checked: true }]);
+		const invalidChecklist = await patch({
+			checklist: [{ section: "acceptance", op: "replace", items: [{ text: "broken", checked: "yes" }] }],
+		});
+		expect(invalidChecklist.status).toBe(422);
+		expect((await core.filesystem.loadTask(task.id))?.acceptanceCriteriaItems?.[0]?.text).toBe("Edited in browser");
 
 		const invalid = await patch({ fields: { side: "unsupported" } });
 		expect(invalid.status).toBe(422);

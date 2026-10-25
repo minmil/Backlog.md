@@ -85,7 +85,13 @@ export interface SchemaTaskWrite {
 	title?: string;
 	fields?: Record<string, FieldValue | null>;
 	sections?: Record<string, string>;
-	checklist?: Array<{ section: string; op: "add" | "check" | "uncheck" | "remove"; index?: number; text?: string }>;
+	checklist?: Array<{
+		section: string;
+		op: "add" | "check" | "uncheck" | "remove" | "replace";
+		index?: number;
+		text?: string;
+		items?: Array<{ index: number; text: string; checked: boolean }>;
+	}>;
 	log?: { section: string; body: string; author?: string; date?: string };
 }
 

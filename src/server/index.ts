@@ -133,9 +133,10 @@ function schemaErrorResponse(error: unknown, key = "task"): Response {
 
 type SchemaChecklistOperation = {
 	section: string;
-	op: "add" | "check" | "uncheck" | "remove";
+	op: "add" | "check" | "uncheck" | "remove" | "replace";
 	text?: string;
 	index?: number;
+	items?: Array<{ index: number; text: string; checked: boolean }>;
 };
 
 function readSchemaSections(value: unknown, schema: TaskSchema): Record<string, string> {
@@ -159,8 +160,27 @@ function readSchemaChecklist(value: unknown, schema: TaskSchema): SchemaChecklis
 			throw new SchemaApiError(`checklist.${position}.section`, "Expected a configured checklist section.");
 		}
 		const op = item.op;
-		if (op !== "add" && op !== "check" && op !== "uncheck" && op !== "remove") {
-			throw new SchemaApiError(`checklist.${position}.op`, "Expected add, check, uncheck, or remove.");
+		if (op !== "add" && op !== "check" && op !== "uncheck" && op !== "remove" && op !== "replace") {
+			throw new SchemaApiError(`checklist.${position}.op`, "Expected add, check, uncheck, remove, or replace.");
+		}
+		if (op === "replace") {
+			if (!Array.isArray(item.items))
+				throw new SchemaApiError(`checklist.${position}.items`, "Expected checklist items.");
+			const items = item.items.map((raw, index) => {
+				const value = payloadObject(raw, `checklist.${position}.items.${index}`);
+				if (
+					typeof value.text !== "string" ||
+					!value.text.trim() ||
+					/\r|\n/.test(value.text) ||
+					typeof value.checked !== "boolean"
+				)
+					throw new SchemaApiError(
+						`checklist.${position}.items.${index}`,
+						"Expected one-line text and checked true or false.",
+					);
+				return { index: index + 1, text: value.text, checked: value.checked };
+			});
+			return { section, op, items };
 		}
 		if (op === "add") {
 			if (typeof item.text !== "string" || !item.text.trim())
@@ -1276,6 +1296,9 @@ export class BacklogServer {
 							...(update.addSectionItems[operation.section] ?? []),
 							operation.text as string,
 						];
+					} else if (operation.op === "replace") {
+						update.replaceSectionItems ??= {};
+						update.replaceSectionItems[operation.section] = operation.items ?? [];
 					} else {
 						const key =
 							operation.op === "check"

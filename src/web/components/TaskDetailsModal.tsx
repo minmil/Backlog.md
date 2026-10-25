@@ -4,15 +4,11 @@ import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/
 import Modal from "./Modal";
 import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
-import type { SectionValue } from "../../markdown/sections.ts";
+import { parseSections, type SectionValue } from "../../markdown/sections.ts";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
-import { useTheme } from "../contexts/ThemeContext";
-import MDEditor from "@uiw/react-md-editor";
-import AcceptanceCriteriaEditor from "./AcceptanceCriteriaEditor";
-import MermaidMarkdown from './MermaidMarkdown';
+import SchemaSections from "./schema/SchemaSections.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
-import StoredDate from "./StoredDate";
 import { formatReadinessBlockers } from "../../utils/readiness";
 import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "../../utils/task-subtasks.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
@@ -55,10 +51,6 @@ type TaskUpdatePayload = Omit<Partial<Task>, "dueDate" | "project"> & {
   commentAuthor?: string;
 };
 
-type InlineMetaUpdatePayload = Omit<Partial<Task>, "milestone"> & {
-  milestone?: string | null;
-};
-
 type TaskDetailsFormState = {
   title: string;
   description: string;
@@ -87,8 +79,6 @@ type TaskDetailsFormState = {
 const EMPTY_STATUSES: string[] = [];
 const EMPTY_TASKS: Task[] = [];
 
-const containsCommentDelimiterLine = (value: string): boolean => /^\s*---\s*$/m.test(value.replace(/\r\n/g, "\n"));
-
 const areJsonEqual = (first: unknown, second: unknown): boolean => JSON.stringify(first) === JSON.stringify(second);
 
 type SchemaTask = Task & {
@@ -116,6 +106,22 @@ function readSchemaFieldValues(
     if (isDraftMode) values.status = "Draft";
   }
   return values;
+}
+
+function readSchemaSectionValues(task: Task | TaskDetail | undefined, schema: ReturnType<typeof useSchema>["schema"]): { sections: Record<string, SectionValue>; other: string } {
+  const supplied = task as SchemaTask | undefined;
+  if (supplied?.sections) return { sections: supplied.sections, other: supplied.other ?? "" };
+  const parsed = task?.rawContent ? parseSections(task.rawContent, schema) : null;
+  const sections: Record<string, SectionValue> = {};
+  for (const [id, definition] of Object.entries(schema.sections)) {
+    const fromSource = parsed?.sections[id];
+    if (fromSource && (typeof fromSource === "string" ? fromSource.trim() : fromSource.length > 0)) sections[id] = fromSource;
+    else if (id === "description" && task?.description) sections[id] = task.description;
+    else if (id === "acceptance" && task?.acceptanceCriteriaItems) sections[id] = task.acceptanceCriteriaItems;
+    else if (id === "log" && task?.comments) sections[id] = task.comments.map((comment) => ({ author: comment.author ?? "", date: comment.createdDate.slice(0, 10), createdAt: comment.createdDate, body: comment.body }));
+    else sections[id] = definition.kind === "markdown" ? "" : [];
+  }
+  return { sections, other: supplied?.other ?? "" };
 }
 
 const isEditableKeyboardTarget = (target: EventTarget | null): boolean =>
@@ -217,12 +223,14 @@ export const TaskDetailsModal: React.FC<Props> = ({
   defaultAssignee,
   dateFormat,
 }) => {
-  const { theme } = useTheme();
   const { schema, registry } = useSchema();
   const isCreateMode = !task;
   const schemaFieldBaseline = useMemo(() => readSchemaFieldValues(task, registry, isDraftMode), [task, registry, isDraftMode]);
   const [schemaFields, setSchemaFields] = useState<Record<string, RegistryFieldValue | null>>(schemaFieldBaseline);
   const schemaFieldBaselineRef = useRef(schemaFieldBaseline);
+  const schemaSectionBaseline = useMemo(() => readSchemaSectionValues(task, schema), [task, schema]);
+  const [schemaSections, setSchemaSections] = useState(schemaSectionBaseline.sections);
+  const schemaSectionBaselineRef = useRef(schemaSectionBaseline.sections);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
   const isReadOnly = task ? isReadOnlyTask(task) : false;
@@ -249,10 +257,10 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [description, setDescription] = useState(task?.description || "");
   const [plan, setPlan] = useState(task?.implementationPlan || "");
   const [notes, setNotes] = useState(task?.implementationNotes || "");
-  const [displayComments, setDisplayComments] = useState<TaskComment[]>(task?.comments ?? []);
+  const [, setDisplayComments] = useState<TaskComment[]>(task?.comments ?? []);
   const [commentBody, setCommentBody] = useState("");
   const [commentAuthor, setCommentAuthor] = useState("");
-  const [commentSaving, setCommentSaving] = useState(false);
+  const [, setCommentSaving] = useState(false);
   const [commentsChanged, setCommentsChanged] = useState(false);
   const preserveEditModeAfterCommentRefresh = useRef(false);
   const [finalSummary, setFinalSummary] = useState(task?.finalSummary || "");
@@ -337,10 +345,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
       finalSummary !== baseline.finalSummary ||
       dueDate !== baseline.dueDate ||
       !areJsonEqual(schemaFields, schemaFieldBaseline) ||
+      !areJsonEqual(schemaSections, schemaSectionBaseline.sections) ||
       JSON.stringify(criteria) !== baseline.criteria ||
       JSON.stringify(definitionOfDone) !== baseline.definitionOfDone
     );
-  }, [title, description, plan, notes, finalSummary, dueDate, criteria, definitionOfDone, baseline, schemaFields, schemaFieldBaseline]);
+  }, [title, description, plan, notes, finalSummary, dueDate, criteria, definitionOfDone, baseline, schemaFields, schemaFieldBaseline, schemaSections, schemaSectionBaseline]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -406,6 +415,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (sameOpenModalRefresh && previousFormState) {
       setSchemaFields((current) => preserveDirtyRefreshValue(current, schemaFieldBaselineRef.current, schemaFieldBaseline, areJsonEqual));
       schemaFieldBaselineRef.current = schemaFieldBaseline;
+      setSchemaSections((current) => preserveDirtyRefreshValue(current, schemaSectionBaselineRef.current, schemaSectionBaseline.sections, areJsonEqual));
+      schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
       setTitle((current) => preserveDirtyRefreshValue(current, previousFormState.title, nextFormState.title));
       setDescription((current) =>
         preserveDirtyRefreshValue(current, previousFormState.description, nextFormState.description),
@@ -469,6 +480,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setTitle(nextFormState.title);
     setSchemaFields(schemaFieldBaseline);
     schemaFieldBaselineRef.current = schemaFieldBaseline;
+    setSchemaSections(schemaSectionBaseline.sections);
+    schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
     setFieldErrors({});
     setDescription(nextFormState.description);
     setPlan(nextFormState.plan);
@@ -498,7 +511,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     previousIsOpen.current = isOpen;
     formBaselineRef.current = nextFormState;
     setError(null);
-  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone, createModeAssignee, schemaFieldBaseline]);
+  }, [task, isOpen, isCreateMode, isDraftMode, availableStatuses, defaultDefinitionOfDone, createModeAssignee, schemaFieldBaseline, schemaSectionBaseline]);
 
   const refreshAfterCommentChange = useCallback(() => {
     if (!commentsChanged) return;
@@ -554,6 +567,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     } else {
       setTitle(task?.title || "");
       setSchemaFields(schemaFieldBaseline);
+      setSchemaSections(schemaSectionBaseline.sections);
       setFieldErrors({});
       setDescription(task?.description || "");
       setPlan(task?.implementationPlan || "");
@@ -597,68 +611,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
     if (disableDefaults) {
       payload.disableDefinitionOfDoneDefaults = true;
-    }
-    return payload;
-  };
-
-  const buildDefinitionOfDoneEditPayload = (): TaskUpdatePayload => {
-    const original = task?.definitionOfDoneItems ?? [];
-    const cleanedCurrent = normalizeChecklistItems(definitionOfDone);
-    const originalByIndex = new Map(original.map((item) => [item.index, item]));
-    const currentByIndex = new Map(cleanedCurrent.map((item) => [item.index, item]));
-    const removals = new Set<number>();
-    const additions: string[] = [];
-    const checks: number[] = [];
-    const unchecks: number[] = [];
-
-    let nextIndex = original.reduce((max, item) => Math.max(max, item.index), 0);
-
-    for (const item of cleanedCurrent) {
-      const originalItem = originalByIndex.get(item.index);
-      if (!originalItem) {
-        additions.push(item.text);
-        nextIndex += 1;
-        if (item.checked) {
-          checks.push(nextIndex);
-        }
-        continue;
-      }
-      if (originalItem.text !== item.text) {
-        removals.add(item.index);
-        additions.push(item.text);
-        nextIndex += 1;
-        if (item.checked) {
-          checks.push(nextIndex);
-        }
-        continue;
-      }
-      if (originalItem.checked !== item.checked) {
-        if (item.checked) {
-          checks.push(item.index);
-        } else {
-          unchecks.push(item.index);
-        }
-      }
-    }
-
-    for (const originalItem of original) {
-      if (!currentByIndex.has(originalItem.index)) {
-        removals.add(originalItem.index);
-      }
-    }
-
-    const payload: TaskUpdatePayload = {};
-    if (additions.length > 0) {
-      payload.definitionOfDoneAdd = additions;
-    }
-    if (removals.size > 0) {
-      payload.definitionOfDoneRemove = Array.from(removals);
-    }
-    if (checks.length > 0) {
-      payload.definitionOfDoneCheck = checks;
-    }
-    if (unchecks.length > 0) {
-      payload.definitionOfDoneUncheck = unchecks;
     }
     return payload;
   };
@@ -716,15 +668,23 @@ export const TaskDetailsModal: React.FC<Props> = ({
         const fieldChanges = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
           !schema.fields[key]?.managed && !areJsonEqual(value, schemaFieldBaseline[key]),
         ));
-        const legacyBodyChanged = description !== baseline.description || plan !== baseline.plan || notes !== baseline.notes ||
-          finalSummary !== baseline.finalSummary || JSON.stringify(criteria) !== baseline.criteria ||
-          JSON.stringify(definitionOfDone) !== baseline.definitionOfDone;
-        if (legacyBodyChanged) {
-          Object.assign(taskData, buildDefinitionOfDoneEditPayload());
-          await apiClient.updateTask(task.id, taskData);
+        const markdownChanges: Record<string, string> = {};
+        const checklistChanges: NonNullable<import("../lib/api").SchemaTaskWrite["checklist"]> = [];
+        for (const [id, definition] of Object.entries(schema.sections)) {
+          const current = schemaSections[id];
+          const previous = schemaSectionBaseline.sections[id];
+          if (areJsonEqual(current, previous)) continue;
+          if (definition.kind === "markdown" && typeof current === "string") markdownChanges[id] = current;
+          else if (definition.kind === "checklist" && Array.isArray(current)) {
+            checklistChanges.push({ section: id, op: "replace", items: current.filter((item): item is AcceptanceCriterion => "checked" in item) });
+          }
         }
-        if (Object.keys(fieldChanges).length > 0) {
-          await apiClient.patchSchemaTask(task.id, { fields: fieldChanges });
+        if (Object.keys(fieldChanges).length || Object.keys(markdownChanges).length || checklistChanges.length) {
+          await apiClient.patchSchemaTask(task.id, {
+            ...(Object.keys(fieldChanges).length ? { fields: fieldChanges } : {}),
+            ...(Object.keys(markdownChanges).length ? { sections: markdownChanges } : {}),
+            ...(checklistChanges.length ? { checklist: checklistChanges } : {}),
+          });
         }
         setMode("preview");
         if (onSaved) await onSaved();
@@ -751,108 +711,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
       setSaving(false);
     }
   };
-
-  const handleToggleCriterion = async (index: number, checked: boolean) => {
-    if (demoting) return;
-    if (!task) return; // Can't toggle in create mode
-    if (isReadOnly) return; // Can't toggle on a read-only task
-    // Optimistic update
-    const next = (criteria || []).map((c) => (c.index === index ? { ...c, checked } : c));
-    setCriteria(next);
-    try {
-      await apiClient.updateTask(task.id, { acceptanceCriteriaItems: next });
-      if (onSaved) await onSaved();
-    } catch (err) {
-      // rollback
-      setCriteria(criteria);
-      console.error("Failed to update criterion", err);
-    }
-  };
-
-  const handleToggleDefinitionOfDone = async (index: number, checked: boolean) => {
-    if (demoting) return;
-    if (!task) return; // Can't toggle in create mode
-    if (isReadOnly) return; // Can't toggle on a read-only task
-    const next = (definitionOfDone || []).map((c) => (c.index === index ? { ...c, checked } : c));
-    setDefinitionOfDone(next);
-    try {
-      const updates: TaskUpdatePayload = checked
-        ? { definitionOfDoneCheck: [index] }
-        : { definitionOfDoneUncheck: [index] };
-      await apiClient.updateTask(task.id, updates);
-      if (onSaved) await onSaved();
-    } catch (err) {
-      setDefinitionOfDone(definitionOfDone);
-      console.error("Failed to update Definition of Done item", err);
-    }
-  };
-
-  const handleInlineMetaUpdate = async (updates: InlineMetaUpdatePayload) => {
-    if (demoting) return;
-    // Don't allow updates on a read-only task
-    if (isReadOnly) return;
-
-    setError(null);
-
-    // Optimistic UI
-    if (updates.status !== undefined) setStatus(String(updates.status));
-    if (updates.assignee !== undefined) setAssignee(updates.assignee as string[]);
-    if (updates.labels !== undefined) setLabels(updates.labels as string[]);
-    if (updates.priority !== undefined) setPriority(String(updates.priority));
-    if (updates.type !== undefined) setTaskType(String(updates.type));
-    if (updates.project !== undefined) setProject(String(updates.project));
-    if (updates.dependencies !== undefined) setDependencies(updates.dependencies as string[]);
-    if (updates.references !== undefined) setReferences(updates.references as string[]);
-    if (updates.modifiedFiles !== undefined) setModifiedFiles(updates.modifiedFiles as string[]);
-    if (updates.milestone !== undefined) setMilestone((updates.milestone ?? "") as string);
-
-    // Only update server if editing existing task
-    if (task) {
-      try {
-        await apiClient.updateTask(task.id, updates);
-        if (onSaved) await onSaved();
-      } catch (err) {
-        console.error("Failed to update task metadata", err);
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
-  const handleAddComment = async () => {
-    if (demoting) return;
-    if (!task || isReadOnly) return;
-    const body = commentBody.trim();
-    if (!body) return;
-    const author = commentAuthor.trim();
-    if (containsCommentDelimiterLine(body)) {
-      setError("Comment body cannot contain standalone '---' delimiter lines.");
-      return;
-    }
-    if (author && containsCommentDelimiterLine(author)) {
-      setError("Comment author cannot contain standalone '---' delimiter lines.");
-      return;
-    }
-    setCommentSaving(true);
-    setError(null);
-    preserveEditModeAfterCommentRefresh.current = true;
-    try {
-      const updatedTask = await apiClient.updateTask(task.id, {
-        commentsAppend: [body],
-        ...(author.length > 0 && { commentAuthor: author }),
-      });
-      setDisplayComments(updatedTask.comments ?? []);
-      setCommentsChanged(true);
-      setCommentBody("");
-      setCommentAuthor("");
-    } catch (err) {
-      preserveEditModeAfterCommentRefresh.current = false;
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCommentSaving(false);
-    }
-  };
-
-  // labels handled via ChipInput; no textarea parsing
 
 	const handleDemote = async () => {
 		if (!task || !canDemote || activeDemotionRequest.current !== null) return;
@@ -937,15 +795,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
   };
 
-  const checkedCount = (criteria || []).filter((c) => c.checked).length;
-  const totalCount = (criteria || []).length;
-  const definitionCheckedCount = (definitionOfDone || []).filter((c) => c.checked).length;
-  const definitionTotalCount = (definitionOfDone || []).length;
 	const canDemote = Boolean(task && !isDraftMode && !isOpenDraft && !isReadOnly);
-  const comments = displayComments;
-
   const displayId = task?.id ?? "";
-  const documentation = task?.documentation ?? [];
 
   return (
     <Modal
@@ -1097,29 +948,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
               />
             </div>
           )}
-          {/* Description */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader title="Description" />
-            {mode === "preview" ? (
-              description ? (
-                <div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}>
-                  <MermaidMarkdown source={description} />
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 dark:text-gray-400">No description</div>
-              )
-            ) : (
-              <div className="border border-gray-200 dark:border-gray-700 rounded-md">
-                <MDEditor
-                  value={description}
-                  onChange={(val) => setDescription(val || "")}
-                  preview="edit"
-                  height={320}
-                  data-color-mode={theme}
-                />
-              </div>
-            )}
-          </div>
+          <SchemaSections
+            values={schemaSections}
+            other={schemaSectionBaseline.other}
+            mode={mode === "preview" ? "view" : "edit"}
+            onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
+          />
 
           {subtasks.length > 0 && (
             <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
@@ -1172,247 +1006,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
             </section>
           )}
 
-          {/* References */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader title="References" />
-            <div className="space-y-3">
-              {references.length > 0 ? (
-                <ul className="space-y-2">
-                  {references.map((ref, idx) => (
-                    <li key={idx} className="flex items-center gap-3 group">
-                      <span className="flex-1 min-w-0">
-                        {ref.startsWith("http://") || ref.startsWith("https://") ? (
-                          <a
-                            href={ref}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all"
-                          >
-                            {ref}
-                          </a>
-                        ) : (
-                          <code className="text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all">
-                            {ref}
-                          </code>
-                        )}
-                      </span>
-                      {!isReadOnly && (
-                        <button
-                          onClick={() => {
-                            const newRefs = references.filter((_, i) => i !== idx);
-                            handleInlineMetaUpdate({ references: newRefs });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all flex-shrink-0"
-                          title="Remove reference"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No references</p>
-              )}
-              {mode === "preview" && !isReadOnly && (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const input = e.currentTarget.elements.namedItem("newRef") as HTMLInputElement;
-                    const value = input.value.trim();
-                    if (value && !references.includes(value)) {
-                      handleInlineMetaUpdate({ references: [...references, value] });
-                      input.value = "";
-                    }
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    name="newRef"
-                    type="text"
-                    placeholder="URL or file path..."
-                    className="flex-1 text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-                  >
-                    Add
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-
-          {/* Modified files */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader title={`Modified files${modifiedFiles.length ? ` (${modifiedFiles.length})` : ""}`} />
-            <div className="space-y-3">
-              {modifiedFiles.length > 0 ? (
-                // A finished task can list hundreds of paths, so the list scrolls inside the
-                // section instead of pushing the sections below it out of reach.
-                <ul className="space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
-                  {modifiedFiles.map((file, idx) => (
-                    <li key={idx} className="flex items-start gap-3 group">
-                      <span className="flex-1 min-w-0">
-                        <code className="text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all">
-                          {file}
-                        </code>
-                      </span>
-                      {!isReadOnly && (
-                        <button
-                          onClick={() => {
-                            const newFiles = modifiedFiles.filter((_, i) => i !== idx);
-                            handleInlineMetaUpdate({ modifiedFiles: newFiles });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all flex-shrink-0 mt-0.5"
-                          title="Remove modified file"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No modified files</p>
-              )}
-              {mode === "preview" && !isReadOnly && (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const input = e.currentTarget.elements.namedItem("newModifiedFile") as HTMLInputElement;
-                    const value = input.value.trim();
-                    if (value && !modifiedFiles.includes(value)) {
-                      handleInlineMetaUpdate({ modifiedFiles: [...modifiedFiles, value] });
-                      input.value = "";
-                    }
-                  }}
-                  className="flex gap-2"
-                >
-                  <input
-                    name="newModifiedFile"
-                    type="text"
-                    placeholder="Path from project root..."
-                    className="flex-1 text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-                  >
-                    Add
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-
-          {/* Documentation */}
-          {documentation.length > 0 && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <SectionHeader title="Documentation" />
-              <div className="space-y-2">
-                <ul className="space-y-2">
-                  {documentation.map((doc, idx) => (
-                    <li key={idx} className="flex items-center gap-3">
-                      <span className="flex-1 min-w-0">
-                        {doc.startsWith("http://") || doc.startsWith("https://") ? (
-                          <a
-                            href={doc}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all"
-                          >
-                            {doc}
-                          </a>
-                        ) : (
-                          <code className="text-sm font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded break-all">
-                            {doc}
-                          </code>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {/* Acceptance Criteria */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader
-              title={`Acceptance Criteria ${totalCount ? `(${checkedCount}/${totalCount})` : ""}`}
-              right={mode === "preview" && !isReadOnly ? (
-                <span>Toggle to update</span>
-              ) : null}
-            />
-            {mode === "preview" ? (
-              <ul className="space-y-2">
-                {(criteria || []).map((c) => (
-                  <li key={c.index} className="flex items-start gap-2 rounded-md px-2 py-1">
-                    <input
-                      type="checkbox"
-                      checked={c.checked}
-                      disabled={isReadOnly}
-                      onChange={(e) => void handleToggleCriterion(c.index, e.target.checked)}
-                      className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <span className="mt-0.5 w-8 shrink-0 text-right font-mono text-xs font-semibold text-gray-500 dark:text-gray-400">
-                      {`#${c.index}`}
-                    </span>
-                    <div className="text-sm text-gray-800 dark:text-gray-100">{c.text}</div>
-                  </li>
-                ))}
-                {totalCount === 0 && (
-                  <li className="text-sm text-gray-500 dark:text-gray-400">No acceptance criteria</li>
-                )}
-              </ul>
-            ) : (
-              <AcceptanceCriteriaEditor criteria={criteria} onChange={setCriteria} />
-            )}
-          </div>
-
-          {/* Definition of Done */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader
-              title={`Definition of Done ${definitionTotalCount ? `(${definitionCheckedCount}/${definitionTotalCount})` : ""}`}
-              right={mode === "preview" && !isReadOnly ? (
-                <span>Toggle to update</span>
-              ) : null}
-            />
-            {mode === "preview" ? (
-              <ul className="space-y-2">
-                {(definitionOfDone || []).map((item) => (
-                  <li key={item.index} className="flex items-start gap-2 rounded-md px-2 py-1">
-                    <input
-                      type="checkbox"
-                      checked={item.checked}
-                      disabled={isReadOnly}
-                      onChange={(e) => void handleToggleDefinitionOfDone(item.index, e.target.checked)}
-                      className="mt-0.5 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <div className="text-sm text-gray-800 dark:text-gray-100">{item.text}</div>
-                  </li>
-                ))}
-                {definitionTotalCount === 0 && (
-                  <li className="text-sm text-gray-500 dark:text-gray-400">No Definition of Done items</li>
-                )}
-              </ul>
-            ) : (
-              <AcceptanceCriteriaEditor
-                criteria={definitionOfDone}
-                onChange={setDefinitionOfDone}
-                label="Definition of Done"
-                preserveIndices
-                disableToggle={isCreateMode}
-              />
-            )}
-          </div>
-
           {dependencyGraph && dependencyGraph.nodes.length > 1 && (
             <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <SectionHeader title="Dependency Graph" />
@@ -1420,131 +1013,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
             </section>
           )}
 
-          {/* Implementation Plan */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader title="Implementation Plan" />
-            {mode === "preview" ? (
-              plan ? (
-                <div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}>
-                  <MermaidMarkdown source={plan} />
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 dark:text-gray-400">No plan</div>
-              )
-            ) : (
-              <div className="border border-gray-200 dark:border-gray-700 rounded-md">
-                <MDEditor
-                  value={plan}
-                  onChange={(val) => setPlan(val || "")}
-                  preview="edit"
-                  height={280}
-                  data-color-mode={theme}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Implementation Notes */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-            <SectionHeader title="Implementation Notes" />
-            {mode === "preview" ? (
-              notes ? (
-                <div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}>
-                  <MermaidMarkdown source={notes} />
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 dark:text-gray-400">No notes</div>
-              )
-            ) : (
-              <div className="border border-gray-200 dark:border-gray-700 rounded-md">
-                <MDEditor
-                  value={notes}
-                  onChange={(val) => setNotes(val || "")}
-                  preview="edit"
-                  height={280}
-                  data-color-mode={theme}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Comments */}
-          {!isCreateMode && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <SectionHeader title={`Comments${comments.length ? ` (${comments.length})` : ""}`} />
-              {comments.length > 0 ? (
-                <div className="space-y-4">
-                  {comments.map((comment) => (
-                    <article key={`${comment.index}-${comment.createdDate}`} className="border-l-2 border-gray-200 dark:border-gray-700 pl-3">
-                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                        <span className="font-semibold text-gray-700 dark:text-gray-200">#{comment.index}</span>
-                        {comment.author ? <span>{comment.author}</span> : null}
-                        {comment.createdDate ? <StoredDate value={comment.createdDate} dateFormat={dateFormat} /> : null}
-                      </div>
-                      <div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}>
-                        <MermaidMarkdown source={comment.body} />
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-gray-500 dark:text-gray-400">No comments</div>
-              )}
-              {mode === "edit" && !isReadOnly && (
-                <div className="mt-4 space-y-2">
-                  <input
-                    type="text"
-                    value={commentAuthor}
-                    onChange={(e) => setCommentAuthor(e.target.value)}
-                    placeholder="Author"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-colors duration-200"
-                  />
-                  <textarea
-                    value={commentBody}
-                    onChange={(e) => setCommentBody(e.target.value)}
-                    rows={4}
-                    placeholder="Add a comment..."
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-                  />
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void handleAddComment()}
-                      disabled={commentSaving || commentBody.trim().length === 0}
-                      className="px-4 py-2 text-sm font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50"
-                    >
-                      {commentSaving ? "Adding..." : "Add comment"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Final Summary */}
-          {(mode !== "preview" || finalSummary.trim().length > 0) && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <SectionHeader title="Final Summary" right="Completion summary" />
-              {mode === "preview" ? (
-                <div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}>
-                  <MermaidMarkdown source={finalSummary} />
-                </div>
-              ) : (
-                <div className="border border-gray-200 dark:border-gray-700 rounded-md">
-                  <MDEditor
-                    value={finalSummary}
-                    onChange={(val) => setFinalSummary(val || "")}
-                    preview="edit"
-                    height={220}
-                    data-color-mode={theme}
-                    textareaProps={{
-                      placeholder: "PR-style summary of what was implemented (write when task is complete)",
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Sidebar */}
