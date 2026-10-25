@@ -4,7 +4,7 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-The Task 5 watcher and fixture migration cleared the remaining eight Task 5 entries in focused tests. The Task 5 full-suite gate will confirm that there are no new active failures.
+None. The Task 9 full-suite gate confirmed no failures beyond the 19 documented pre-schema baseline cases.
 
 ## TUI/MCP exclusions
 
