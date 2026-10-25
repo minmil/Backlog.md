@@ -1,5 +1,27 @@
 # Schema-driven tracker progress
 
+## Task-by-task summary
+
+This is the current state of the schema-driven prototype. The chronological checkpoints and gate details remain below. Implementation followed the owner-directed order **1 → combined 2–3 → 4 → 5 → 6 → 9 → 7 → 8 → reduced 10 → reduced 12 → slim 13**; Task 11 was deferred.
+
+| Task | Outcome | What was delivered |
+| --- | --- | --- |
+| **1 — Audit** | Complete (`f561082`) | Mapped field and body-section behavior across CLI, server, browser, TUI, and MCP in `AUDIT.md`; captured ten-task browser before-state screenshots in light and dark mode. Recorded decisions about persisted core fields, computed `branch`, Ordinal, and empty project values. |
+| **2 — Schema loading** | Complete in combined 2–3 gate (`185b726`) | Added validated `task-schema.yml`, a commented default written by `backlog init`, an example schema, and `backlog schema` inspection/validation commands. Projects without a schema use the built-in default through the same field registry. Leftover `fields.yml` and moved config keys produce migration errors; the old config bridge and legacy custom-field path were removed. |
+| **3 — Field registry and CLI** | Complete in combined 2–3 gate (`185b726`) | Made the registry the common path for core and custom field reads, writes, validation, filtering, sorting, and formatting. CLI `--field` and shortcut flags share validation and produce identical task files. Task, draft, and search JSON use version 2 `fields` and `unknownFields`; list, view, interactive filtering, and instructions use registry values. |
+| **4 — Section engine** | Complete (`3dd0d66`) | Replaced hard-coded task-body sections with schema-ordered Markdown, checklist, and log sections, preserving unrecognized body text as `other`. Added generic CLI section/checklist/log operations, JSON `sections`/`other`, plain detail output, and automatic log entries for tracked field changes. Retired old section flags and storage code. |
+| **5 — Server API** | Complete (`080d34a`) | Exposed `/api/schema`; made task, draft, and search responses schema-shaped; and added registry-backed create/PATCH operations with field-level validation errors. Search, filtering, cleanup, statistics, and config handling read schema values. Schema file changes refresh the server snapshot and notify the browser. |
+| **6 — Browser foundation** | Complete (`20bf247`) | Added a live-updating `SchemaProvider` and reusable browser components for every field type, field input/filter, Markdown/checklist/log section, and preserved `other` content. This is the shared rendering and editing base for the prototype screens. |
+| **7 — Board** | Complete (`504f219`) | Board cards render configured `ui.board.card` fields in schema order, including custom fields. The filter bar uses `ui.board.filters`, validates values through the registry, and keeps selections in the URL. |
+| **8 — Task list** | Complete (`eb40842`) | Task list columns and widths come from `ui.task_list.columns`, with ID and Title retained; configured fields render and sort through the registry. Filters come from `ui.task_list.filters`, including custom fields and URL-persisted selections. After Tasks 7–9, ten styled light/dark screenshots of Board, list, and detail view/edit/create were captured (`d18ecdb`). |
+| **9 — Task detail, edit, create** | Complete (`3c9ce12`) | The detail sidebar and body render schema fields and sections in order. Edits save dirty fields, Markdown, checklists, and log entries through schema PATCH; create and draft modes send the same schema payload. Validation, unsaved-change handling, dependency suggestions, and readiness behavior were preserved. |
+| **10 — Remaining browser screens** | Reduced scope complete (`140fe1f`) | Confirmed Milestones, Drafts, Statistics, Settings, Docs, and Decisions render without browser errors. Settings includes a read-only panel of users, fields, and sections and points to `task-schema.yml` for editing. Broader screen redesign was outside the reduced scope. |
+| **11 — Language toggle** | Deferred by owner | No language-toggle work was done for this prototype. |
+| **12 — Agent guidance** | Reduced scope complete (`d8a1135`) | Updated built-in agent guides for schema discovery, registry field commands, exact enum values and user handles, and generic section/checklist/log operations. Added `docs/examples/AGENTS.md.template` for a client data repository. |
+| **13 — Acceptance and release** | Slim scope complete (`03c6a0a`) | Ran the example-schema acceptance scenario and recorded it in `ACCEPTANCE-2.md`; built version `1.55.1-cf.2`; updated the external technical handoff with deferrals; and tagged the closing commit `v1.55.1-cf.2`. |
+
+**Final gate at the release commit:** `bun test --timeout=10000` reported **3,337 pass / 46 skip / 19 fail / 3,402 total** across 308 files. The 19 failures are the documented `c645ca5` archive/record baseline; the skips include owner-directed TUI/MCP exclusions. `KNOWN-FAILURES.md` has no active migration entries. `bun run check`, `bun run check:types`, and the versioned build passed. The release tag points to `03c6a0a`.
+
 ## Task 1 — UI and code audit
 
 Mapped the current task field and body-section usage across the web UI, server, CLI, TUI and MCP in `AUDIT.md`. Captured the current browser layout from a ten-task sample in light and dark mode, including scrolled task-detail views, under `docs/screenshots/before/`. The capture script is retained for reproducibility. No application behavior changed.
