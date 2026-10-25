@@ -4,7 +4,7 @@ This ledger tracks failures beyond the 19 failures recorded in the pre-schema ba
 
 ## Active failures
 
-None. The Task 8 full-suite gate confirmed no failures beyond the 19 documented pre-schema baseline cases.
+None. The Task 13 full-suite gate confirmed no failures beyond the 19 documented pre-schema baseline cases.
 
 ## TUI/MCP exclusions
 
