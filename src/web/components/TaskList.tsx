@@ -325,8 +325,11 @@ const TaskList: React.FC<TaskListProps> = ({
 		if (definition?.type === "bool") return [key, raw === "true" ? true : raw === "false" ? false : null];
 		return [key, raw];
 	})) as Record<string, RegistryFieldValue | null>;
+	const overdueEnabled = Object.values(schema.fields).some((field) => field.type === "date" && field.overdue_when !== undefined);
+	const overdueOnly = overdueEnabled && searchParams.get("overdue") === "1";
 	const hasActiveFilters = Boolean(
 		statusFilter.length > 0 ||
+			overdueOnly ||
 			excludedStatusFilter.length > 0 ||
 			priorityFilter ||
 			labelFilter.length > 0 ||
@@ -553,7 +556,7 @@ const TaskList: React.FC<TaskListProps> = ({
 		setLabelFilter([]);
 		setMilestoneFilter("");
 		setSearchParams((params) => {
-			for (const key of [...filterKeys, "excludeStatus", "excludeStatuses", "label", "labels"]) params.delete(key);
+			for (const key of [...filterKeys, "excludeStatus", "excludeStatuses", "label", "labels", "overdue"]) params.delete(key);
 			return params;
 		}, { replace: true });
 		setDisplayTasks(sortedBaseTasks);
@@ -686,9 +689,9 @@ const TaskList: React.FC<TaskListProps> = ({
 			const label = value ? getMilestoneLabel(String(value), milestoneEntities) : "—";
 			return <td key={key} className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={label}>{label}</td>;
 		}
-		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} /></td>;
+		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></td>;
 	};
-	const visibleTasks = sortedDisplayTasks.filter((task) => customFilterKeys.every((key) => {
+	const visibleTasks = sortedDisplayTasks.filter((task) => (!overdueOnly || (task.overdue?.length ?? 0) > 0) && customFilterKeys.every((key) => {
 		const wanted = customFilters[key];
 		if (wanted === null || wanted === undefined || wanted === "" || (Array.isArray(wanted) && !wanted.length)) return true;
 		const actual = fieldValue(task, key);
@@ -758,6 +761,7 @@ const TaskList: React.FC<TaskListProps> = ({
 				<div className="flex flex-wrap items-center gap-3 justify-between">
 					<div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
 						{filterKeys.map(renderSchemaFilter)}
+						{overdueEnabled && <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap"><input type="checkbox" checked={overdueOnly} onChange={(event) => setSearchParams((params) => { if (event.target.checked) params.set("overdue", "1"); else params.delete("overdue"); return params; }, { replace: true })} />Overdue</label>}
 					</div>
 					<div className="flex items-center gap-3 flex-shrink-0">
 						{isFilteringTerminalStatus && currentCount > 0 && <button type="button" onClick={() => setShowCleanupModal(true)} className="py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 flex items-center gap-2 whitespace-nowrap" title="Clean up old completed tasks"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>Clean Up</button>}

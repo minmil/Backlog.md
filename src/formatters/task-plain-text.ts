@@ -83,7 +83,7 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 				: (key === "created_date" || key === "updated_date") && typeof value === "string"
 					? formatDateForDisplay(value, { appendUtcLabel: true })
 					: registry.format(key, value, "plain");
-		lines.push(`${label}: ${formatted}`);
+		lines.push(`${label}: ${formatted}${registry.isOverdue(task, key) ? " (overdue)" : ""}`);
 	}
 
 	const subtaskSummaries = task.subtaskSummaries ?? [];
@@ -127,5 +127,10 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 }
 
 export function formatPlainTaskListFields(task: Task, names: string[], registry: FieldRegistry): string {
-	return names.map((name) => `${name}=${registry.format(name, registry.getField(task, name), "plain")}`).join(" ");
+	return names
+		.map(
+			(name) =>
+				`${name}=${registry.format(name, registry.getField(task, name), "plain")}${registry.isOverdue(task, name) ? " (overdue)" : ""}`,
+		)
+		.join(" ");
 }

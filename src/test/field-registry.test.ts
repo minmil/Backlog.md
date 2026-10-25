@@ -113,6 +113,52 @@ describe("field registry", () => {
 		expect(fields.format("tags", ["a", "b"], "json")).toEqual(["a", "b"]);
 	});
 
+	test("overdue date boundaries and conditions use the local day", () => {
+		const schema = parseTaskSchema(
+			getDefaultTaskSchemaText()
+				.replace(
+					"due_date: {type: date, core: true, label: Due}",
+					"due_date: {type: date, core: true, label: Due, overdue_when: {status: [To Do, In Progress], assignee: ['@a']}}",
+				)
+				.replace("users: []", "users: [{handle: '@a', name: A, default: true}]")
+				.replace("\nsections:", "\n  client_due: {type: date, overdue_when: {status: To Do}}\nsections:"),
+		);
+		const fields = new FieldRegistry(schema);
+		const today = new Date(2026, 9, 25, 12);
+		const base = fields.setField({ ...task(), assignee: ["@a"] }, "due_date", "2026-10-24");
+		expect(fields.isOverdue(base, "due_date", today)).toBe(true);
+		expect(fields.overdueFields(base, today)).toEqual(["due_date"]);
+		expect(fields.isOverdue(fields.setField(base, "due_date", "2026-10-25"), "due_date", today)).toBe(false);
+		expect(fields.isOverdue(fields.setField(base, "due_date", "2026-10-26"), "due_date", today)).toBe(false);
+		expect(fields.isOverdue(fields.clearField(base, "due_date"), "due_date", today)).toBe(false);
+		expect(fields.isOverdue({ ...base, assignee: [] }, "due_date", today)).toBe(false);
+		expect(fields.isOverdue({ ...base, status: "Done" }, "due_date", today)).toBe(false);
+		expect(fields.overdueFields(fields.setField(base, "client_due", "2026-10-20"), today)).toEqual([
+			"due_date",
+			"client_due",
+		]);
+	});
+
+	test("schema rejects invalid overdue rules", () => {
+		const source = getDefaultTaskSchemaText();
+		const withRule = (definition: string) =>
+			source.replace("due_date: {type: date, core: true, label: Due}", definition);
+		expect(() => parseTaskSchema(withRule("due_date: {type: date, core: true, overdue_when: {title: X}}"))).toThrow(
+			/Condition field/,
+		);
+		expect(() =>
+			parseTaskSchema(withRule("due_date: {type: date, core: true, overdue_when: {status: Unknown}}")),
+		).toThrow(/Invalid condition value/);
+		expect(() =>
+			parseTaskSchema(
+				source.replace(
+					"title: {type: text, core: true, required: true, label: Title}",
+					"title: {type: text, core: true, required: true, overdue_when: {status: To Do}}",
+				),
+			),
+		).toThrow(/Only date fields/);
+	});
+
 	test("task-list JSON v2 uses the canonical fields object", () => {
 		const fields = registry();
 		const item = { ...fields.setField(task(), "side", "Buyer"), unknownFields: { legacy: "keep" }, isReady: true };
@@ -132,6 +178,7 @@ describe("field registry", () => {
 				side: "Buyer",
 			},
 			unknownFields: { legacy: "keep" },
+			overdue: [],
 		});
 	});
 

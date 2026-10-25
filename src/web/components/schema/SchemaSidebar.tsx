@@ -26,9 +26,10 @@ interface Props {
 	availableTasks?: Task[];
 	milestones?: Milestone[];
 	dateFormat?: string;
+	overdueFields?: string[];
 }
 
-export default function SchemaSidebar({ values, onChange, mode, readOnly, draft, errors, availableTasks, milestones, dateFormat }: Props) {
+export default function SchemaSidebar({ values, onChange, mode, readOnly, draft, errors, availableTasks, milestones, dateFormat, overdueFields }: Props) {
 	const { schema } = useSchema();
 	return <>
 		{detailFieldOrder(schema).filter((key) => mode !== "create" || key !== "title").map((key) => {
@@ -43,7 +44,7 @@ export default function SchemaSidebar({ values, onChange, mode, readOnly, draft,
 			) : (
 				<div key={key} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
 					<div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">{field.label ?? key}{field.lang ? <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{field.lang}</span> : null}</div>
-					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} /></div>
+					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} overdue={overdueFields?.includes(key)} /></div>
 				</div>
 			);
 		})}

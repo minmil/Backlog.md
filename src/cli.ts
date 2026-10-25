@@ -325,7 +325,10 @@ function formatPlainTaskListRow(
 	const typeIndicator = typeof type === "string" ? `[${type}] ` : "";
 	const statusIndicator = options.includeStatus && status ? ` (${status})` : "";
 	const acceptanceCriteria = formatAcceptanceCriteriaSummarySuffix(task);
-	const dueDate = typeof due === "string" ? ` (due ${formatUtcDateForDisplay(due)})` : "";
+	const dueDate =
+		typeof due === "string"
+			? ` (due ${formatUtcDateForDisplay(due)}${registry.isOverdue(task, "due_date") ? " (overdue)" : ""})`
+			: "";
 	const fields = options.showFields?.length ? ` ${formatPlainTaskListFields(task, options.showFields, registry)}` : "";
 	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
 }
@@ -2818,8 +2821,14 @@ async function runTaskList(
 	}
 	const baseFilters: TaskListFilter = {};
 	let schemaConditions: ReturnType<FieldRegistry["parseCondition"]>[] = [];
+	const overdueKeys = toStringArray(options.overdue);
 	try {
 		schemaConditions = toStringArray(options.where).map((expression) => registry.parseCondition(expression));
+		for (const key of overdueKeys) {
+			const definition = taskSchema.fields[key];
+			if (!definition || definition.type !== "date" || !definition.overdue_when)
+				throw new Error(`Field "${key}" has no overdue_when rule`);
+		}
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
@@ -2952,8 +2961,10 @@ async function runTaskList(
 			filters: Object.keys(baseFilters).length > 0 ? baseFilters : undefined,
 			includeCrossBranch: false,
 		});
-		const tasks = queriedTasks.filter((task) =>
-			schemaConditions.every((condition) => registry.matches(task, condition)),
+		const tasks = queriedTasks.filter(
+			(task) =>
+				schemaConditions.every((condition) => registry.matches(task, condition)) &&
+				(overdueKeys.length === 0 || overdueKeys.some((key) => registry.isOverdue(task, key))),
 		);
 		// Ordering, the parent narrowing and the limit are the same whatever the rows carry, so the
 		// readiness projection below travels through them instead of being derived twice.
@@ -3038,6 +3049,7 @@ async function runTaskList(
 	if (searchQuery) activeFilters.push(`Search: ${searchQuery}`);
 	if (taskLimit !== undefined) activeFilters.push(`Limit: ${taskLimit}`);
 	if (options.sort) activeFilters.push(`Sort: ${options.sort}`);
+	if (overdueKeys.length) activeFilters.push(`Overdue: ${overdueKeys.join(", ")}`);
 
 	if (activeFilters.length > 0) {
 		filterDescription = activeFilters.join(", ");
@@ -3121,7 +3133,11 @@ async function runTaskList(
 				tasks: (resolvedParentId
 					? tasks.filter((task) => task.parentTaskId && taskIdsEqual(resolvedParentId, task.parentTaskId))
 					: tasks
-				).filter((task) => schemaConditions.every((condition) => registry.matches(task, condition))),
+				).filter(
+					(task) =>
+						schemaConditions.every((condition) => registry.matches(task, condition)) &&
+						(overdueKeys.length === 0 || overdueKeys.some((key) => registry.isOverdue(task, key))),
+				),
 				statuses: taskSchema.fields.status?.values ?? [],
 				// The filters above narrow what is displayed. Dependency readiness must still see
 				// every task, or a dependency assigned to someone else reads as unknown.
@@ -3167,6 +3183,11 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 			description: "Filter by one or more configured projects; repeat or comma-separate values",
 		},
 		{ name: "where", type: "key<op>value", description: "Filter a declared schema field; repeat for AND" },
+		{
+			name: "overdue",
+			type: "Date field key",
+			description: "Filter tasks overdue under a schema date rule; repeat for OR",
+		},
 		{ name: "show-fields", type: "k1,k2", description: "Append selected schema fields to --plain task rows" },
 		{
 			name: "labels",
@@ -3231,6 +3252,11 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 		createMultiValueAccumulator(),
 	)
 	.option("--where <expr>", "filter a declared schema field (repeatable; AND)", createMultiValueAccumulator())
+	.option(
+		"--overdue <fieldKey>",
+		"filter overdue tasks by a date field (repeatable; OR)",
+		createMultiValueAccumulator(),
+	)
 	.option("--show-fields <names>", "append comma-separated schema fields to plain task rows")
 	.option(
 		"-l, --labels <labels>",

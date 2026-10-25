@@ -54,6 +54,7 @@ const FILTERABLE_TYPES = new Set<FieldType>([
 	"user-list",
 	"string-list",
 	"milestone-ref",
+	"sequence",
 ]);
 export const MOVED_CONFIG_KEYS: Record<string, string> = {
 	statuses: "fields.status.values",
@@ -79,6 +80,11 @@ const FIELD_ATTRIBUTES = new Set([
 	"lang",
 	"translation_of",
 	"track_changes",
+	"overdue_when",
+	"scope",
+	"prefixes",
+	"pad",
+	"assign_when",
 ]);
 const SECTION_ATTRIBUTES = new Set(["kind", "title", "description", "lang", "translation_of", "required"]);
 const USER_ATTRIBUTES = new Set(["handle", "name", "default"]);
@@ -178,9 +184,41 @@ function validDefault(field: SchemaField, value: unknown, users: SchemaUser[]): 
 			return stringArray(value);
 		case "id":
 		case "text":
+		case "sequence":
 		case "task-ref":
 		case "milestone-ref":
 			return typeof value === "string";
+	}
+}
+
+function validateCondition(
+	value: unknown,
+	path: string,
+	fields: Record<string, SchemaField>,
+	users: SchemaUser[],
+	issues: SchemaIssue[],
+): void {
+	const conditions = record(value);
+	if (!conditions) {
+		issues.push({ key: path, message: "Expected a mapping of field keys to allowed values" });
+		return;
+	}
+	for (const [key, raw] of Object.entries(conditions)) {
+		const field = fields[key];
+		if (!field || !["enum", "multi-enum", "bool", "user-list"].includes(field.type)) {
+			issues.push({ key: `${path}.${key}`, message: "Condition field must be an enum, multi-enum, bool or user-list" });
+			continue;
+		}
+		const values = Array.isArray(raw) ? raw : [raw];
+		if (!values.length) issues.push({ key: `${path}.${key}`, message: "Expected at least one value" });
+		for (const item of values) {
+			const valid =
+				field.type === "bool"
+					? typeof item === "boolean"
+					: typeof item === "string" &&
+						(field.type === "user-list" ? users.some((user) => user.handle === item) : field.values?.includes(item));
+			if (!valid) issues.push({ key: `${path}.${key}`, message: `Invalid condition value: ${String(item)}` });
+		}
 	}
 }
 
@@ -269,6 +307,42 @@ function validateFields(value: unknown, users: SchemaUser[], issues: SchemaIssue
 	}
 	for (const [key, field] of Object.entries(fields)) {
 		validateTranslation(key, field, fields, "field", issues);
+		if (field.overdue_when !== undefined) {
+			if (field.type !== "date")
+				issues.push({ key: `fields.${key}.overdue_when`, message: "Only date fields can declare overdue_when" });
+			validateCondition(field.overdue_when, `fields.${key}.overdue_when`, fields, users, issues);
+		}
+		if (field.type === "sequence") {
+			const scope = typeof field.scope === "string" ? fields[field.scope] : undefined;
+			if (!scope || scope.type !== "enum")
+				issues.push({ key: `fields.${key}.scope`, message: "Scope must name an enum field" });
+			const prefixes = record(field.prefixes);
+			if (
+				!prefixes ||
+				!scope ||
+				Object.keys(prefixes).length !== (scope.values ?? []).length ||
+				(scope.values ?? []).some((value) => !Object.hasOwn(prefixes, value))
+			)
+				issues.push({ key: `fields.${key}.prefixes`, message: "Prefixes must cover every scope value" });
+			if (prefixes) {
+				const values = Object.values(prefixes);
+				if (values.some((value) => typeof value !== "string" || !/^[A-Z][A-Z0-9]{1,9}$/.test(value)))
+					issues.push({ key: `fields.${key}.prefixes`, message: "Prefixes must match ^[A-Z][A-Z0-9]{1,9}$" });
+				if (new Set(values).size !== values.length)
+					issues.push({ key: `fields.${key}.prefixes`, message: "Prefixes must be unique" });
+			}
+			if (!Number.isInteger(field.pad) || field.pad! < 1 || field.pad! > 6)
+				issues.push({ key: `fields.${key}.pad`, message: "Padding must be an integer from 1 to 6" });
+			if (field.assign_when !== undefined)
+				validateCondition(field.assign_when, `fields.${key}.assign_when`, fields, users, issues);
+		} else if (
+			field.scope !== undefined ||
+			field.prefixes !== undefined ||
+			field.pad !== undefined ||
+			field.assign_when !== undefined
+		) {
+			issues.push({ key: `fields.${key}`, message: "Sequence attributes require type: sequence" });
+		}
 		if (field.default !== undefined && !validDefault(field, field.default, users))
 			issues.push({ key: `fields.${key}.default`, message: `Invalid default for ${field.type}` });
 		if (field.required && field.default === "")

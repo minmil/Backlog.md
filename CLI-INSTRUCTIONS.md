@@ -12,6 +12,8 @@ All examples use the `backlog` command, available after installing the `backlog.
 
 Use repeatable `--field key=value` on task creation and edit, and `--clear-field key` on edit. Built-in shortcut flags use the same registry validation. `task list --where <expr>` filters any declared field; repeat it to combine conditions with AND. Supported operators are `=` and `!=` for all types and `<`, `<=`, `>`, `>=` for dates and datetimes. `key=` means unset, `key!=` means set, and `key=a|b` accepts either value. Date expressions accept `today`, `+Nd`, and `-Nd`, resolved using the machine's local time zone. Sort fields with `--sort key[:asc|:desc]`; unset values sort last. `task list --plain --show-fields k1,k2` appends selected values.
 
+For date fields with an `overdue_when` rule, `task list --overdue <fieldKey>` selects tasks whose date is before the local day and whose conditions match. Repeat the flag for OR across date fields; other filters, including `--where`, still apply.
+
 | Action      | Example                                              |
 |-------------|------------------------------------------------------|
 | Initialize project | `backlog init [project-name]` (creates backlog structure with a minimal interactive flow) |

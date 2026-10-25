@@ -1015,6 +1015,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
             availableTasks={localAvailableTasks}
             milestones={milestoneEntities}
             dateFormat={dateFormat}
+            overdueFields={task?.overdue}
           />
           {shownReadiness && (
             <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${shownReadiness.isReady ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>

@@ -1,6 +1,6 @@
 import { taskFrontmatter } from "../markdown/task-frontmatter.ts";
 import type { Task } from "../types/index.ts";
-import type { FieldType, SchemaField, TaskSchema } from "./types.ts";
+import type { FieldType, SchemaCondition, SchemaField, TaskSchema } from "./types.ts";
 
 export type FieldValue = string | number | boolean | string[];
 export type FieldOperator = "=" | "!=" | "<" | "<=" | ">" | ">=";
@@ -50,6 +50,7 @@ const FILTERABLE_TYPES = new Set<FieldType>([
 	"user-list",
 	"string-list",
 	"milestone-ref",
+	"sequence",
 ]);
 const USER_HANDLE = /^@[A-Za-z0-9._-]+$/;
 
@@ -157,6 +158,7 @@ export class FieldRegistry {
 		switch (field.type) {
 			case "id":
 			case "text":
+			case "sequence":
 				return typeof raw === "string" ? raw : fail("expected text");
 			case "bool": {
 				if (typeof raw === "boolean") return raw;
@@ -218,6 +220,8 @@ export class FieldRegistry {
 
 	clearField(task: Task, key: string): Task {
 		const field = this.definition(key);
+		if (field.type === "sequence")
+			throw new Error(`Task field "${key}" is a permanent reference and cannot be cleared`);
 		if (field.managed || field.required) throw new Error(`Task field "${key}" cannot be cleared`);
 		const next: Task = { ...task };
 		if (field.core)
@@ -280,6 +284,31 @@ export class FieldRegistry {
 			case ">=":
 				return comparison >= 0;
 		}
+	}
+
+	conditionMatches(task: Task, conditions: SchemaCondition): boolean {
+		return Object.entries(conditions).every(([key, raw]) => {
+			const actual = this.getField(task, key);
+			const allowed = Array.isArray(raw) ? raw : [raw];
+			return Array.isArray(actual)
+				? actual.some((value) => allowed.includes(value))
+				: actual !== undefined && allowed.includes(actual as string | boolean);
+		});
+	}
+
+	isOverdue(task: Task, fieldKey: string, today = new Date()): boolean {
+		const field = this.definition(fieldKey);
+		if (field.type !== "date" || !field.overdue_when) return false;
+		const value = this.getField(task, fieldKey);
+		return (
+			typeof value === "string" &&
+			value < relativeDay("today", today) &&
+			this.conditionMatches(task, field.overdue_when)
+		);
+	}
+
+	overdueFields(task: Task, today = new Date()): string[] {
+		return Object.keys(this.schema.fields).filter((key) => this.isOverdue(task, key, today));
 	}
 
 	compare(key: string, a: FieldValue | undefined, b: FieldValue | undefined, enumOrder?: readonly string[]): number {

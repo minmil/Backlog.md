@@ -87,6 +87,8 @@ export interface Task {
 	fieldValues?: Record<string, unknown>;
 	/** Undeclared frontmatter retained for read-only JSON output and lossless rewrites. */
 	unknownFields?: Record<string, unknown>;
+	/** Date field keys whose schema overdue rules currently match. API projection only. */
+	overdue?: string[];
 	branch?: string;
 	ordinal?: number;
 	filePath?: string;

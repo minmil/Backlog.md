@@ -81,6 +81,12 @@ describe("schema field components", () => {
 		});
 	}
 
+	it("renders overdue dates using the existing validation error text color", () => {
+		const html = renderToStaticMarkup(<SchemaProvider initialSchema={schemaWithField("date")}><FieldValue fieldKey="sample" value="2026-10-24" variant="cell" overdue /></SchemaProvider>);
+		expect(html).toContain("text-red-600 dark:text-red-400");
+		expect(html).toContain("overdue");
+	});
+
 	it("renders a markdown section", () => {
 		const html = renderToStaticMarkup(<ThemeProvider><SchemaProvider><SectionBlock sectionId="description" value="A description" mode="view" /></SchemaProvider></ThemeProvider>);
 		expect(html).toContain("A description");

@@ -93,7 +93,13 @@ export function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 			return [[key, formatted]];
 		}),
 	);
-	return { id: task.id, title: task.title, fields, unknownFields: task.unknownFields ?? {} };
+	return {
+		id: task.id,
+		title: task.title,
+		fields,
+		unknownFields: task.unknownFields ?? {},
+		overdue: registry.overdueFields(task),
+	};
 }
 
 export function taskListJson(

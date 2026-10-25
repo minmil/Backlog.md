@@ -866,6 +866,12 @@ export class BacklogServer {
 		const labels = labelParams.map((label) => label.trim()).filter((label) => label.length > 0);
 
 		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+		const overdueKeys = url.searchParams.getAll("overdue");
+		for (const key of overdueKeys) {
+			const field = registry.schema.fields[key];
+			if (!field || field.type !== "date" || !field.overdue_when)
+				return Response.json({ error: `Field "${key}" has no overdue_when rule` }, { status: 400 });
+		}
 		let priority: string | undefined;
 		if (priorityParam) {
 			try {
@@ -931,7 +937,11 @@ export class BacklogServer {
 			refreshCrossBranch,
 		});
 
-		return Response.json(tasks.map((task) => this.taskResponse(task, registry)));
+		return Response.json(
+			tasks
+				.filter((task) => overdueKeys.length === 0 || overdueKeys.some((key) => registry.isOverdue(task, key)))
+				.map((task) => this.taskResponse(task, registry)),
+		);
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
