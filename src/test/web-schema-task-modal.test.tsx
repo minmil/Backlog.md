@@ -102,4 +102,31 @@ describe("schema task modal", () => {
 		expect(patches).toEqual([{ checklist: [{ section: "acceptance", op: "replace", items: [{ index: 1, text: "Ready for review", checked: false }] }] }]);
 	});
 
+	it("appends a log entry with the selected author and date", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "TASK-3", title: "Log task", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25",
+			fields: { status: "To Do" }, sections: { description: "", acceptance: [], log: [] },
+		} as Task;
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_id, patch) => { patches.push(patch); return task; };
+		root = createRoot(container);
+		await act(async () => {
+			root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>);
+		});
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
+		const author = container.querySelector<HTMLSelectElement>('select[aria-label="Log author"]');
+		expect(author?.value).toBe("@alice");
+		const date = container.querySelector<HTMLInputElement>('input[aria-label="Log date"]');
+		expect(date).toBeTruthy();
+		const body = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
+		expect(body).toBeTruthy();
+		await act(async () => { if (body) setNativeInputValue(body, "Reviewed by Alice"); });
+		const logSection = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
+		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		expect(patches).toEqual([{ log: { section: "log", body: "Reviewed by Alice", author: "@alice", date: date?.value } }]);
+	});
 });

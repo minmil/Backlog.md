@@ -4,7 +4,7 @@ import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/
 import Modal from "./Modal";
 import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
-import { parseSections, type SectionValue } from "../../markdown/sections.ts";
+import { parseSections, type LogEntry, type LogInput, type SectionValue } from "../../markdown/sections.ts";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
@@ -231,6 +231,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const schemaSectionBaseline = useMemo(() => readSchemaSectionValues(task, schema), [task, schema]);
   const [schemaSections, setSchemaSections] = useState(schemaSectionBaseline.sections);
   const schemaSectionBaselineRef = useRef(schemaSectionBaseline.sections);
+  const [pendingLog, setPendingLog] = useState<{ section: string; entry: LogInput } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
   const isReadOnly = task ? isReadOnlyTask(task) : false;
@@ -482,6 +483,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     schemaFieldBaselineRef.current = schemaFieldBaseline;
     setSchemaSections(schemaSectionBaseline.sections);
     schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
+    setPendingLog(null);
     setFieldErrors({});
     setDescription(nextFormState.description);
     setPlan(nextFormState.plan);
@@ -568,6 +570,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       setTitle(task?.title || "");
       setSchemaFields(schemaFieldBaseline);
       setSchemaSections(schemaSectionBaseline.sections);
+      setPendingLog(null);
       setFieldErrors({});
       setDescription(task?.description || "");
       setPlan(task?.implementationPlan || "");
@@ -710,6 +713,24 @@ export const TaskDetailsModal: React.FC<Props> = ({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAppendLog = async (section: string, entry: LogInput) => {
+    if (isReadOnly) throw new Error("This task is read-only.");
+    if (!task) {
+      if (pendingLog) throw new Error("Create the task before adding another log entry.");
+      setPendingLog({ section, entry });
+      setSchemaSections((current) => ({
+        ...current,
+        [section]: [...(Array.isArray(current[section]) ? current[section].filter((item): item is LogEntry => "body" in item) : []), {
+          author: entry.author ?? "", date: entry.date ?? new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString(), body: entry.body,
+        }],
+      }));
+      return;
+    }
+    await apiClient.patchSchemaTask(task.id, { log: { section, body: entry.body, author: entry.author, date: entry.date } });
+    if (onSaved) await onSaved();
   };
 
 	const handleDemote = async () => {
@@ -953,6 +974,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
             other={schemaSectionBaseline.other}
             mode={mode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
+            onAppendLog={handleAppendLog}
           />
 
           {subtasks.length > 0 && (
