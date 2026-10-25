@@ -23,6 +23,7 @@ function setupDom(): HTMLElement {
 	globalThis.localStorage = dom.window.localStorage;
 	globalThis.HTMLElement = dom.window.HTMLElement;
 	globalThis.HTMLInputElement = dom.window.HTMLInputElement;
+	globalThis.HTMLTextAreaElement = dom.window.HTMLTextAreaElement;
 	globalThis.HTMLSelectElement = dom.window.HTMLSelectElement;
 	globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => window.setTimeout(callback, 0);
 	globalThis.cancelAnimationFrame = (handle: number) => window.clearTimeout(handle);
@@ -41,6 +42,39 @@ afterEach(() => {
 });
 
 describe("schema task modal", () => {
+	it("creates a task with schema fields and sections", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.side = { type: "enum", label: "Side", values: ["Buyer", "Seller"] };
+		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		apiClient.fetchSchema = async () => schema;
+		const submissions: SchemaTaskWrite[] = [];
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal isOpen onClose={() => {}} onSubmit={async (input) => { submissions.push(input); }} /></SchemaProvider></ThemeProvider>); });
+		const title = container.querySelector<HTMLInputElement>("#schema-field-title");
+		const description = container.querySelector<HTMLTextAreaElement>('textarea.w-md-editor-text-input');
+		expect(description).toBeTruthy();
+		await act(async () => {
+			if (title) setNativeInputValue(title, "New schema task");
+			if (description) setNativeInputValue(description, "A schema section");
+		});
+		const side = container.querySelector<HTMLSelectElement>("#schema-field-side");
+		await act(async () => {
+			const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set;
+			setter?.call(side, "Buyer");
+			side?.dispatchEvent(new window.Event("change", { bubbles: true }));
+		});
+		const criterion = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		await act(async () => { if (criterion) setNativeInputValue(criterion, "Ready for review"); });
+		const acceptance = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
+		await act(async () => { Array.from(acceptance?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		const logBody = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
+		await act(async () => { if (logBody) setNativeInputValue(logBody, "Created by Alice"); });
+		const log = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
+		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
+		expect(submissions).toEqual([{ title: "New schema task", fields: { status: "To Do", assignee: ["@alice"], reporter: "@alice", side: "Buyer" }, sections: { description: "A schema section" }, checklist: [{ section: "acceptance", op: "add", text: "Ready for review" }], log: { section: "log", body: "Created by Alice", author: "@alice", date: container.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value } }]);
+	});
 	it("shows a custom field in the sidebar and saves it through one PATCH", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());

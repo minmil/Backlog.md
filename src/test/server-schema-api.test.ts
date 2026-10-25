@@ -77,6 +77,24 @@ describe("schema task API", () => {
 		expect(settings.schema.fields.side.values).toEqual(["Buyer", "Seller"]);
 	});
 
+	it("creates a draft through the schema payload without requiring Draft in the status enum", async () => {
+		const response = await fetch(`${baseUrl}/api/tasks`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				title: "Schema draft",
+				fields: { status: "Draft", side: "Buyer" },
+				sections: { description: "First draft" },
+			}),
+		});
+		expect(response.status).toBe(201);
+		const created = await response.json();
+		expect(created.fields).toMatchObject({ status: "Draft", side: "Buyer" });
+		expect(created.sections.description).toBe("First draft");
+		const drafts = await (await fetch(`${baseUrl}/api/drafts`)).json();
+		expect(drafts.some((draft: { id: string }) => draft.id === created.id)).toBe(true);
+	});
+
 	it("PATCH validates mixed fields and section operations before writing", async () => {
 		const { task } = await core.createTaskFromInput({ title: "Patch target" });
 		const patch = (body: unknown) =>

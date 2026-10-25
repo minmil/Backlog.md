@@ -1134,7 +1134,15 @@ export class BacklogServer {
 			const fields = payload.fields === undefined ? {} : payloadObject(payload.fields, "fields");
 			const title = payload.title ?? fields.title;
 			if (typeof title !== "string" || !title.trim()) throw new SchemaApiError("title", "Title is required.");
-			let input: TaskCreateInput = applyCreateFieldValues(registry, { title }, fields);
+			// Draft is a record lifecycle state, even when the configured status enum has no Draft value.
+			const creatingDraft = fields.status === "Draft";
+			const normalizedFields = creatingDraft ? { ...fields, status: undefined } : fields;
+			if (creatingDraft) delete normalizedFields.status;
+			let input: TaskCreateInput = applyCreateFieldValues(
+				registry,
+				{ title, ...(creatingDraft ? { status: "Draft" } : {}) },
+				normalizedFields,
+			);
 			if (payload.sections !== undefined) input.sections = readSchemaSections(payload.sections, registry.schema);
 			if (payload.checklist !== undefined) {
 				const sectionItems: Record<string, string[]> = {};

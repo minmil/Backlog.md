@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isReadOnlyTask, type AcceptanceCriterion, type Milestone, type Task, type TaskComment } from "../../types";
 import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/task-detail";
 import Modal from "./Modal";
-import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState } from "../lib/api";
+import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState, type SchemaTaskWrite } from "../lib/api";
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
 import { parseSections, type LogEntry, type LogInput, type SectionValue } from "../../markdown/sections.ts";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
+import FieldInput from "./schema/FieldInput.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import { formatReadinessBlockers } from "../../utils/readiness";
 import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "../../utils/task-subtasks.ts";
@@ -19,7 +20,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: () => Promise<void> | void; // refresh callback
-  onSubmit?: (taskData: Partial<Task>) => Promise<void>; // For creating new tasks
+  onSubmit?: (taskData: SchemaTaskWrite) => Promise<void>; // For creating new tasks
   onArchive?: () => Promise<void> | void; // For archiving tasks
   onDependencyCleanup?: (taskId: string, cleanedTaskIds: string[]) => void; // Reports records that lost a reference
   availableStatuses?: string[]; // Available statuses for new tasks
@@ -38,18 +39,6 @@ interface Props {
 }
 
 type Mode = "preview" | "edit" | "create";
-
-type TaskUpdatePayload = Omit<Partial<Task>, "dueDate" | "project"> & {
-	dueDate?: string | null;
-  project?: string | null;
-  definitionOfDoneAdd?: string[];
-  definitionOfDoneRemove?: number[];
-  definitionOfDoneCheck?: number[];
-  definitionOfDoneUncheck?: number[];
-  disableDefinitionOfDoneDefaults?: boolean;
-  commentsAppend?: string[];
-  commentAuthor?: string;
-};
 
 type TaskDetailsFormState = {
   title: string;
@@ -586,38 +575,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
   };
 
-  const normalizeChecklistItems = (items: AcceptanceCriterion[]): AcceptanceCriterion[] => {
-    return items
-      .map((item) => ({ ...item, text: item.text.trim() }))
-      .filter((item) => item.text.length > 0);
-  };
-
-  const buildDefinitionOfDoneCreatePayload = (): TaskUpdatePayload => {
-    const cleanedCurrent = normalizeChecklistItems(definitionOfDone);
-    const defaults = (definitionOfDoneDefaults ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
-    const defaultItems = defaults.map((text, index) => ({ index: index + 1, text, checked: false }));
-    const defaultsMatch =
-      cleanedCurrent.length >= defaultItems.length &&
-      defaultItems.every(
-        (item, index) =>
-          cleanedCurrent[index]?.text === item.text && cleanedCurrent[index]?.checked === false,
-      );
-
-    const disableDefaults = !defaultsMatch;
-    const definitionOfDoneAdd = disableDefaults
-      ? cleanedCurrent.map((item) => item.text)
-      : cleanedCurrent.slice(defaultItems.length).map((item) => item.text);
-
-    const payload: TaskUpdatePayload = {};
-    if (definitionOfDoneAdd.length > 0) {
-      payload.definitionOfDoneAdd = definitionOfDoneAdd;
-    }
-    if (disableDefaults) {
-      payload.disableDefinitionOfDoneDefaults = true;
-    }
-    return payload;
-  };
-
   const handleSave = async () => {
     if (demoting) return;
     setSaving(true);
@@ -625,54 +582,42 @@ export const TaskDetailsModal: React.FC<Props> = ({
     setFieldErrors({});
 
     // Validation for create mode
-    if (isCreateMode && !title.trim()) {
+    if (isCreateMode && !String(schemaFields.title ?? "").trim()) {
       setError("Title is required");
       setSaving(false);
       return;
     }
 
     try {
-      const taskData: TaskUpdatePayload = {
-        title: title.trim(),
-        description,
-        implementationPlan: plan,
-        implementationNotes: notes,
-        finalSummary,
-        acceptanceCriteriaItems: criteria,
-        status,
-        // Create starts with the configured defaultAssignee in the field, so what the field
-        // holds is what the user meant: empty is an explicit "unassigned". Only a project
-        // without a default has nothing to remove, so there a blank field still omits the
-        // field. On edit an explicit empty list clears the assignees.
-        ...(isCreateMode && assignee.length === 0 && createModeAssignee.length === 0 ? {} : { assignee }),
-        labels,
-        priority: priority === "" ? undefined : priority,
-        dependencies,
-        milestone: milestone.trim().length > 0 ? milestone.trim() : undefined,
-        dueDate: dueDate.trim().length > 0 ? dueDate.trim() : isCreateMode ? undefined : null,
-      };
-
-      // Like type, project is only sent from the create form. On edit the sidebar select
-      // persists immediately through handleInlineMetaUpdate, so including it here would
-      // re-send a value the form never showed -- clearing a stale project when none are
-      // configured, or failing the whole save when the stored value is no longer valid.
-      if (isCreateMode) {
-        taskData.type = taskType;
-        taskData.project = project.trim().length > 0 ? project.trim() : undefined;
-      }
-
       if (isCreateMode && onSubmit) {
-        Object.assign(taskData, buildDefinitionOfDoneCreatePayload());
-        // Create new task
-        await onSubmit({ ...taskData, dueDate: taskData.dueDate ?? undefined } as Partial<Task>);
-        // Only close if successful (no error thrown)
+        const fields = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
+          key !== "title" && !schema.fields[key]?.managed && value !== null && value !== undefined && value !== "",
+        ));
+        const sections: Record<string, string> = {};
+        const checklist: NonNullable<SchemaTaskWrite["checklist"]> = [];
+        for (const [id, definition] of Object.entries(schema.sections)) {
+          const value = schemaSections[id];
+          if (definition.kind === "markdown" && typeof value === "string" && value.trim()) sections[id] = value;
+          if (definition.kind === "checklist" && Array.isArray(value)) {
+            const items = value.filter((item): item is AcceptanceCriterion => "checked" in item && Boolean(item.text.trim()));
+            for (const item of items) checklist.push({ section: id, op: "add", text: item.text.trim() });
+            items.forEach((item, index) => { if (item.checked) checklist.push({ section: id, op: "check", index: index + 1 }); });
+          }
+        }
+        await onSubmit({
+          title: String(schemaFields.title).trim(),
+          fields,
+          ...(Object.keys(sections).length ? { sections } : {}),
+          ...(checklist.length ? { checklist } : {}),
+          ...(pendingLog ? { log: { section: pendingLog.section, ...pendingLog.entry } } : {}),
+        });
         onClose();
       } else if (task) {
         const fieldChanges = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
           !schema.fields[key]?.managed && !areJsonEqual(value, schemaFieldBaseline[key]),
         ));
         const markdownChanges: Record<string, string> = {};
-        const checklistChanges: NonNullable<import("../lib/api").SchemaTaskWrite["checklist"]> = [];
+        const checklistChanges: NonNullable<SchemaTaskWrite["checklist"]> = [];
         for (const [id, definition] of Object.entries(schema.sections)) {
           const current = schemaSections[id];
           const previous = schemaSectionBaseline.sections[id];
@@ -959,14 +904,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
           {/* Title field for create mode */}
           {isCreateMode && (
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <SectionHeader title="Title" />
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter task title"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-colors duration-200"
-              />
+              <FieldInput fieldKey="title" value={schemaFields.title} error={fieldErrors.title} onChange={(value) => setSchemaFields((current) => ({ ...current, title: value }))} />
             </div>
           )}
           <SchemaSections
