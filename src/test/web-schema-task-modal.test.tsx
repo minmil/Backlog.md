@@ -42,6 +42,78 @@ afterEach(() => {
 });
 
 describe("schema task modal", () => {
+	it("toggles multiple checklist sections directly in preview and saves each change", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.sections.release_items = { kind: "checklist", title: "Release items" };
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "TASK-13", title: "Monthly extract", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25",
+			sections: {
+				acceptance: [{ index: 1, text: "UAT is ready", checked: false }],
+				release_items: [{ index: 1, text: "UAT definition", checked: true }],
+			},
+		} as Task;
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_id, patch) => { patches.push(patch); return task; };
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); });
+		const acceptance = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
+		const release = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Release items");
+		const acceptanceBox = acceptance?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+		const releaseBox = release?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+		expect(acceptanceBox?.disabled).toBe(false);
+		expect(releaseBox?.disabled).toBe(false);
+		await act(async () => { acceptanceBox?.click(); });
+		await act(async () => { releaseBox?.click(); });
+		expect(patches).toEqual([
+			{ checklist: [{ section: "acceptance", op: "check", index: 1 }] },
+			{ checklist: [{ section: "release_items", op: "uncheck", index: 1 }] },
+		]);
+		expect(acceptanceBox?.checked).toBe(true);
+		expect(releaseBox?.checked).toBe(false);
+	});
+
+	it("resets the modal scroll position when navigating to another task", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		apiClient.fetchSchema = async () => schema;
+		const first = { id: "TASK-11", title: "Parent", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25" } as Task;
+		const second = { ...first, id: "TASK-11.1", title: "Subtask" } as Task;
+		root = createRoot(container);
+		const render = async (task: Task) => { await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); }); };
+		await render(first);
+		const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+		expect(dialog).toBeTruthy();
+		if (dialog) dialog.scrollTop = 400;
+		await render(second);
+		expect(dialog?.scrollTop).toBe(0);
+	});
+
+	it("shows only populated read fields, resolves milestone titles, and puts readiness first", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.project = { type: "enum", core: true, label: "Client", values: ["Client 2"] };
+		schema.fields.title_ja = { type: "text", label: "Title (JA)", lang: "ja", translation_of: "title" };
+		schema.sections.description_ja = { kind: "markdown", title: "Description (JA)", lang: "ja", translation_of: "description" };
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "TASK-11.2", title: "Place disclaimer", status: "To Do", assignee: [], labels: [], dependencies: ["TASK-11.1"], createdDate: "2026-10-25", milestone: "m-2",
+			fields: { title: "Place disclaimer", title_ja: "免責文言", status: "To Do", milestone: "m-2", dependencies: ["TASK-11.1"] },
+			sections: { description: "English text", description_ja: "日本語" },
+			readiness: { isReady: true, isBlocked: false, blockingDependencies: [], missingDependencies: [] },
+		} as Task;
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} milestoneEntities={[{ id: "m-2", title: "Release 2026-11-13", description: "", rawContent: "" }]} /></SchemaProvider></ThemeProvider>); });
+		const sidebar = container.querySelector(".md\\:col-span-1.space-y-4");
+		expect(sidebar?.firstElementChild?.textContent).toContain("Ready to start");
+		expect(sidebar?.textContent).toContain("Release 2026-11-13");
+		expect(sidebar?.textContent).not.toContain("Client");
+		const translated = Array.from(container.querySelectorAll("section")).find((section) => section.querySelector("h2")?.textContent?.includes("Description (JA)"));
+		expect(translated?.querySelector("h2 .ml-auto")?.textContent).toBe("ja");
+		expect(sidebar?.querySelector(".ml-auto")?.textContent).toBe("ja");
+	});
+
 	it("creates a task with schema fields and sections", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());

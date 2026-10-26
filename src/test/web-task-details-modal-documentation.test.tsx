@@ -53,7 +53,7 @@ describe("Web task popup documentation display", () => {
 		expect(html).toContain("https://docs.example.com");
 	});
 
-	it("shows the configured documentation field when empty", () => {
+	it("hides the configured documentation field when empty in read mode", () => {
 		setupDom();
 
 		const task: Task = {
@@ -73,6 +73,6 @@ describe("Web task popup documentation display", () => {
 			</ThemeProvider>,
 		);
 
-		expect(html).toContain("Documentation");
+		expect(html).not.toContain("Documentation");
 	});
 });

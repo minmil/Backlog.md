@@ -14,6 +14,7 @@ import { BoardLoadingSkeleton } from './BoardLoadingSkeleton';
 import CleanupModal from './CleanupModal';
 import LabelFilterDropdown from './LabelFilterDropdown';
 import FieldFilter from './schema/FieldFilter.tsx';
+import FilterSelect from './FilterSelect.tsx';
 import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import { SuccessToast } from './SuccessToast';
@@ -51,9 +52,6 @@ interface BoardProps {
   hideEmptyColumns?: boolean;
   dateFormat?: string;
 }
-
-const BOARD_FILTER_SELECT_CLASS =
-  'min-w-[140px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200';
 
 const BOARD_FILTER_BUTTON_CLASS =
   'h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg whitespace-nowrap transition-colors duration-200 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700';
@@ -709,9 +707,8 @@ const Board: React.FC<BoardProps> = ({
             <label className="sr-only" htmlFor="batch-move-status">
               Move selected tasks to
             </label>
-            <select
+            <FilterSelect
               id="batch-move-status"
-              className={BOARD_FILTER_SELECT_CLASS}
               value={batchMoveStatus}
               onChange={(event) => setBatchMoveStatus(event.target.value)}
             >
@@ -721,7 +718,7 @@ const Board: React.FC<BoardProps> = ({
                   {status}
                 </option>
               ))}
-            </select>
+            </FilterSelect>
             <button
               type="button"
               className={BOARD_FILTER_BUTTON_CLASS}
@@ -769,18 +766,17 @@ const Board: React.FC<BoardProps> = ({
               {hasActiveFilters && <button type="button" onClick={onSchemaFiltersClear} className={BOARD_FILTER_BUTTON_CLASS}>Clear filters</button>}
             </div> : onFiltersChange && (
               <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">
-                <select
+                <FilterSelect
                   aria-label="Filter board by assignee"
                   value={filterAssignee}
                   onChange={e => onFiltersChange({ assignee: e.target.value, labels: normalizedFilterLabels, priority: filterPriority, taskType: filterType, project: filterProject })}
-                  className={BOARD_FILTER_SELECT_CLASS}
                 >
                   <option value="">All assignees</option>
                   <option value="__unassigned__">Unassigned</option>
                   {uniqueAssignees.map(a => (
                     <option key={a} value={a}>{a}</option>
                   ))}
-                </select>
+                </FilterSelect>
 
                 <LabelFilterDropdown
                   availableLabels={uniqueLabels}
@@ -790,42 +786,39 @@ const Board: React.FC<BoardProps> = ({
                   className="min-w-[200px]"
                 />
 
-                <select
+                <FilterSelect
                   aria-label="Filter board by type"
                   value={filterType}
                   onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: filterPriority, taskType: e.target.value, project: filterProject })}
-                  className={BOARD_FILTER_SELECT_CLASS}
                 >
                   <option value="">All types</option>
                   {typeOptions.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
-                </select>
+                </FilterSelect>
 
                 {projectOptions.length > 0 && (
-                  <select
+                  <FilterSelect
                     aria-label="Filter board by project"
                     value={filterProject}
                     onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: filterPriority, taskType: filterType, project: e.target.value })}
-                    className={BOARD_FILTER_SELECT_CLASS}
                   >
                     <option value="">All projects</option>
                     {projectOptions.map(project => (
                       <option key={project} value={project}>{project}</option>
                     ))}
-                  </select>
+                  </FilterSelect>
                 )}
 
-                <select
+                <FilterSelect
                   aria-label="Filter board by priority"
                   value={filterPriority}
                   onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: e.target.value, taskType: filterType, project: filterProject })}
-                  className={BOARD_FILTER_SELECT_CLASS}
                 >
                   {priorityOptions.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
-                </select>
+                </FilterSelect>
 
                 {hasActiveFilters && (
                   <button

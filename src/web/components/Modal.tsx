@@ -9,6 +9,7 @@ interface ModalProps {
 	disableEscapeClose?: boolean; // when true, Escape and backdrop click won't close (child can handle it)
 	actions?: React.ReactNode; // optional actions rendered in header before close
 	initialFocusRef?: React.RefObject<HTMLElement | null>;
+	scrollKey?: string;
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -20,6 +21,7 @@ const Modal: React.FC<ModalProps> = ({
 	disableEscapeClose,
 	actions,
 	initialFocusRef,
+	scrollKey,
 }) => {
 	const dialogRef = useRef<HTMLDivElement | null>(null);
 	const onCloseRef = useRef(onClose);
@@ -103,6 +105,10 @@ const Modal: React.FC<ModalProps> = ({
 			}
 		};
 	}, [isOpen]);
+
+	useEffect(() => {
+		if (isOpen && dialogRef.current) dialogRef.current.scrollTop = 0;
+	}, [isOpen, scrollKey]);
 
 	if (!isOpen) return null;
 

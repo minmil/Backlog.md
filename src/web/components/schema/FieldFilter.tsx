@@ -1,5 +1,6 @@
 import type React from "react";
 import type { FieldValue as RegistryFieldValue } from "../../../schema/field-registry.ts";
+import FilterSelect from "../FilterSelect.tsx";
 import LabelFilterDropdown from "../LabelFilterDropdown.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
 
@@ -11,18 +12,11 @@ interface Props {
 }
 
 const CONTROL_CLASS = "min-w-[140px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200";
-const SELECT_CLASS = "min-w-[140px] h-10 py-2 pl-3 pr-10 appearance-none text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200";
 
-function FilterSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>): React.ReactElement {
-	return (
-		<span className="relative inline-flex">
-			<select {...props} className={SELECT_CLASS} />
-			<svg aria-hidden="true" className="pointer-events-none absolute right-4 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-500 dark:text-gray-400" viewBox="0 0 12 12" fill="none">
-				<path d="m2 4 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-			</svg>
-		</span>
-	);
-}
+const pluralLabel = (label: string): string => {
+	const lower = label.toLowerCase();
+	return lower.endsWith("y") ? `${lower.slice(0, -1)}ies` : `${lower}s`;
+};
 
 export default function FieldFilter({ fieldKey, value, onChange, options }: Props): React.ReactElement | null {
 	const { schema } = useSchema();
@@ -39,7 +33,7 @@ export default function FieldFilter({ fieldKey, value, onChange, options }: Prop
 	if (field.type === "enum" || field.type === "user" || field.type === "milestone-ref") {
 		return (
 			<FilterSelect aria-label={`Filter board by ${label.toLowerCase()}`} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value || null)}>
-				<option value="">All {fieldKey === "priority" ? "priorities" : fieldKey === "type" ? "types" : fieldKey === "project" ? "projects" : `${label.toLowerCase()}s`}</option>
+				<option value="">{`All ${pluralLabel(label)}`}</option>
 				{choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
 			</FilterSelect>
 		);

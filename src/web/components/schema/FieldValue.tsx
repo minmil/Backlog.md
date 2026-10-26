@@ -1,5 +1,7 @@
 import type React from "react";
 import type { FieldValue as RegistryFieldValue } from "../../../schema/field-registry.ts";
+import { getMilestoneLabel } from "../../../core/milestones.ts";
+import type { Milestone } from "../../../types/index.ts";
 import StoredDate from "../StoredDate.tsx";
 import EnumBadge from "./EnumBadge.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
@@ -10,9 +12,10 @@ interface Props {
 	variant: "card" | "cell" | "detail";
 	dateFormat?: string;
 	overdue?: boolean;
+	milestones?: Milestone[];
 }
 
-export default function FieldValue({ fieldKey, value, variant, dateFormat, overdue = false }: Props): React.ReactElement | null {
+export default function FieldValue({ fieldKey, value, variant, dateFormat, overdue = false, milestones }: Props): React.ReactElement | null {
 	const { schema } = useSchema();
 	const definition = schema.fields[fieldKey];
 	if (!definition || value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length)) {
@@ -24,6 +27,9 @@ export default function FieldValue({ fieldKey, value, variant, dateFormat, overd
 	}
 	if (definition.type === "date" || definition.type === "datetime") {
 		return <span className={overdue ? "text-red-600 dark:text-red-400" : undefined}><StoredDate value={String(value)} compact={variant !== "detail" && fieldKey !== "due_date"} dateFormat={dateFormat} />{overdue ? <span className="ml-1 text-xs">overdue</span> : null}</span>;
+	}
+	if (definition.type === "milestone-ref" && milestones) {
+		return <span>{getMilestoneLabel(String(value), milestones)}</span>;
 	}
 	if (definition.type === "enum" && variant === "card") {
 		return <EnumBadge fieldKey={fieldKey} value={String(value)} options={definition.values} />;

@@ -5,6 +5,7 @@ import ChipInput from "../ChipInput.tsx";
 import DependencyInput from "../DependencyInput.tsx";
 import FieldValue from "./FieldValue.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
+import LanguagePill from "./LanguagePill.tsx";
 
 interface Props {
 	fieldKey: string;
@@ -74,7 +75,7 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 	}
 	return (
 		<div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-			<label htmlFor={inputId} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 transition-colors duration-200">{label}{field.required ? " *" : ""}</label>
+			<div className="mb-1 flex items-center gap-2"><label htmlFor={inputId} className="text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-200">{label}{field.required ? " *" : ""}</label>{field.lang ? <LanguagePill lang={field.lang} /> : null}</div>
 			{control}
 			{error ? <p id={errorId} role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
 		</div>

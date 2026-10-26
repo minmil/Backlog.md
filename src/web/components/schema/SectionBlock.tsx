@@ -5,17 +5,21 @@ import AcceptanceCriteriaEditor from "../AcceptanceCriteriaEditor.tsx";
 import MermaidMarkdown from "../MermaidMarkdown.tsx";
 import { useTheme } from "../../contexts/ThemeContext.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
+import LanguagePill from "./LanguagePill.tsx";
 
 interface Props {
 	sectionId: string;
 	value: SectionValue | undefined;
 	mode: "view" | "edit";
 	onChange?: (value: string | ChecklistItem[]) => void;
+	onToggleChecklist?: (index: number, checked: boolean) => void | Promise<void>;
+	checklistBusy?: boolean;
+	readOnly?: boolean;
 	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (hasDraft: boolean) => void;
 }
 
-export default function SectionBlock({ sectionId, value, mode, onChange, onAppendLog, onLogDraftChange }: Props): ReactElement | null {
+export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange }: Props): ReactElement | null {
 	const { schema } = useSchema();
 	const { theme } = useTheme();
 	const section = schema.sections[sectionId];
@@ -38,7 +42,7 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onAppen
 		content = mode === "edit" ? (
 			<AcceptanceCriteriaEditor criteria={items} onChange={(next) => onChange?.(next)} label="" />
 		) : (
-			<ul className="space-y-2">{items.map((item) => <li key={item.index} className="flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100"><input type="checkbox" checked={item.checked} disabled className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" /><span>{item.text}</span></li>)}</ul>
+			<ul className="space-y-2">{items.map((item) => <li key={item.index} className="flex items-center gap-2 text-sm text-gray-900 dark:text-gray-100"><input type="checkbox" checked={item.checked} disabled={readOnly || checklistBusy || !onToggleChecklist} aria-label={item.text} onChange={(event) => void onToggleChecklist?.(item.index, event.target.checked)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" /><span>{item.text}</span></li>)}</ul>
 		);
 	} else {
 		const entries = Array.isArray(value) ? value.filter((item): item is LogEntry => "body" in item) : [];
@@ -59,5 +63,5 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onAppen
 			</div>
 		);
 	}
-	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{title}</h2>{content}</section>;
+	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100"><span>{title}</span>{section.lang ? <LanguagePill lang={section.lang} /> : null}</h2>{content}</section>;
 }

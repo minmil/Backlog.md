@@ -19,6 +19,7 @@ import {
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
 import FieldValue from "./schema/FieldValue.tsx";
 import FieldFilter from "./schema/FieldFilter.tsx";
+import FilterSelect from "./FilterSelect.tsx";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
@@ -739,8 +740,8 @@ const TaskList: React.FC<TaskListProps> = ({
 			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={statusFilter} onChange={handleStatusChange} menuId="task-list-status-menu" label="Status" emptyLabel="All" noOptionsLabel="No statuses" clearLabel="Clear status filter" className="min-w-[180px]" />
 			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={excludedStatusFilter} onChange={handleExcludeStatusChange} menuId="task-list-exclude-status-menu" label="Exclude status" emptyLabel="None" noOptionsLabel="No statuses" clearLabel="Clear excluded statuses" className="min-w-[210px]" />
 		</React.Fragment>;
-		if (key === "priority") return <select key={key} aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)} className="min-w-[120px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200">{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</select>;
-		if (key === "milestone") return <select key={key} aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)} className="min-w-[160px] h-10 py-2 px-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</select>;
+		if (key === "priority") return <FilterSelect key={key} minWidthClass="min-w-[120px]" aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)}>{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</FilterSelect>;
+		if (key === "milestone") return <FilterSelect key={key} minWidthClass="min-w-[160px]" aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)}><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</FilterSelect>;
 		if (key === "labels") return <LabelFilterDropdown key={key} availableLabels={mergedAvailableLabels} selectedLabels={labelFilter} onChange={handleLabelChange} menuId="task-list-labels-menu" />;
 		return <FieldFilter key={key} fieldKey={key} value={customFilters[key]} onChange={(value) => handleCustomFilterChange(key, value)} />;
 	};

@@ -4,7 +4,7 @@ import { type TaskDetail, taskDependencyGraph, taskReadiness } from "../../core/
 import Modal from "./Modal";
 import { apiClient, ApiError, NetworkError, readDemotionFailureCause, readMovedFailureState, type SchemaTaskWrite } from "../lib/api";
 import type { FieldValue as RegistryFieldValue } from "../../schema/field-registry.ts";
-import { parseSections, type LogEntry, type LogInput, type SectionValue } from "../../markdown/sections.ts";
+import { parseSections, type ChecklistItem, type LogEntry, type LogInput, type SectionValue } from "../../markdown/sections.ts";
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
@@ -250,6 +250,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const formBaselineRef = useRef<TaskDetailsFormState | null>(null);
   const activeDemotionRequest = useRef<{ identity: string } | null>(null);
   const [saving, setSaving] = useState(false);
+	const [checklistBusy, setChecklistBusy] = useState(false);
+	const checklistBusyRef = useRef(false);
   const [demoting, setDemoting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -702,6 +704,33 @@ export const TaskDetailsModal: React.FC<Props> = ({
     if (onSaved) await onSaved();
   };
 
+	const handleToggleChecklist = async (section: string, index: number, checked: boolean) => {
+		if (!task || isReadOnly || checklistBusyRef.current) return;
+		const previous = schemaSections[section];
+		if (!Array.isArray(previous) || !previous.some((item) => "checked" in item && item.index === index)) return;
+		checklistBusyRef.current = true;
+		setChecklistBusy(true);
+		setError(null);
+		setSchemaSections((current) => ({ ...current, [section]: (current[section] as ChecklistItem[]).map((item) => item.index === index ? { ...item, checked } : item) }));
+		try {
+			await apiClient.patchSchemaTask(task.id, { checklist: [{ section, op: checked ? "check" : "uncheck", index }] });
+		} catch (failure) {
+			if (previousTaskId.current === task.id) {
+				setSchemaSections((current) => ({ ...current, [section]: previous }));
+				setError(failure instanceof Error ? failure.message : String(failure));
+			}
+			return;
+		} finally {
+			checklistBusyRef.current = false;
+			setChecklistBusy(false);
+		}
+		try {
+			if (onSaved) await onSaved();
+		} catch (failure) {
+			if (previousTaskId.current === task.id) setError(`Checklist saved, but refresh failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+		}
+	};
+
 	const handleDemote = async () => {
 		if (!task || !canDemote || activeDemotionRequest.current !== null) return;
 		if (!window.confirm(`Demote "${task.title}" to draft? It will be moved to the drafts folder.`)) return;
@@ -791,6 +820,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   return (
     <Modal
       isOpen={isOpen}
+	  scrollKey={task?.id ?? "create"}
       onClose={() => {
 		if (demoting) return;
         // When in edit mode, confirm closing if dirty
@@ -936,6 +966,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
             other={schemaSectionBaseline.other}
             mode={mode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
+			onToggleChecklist={handleToggleChecklist}
+			checklistBusy={checklistBusy}
+			readOnly={isReadOnly}
             onAppendLog={handleAppendLog}
             onLogDraftChange={(id, hasDraft) => setLogDrafts((current) => ({ ...current, [id]: hasDraft }))}
           />
@@ -1002,6 +1035,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
         {/* Sidebar */}
         <div className="md:col-span-1 space-y-4">
+          {shownReadiness && (
+            <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${shownReadiness.isReady ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
+              <span aria-hidden="true">{shownReadiness.isReady ? '✓' : '⏳'}</span>
+              <span>{shownReadiness.isReady ? 'Ready to start' : formatReadinessBlockers(shownReadiness)}</span>
+            </div>
+          )}
           <SchemaSidebar
             values={schemaFields}
             onChange={(key, value) => {
@@ -1017,12 +1056,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
             dateFormat={dateFormat}
             overdueFields={task?.overdue}
           />
-          {shownReadiness && (
-            <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${shownReadiness.isReady ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
-              <span aria-hidden="true">{shownReadiness.isReady ? '✓' : '⏳'}</span>
-              <span>{shownReadiness.isReady ? 'Ready to start' : formatReadinessBlockers(shownReadiness)}</span>
-            </div>
-          )}
 
           {/* Archive button at bottom of sidebar */}
 		          {task && onArchive && !isReadOnly && (
