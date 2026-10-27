@@ -421,19 +421,23 @@ function validateArea(
 function validateUi(value: unknown, fields: Record<string, SchemaField>, issues: SchemaIssue[]): TaskSchema["ui"] {
 	const source = record(value);
 	if (!source) issues.push({ key: "ui", message: "Expected a mapping" });
-	if (source) addUnknownAttributes(source, new Set(["board", "task_list", "milestones", "detail"]), "ui", issues);
+	if (source)
+		addUnknownAttributes(source, new Set(["board", "task_list", "statistics", "milestones", "detail"]), "ui", issues);
 	const board = record(source?.board);
 	const taskList = record(source?.task_list);
+	const statistics = source?.statistics === undefined ? null : record(source.statistics);
 	const milestones = record(source?.milestones);
 	const detail = record(source?.detail);
 	for (const [name, area, attributes] of [
 		["board", board, ["card", "filters"]],
 		["task_list", taskList, ["columns", "filters"]],
+		["statistics", statistics, ["filters"]],
 		["milestones", milestones, ["row"]],
 		["detail", detail, ["order"]],
 	] as const) {
-		if (!area) issues.push({ key: `ui.${name}`, message: "Expected a mapping" });
-		else addUnknownAttributes(area, new Set(attributes), `ui.${name}`, issues);
+		if (!area && !(name === "statistics" && source?.statistics === undefined))
+			issues.push({ key: `ui.${name}`, message: "Expected a mapping" });
+		else if (area) addUnknownAttributes(area, new Set(attributes), `ui.${name}`, issues);
 	}
 	return {
 		board: {
@@ -443,6 +447,11 @@ function validateUi(value: unknown, fields: Record<string, SchemaField>, issues:
 		task_list: {
 			columns: validateArea(taskList, "ui.task_list", "columns", fields, issues),
 			filters: validateArea(taskList, "ui.task_list", "filters", fields, issues, true),
+		},
+		statistics: {
+			filters: statistics
+				? validateArea(statistics, "ui.statistics", "filters", fields, issues, true)
+				: ["project", "assignee"].filter((key) => fields[key] && !fields[key].hidden),
 		},
 		milestones: { row: validateArea(milestones, "ui.milestones", "row", fields, issues) },
 		detail: { order: validateArea(detail, "ui.detail", "order", fields, issues) },

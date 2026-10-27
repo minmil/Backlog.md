@@ -103,6 +103,7 @@ describe("CLI JSON output", () => {
 				reporter: "@sam",
 				labels: ["cli", "json"],
 				milestone: "m-1",
+				dependencies: ["TASK-2"],
 				references: ["https://example.com/issue"],
 				modified_files: ["src/cli.ts"],
 				ordinal: 1000,
@@ -137,6 +138,7 @@ describe("CLI JSON output", () => {
 		const bare = JSON.parse(result.stdout.toString()).tasks.find((t: { id: string }) => t.id === "TASK-3");
 		expect(bare.fields.references).toBeUndefined();
 		expect(bare.fields.modified_files).toBeUndefined();
+		expect(bare.fields.dependencies).toEqual([]);
 		expect(bare.unknownFields).toEqual({});
 	});
 
@@ -276,6 +278,7 @@ describe("CLI JSON output", () => {
 		expect(output.results.map((entry: { type: string }) => entry.type)).toEqual(["task", "document", "decision"]);
 		expect(output.results[0].data.id).toBe("TASK-1");
 		expect(output.results[0].data.fields.status).toBe("In Progress");
+		expect(output.results[0].data.fields.dependencies).toEqual(["TASK-2"]);
 		expect(output.results[0].data.unknownFields).toEqual({});
 		expect(output.results[1].data).toEqual({
 			id: "doc-1",

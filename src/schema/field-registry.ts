@@ -266,8 +266,9 @@ export class FieldRegistry {
 
 	matches(task: Task, condition: FieldCondition): boolean {
 		const actual = this.getField(task, condition.key);
-		if (condition.presence === "unset") return actual === undefined;
-		if (condition.presence === "set") return actual !== undefined;
+		const empty = actual === undefined || (Array.isArray(actual) && actual.length === 0);
+		if (condition.presence === "unset") return empty;
+		if (condition.presence === "set") return !empty;
 		if (actual === undefined) return false;
 		const equal = (expected: FieldValue) =>
 			Array.isArray(actual)

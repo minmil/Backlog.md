@@ -6,6 +6,7 @@ import MermaidMarkdown from "../MermaidMarkdown.tsx";
 import { useTheme } from "../../contexts/ThemeContext.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
+import SelectControl from "../SelectControl.tsx";
 
 interface Props {
 	sectionId: string;
@@ -50,7 +51,7 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 			<div className="space-y-4">
 				{entries.map((entry, index) => <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
 				{mode === "edit" ? <div className="space-y-2">
-					<div className="flex gap-2"><select aria-label="Log author" className="w-full h-10 px-3 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name}</option>)}</select><input aria-label="Log date" type="date" className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} /></div>
+					<div className="flex gap-2"><SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name}</option>)}</SelectControl><input aria-label="Log date" type="date" className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} /></div>
 					<textarea aria-label="Log entry" value={body} onChange={(event) => { setBody(event.target.value); onLogDraftChange?.(Boolean(event.target.value.trim())); }} className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
 					{appendError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{appendError}</p> : null}
 					<button type="button" disabled={!body.trim() || !author || !onAppendLog} onClick={() => {

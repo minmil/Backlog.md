@@ -6,6 +6,7 @@ import DependencyInput from "../DependencyInput.tsx";
 import FieldValue from "./FieldValue.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
+import SelectControl from "../SelectControl.tsx";
 
 interface Props {
 	fieldKey: string;
@@ -34,19 +35,19 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 			<input id={inputId} type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" />
 		);
 	} else if (field.type === "milestone-ref" && milestones) {
-		control = <select id={inputId} className={INPUT_CLASS} value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
+		control = <SelectControl id={inputId} aria-label={label} className="w-full" minWidthClass="w-full" value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
 			<option value="">No milestone</option>
 			{current && !milestones.some((milestone) => milestone.id === current) ? <option value={String(current)}>{String(current)}</option> : null}
 			{milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}
-		</select>;
+		</SelectControl>;
 	} else if (field.type === "enum" || (field.type === "user" && schema.users.length > 0)) {
 		const options = field.type === "user" ? schema.users.map((user) => user.handle) : field.values ?? [];
 		control = (
-			<select id={inputId} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} className={INPUT_CLASS} value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
+			<SelectControl id={inputId} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} className="w-full" minWidthClass="w-full" value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
 				<option value="">No {label.toLowerCase()}</option>
 				{current && !options.includes(String(current)) ? <option value={String(current)}>{String(current)} (not configured)</option> : null}
 				{options.map((option) => <option key={option} value={option}>{field.type === "user" ? schema.users.find((user) => user.handle === option)?.name ?? option : option}</option>)}
-			</select>
+			</SelectControl>
 		);
 	} else if (field.type === "multi-enum" || field.type === "string-list" || field.type === "user-list" || field.type === "task-ref-list") {
 		const items = Array.isArray(value) ? value : [];

@@ -230,13 +230,14 @@ const expectBoardFiltersInHeader = (container: HTMLElement) => {
 
 	for (const ariaLabel of ["Filter board by assignee", "Filter board by type", "Filter board by priority"]) {
 		const select = container.querySelector(`select[aria-label='${ariaLabel}']`) as HTMLSelectElement | null;
+		const trigger = container.querySelector(`button[aria-label='${ariaLabel}']`) as HTMLButtonElement | null;
 		expect(select).toBeTruthy();
 		expect(toolbar?.contains(select)).toBe(true);
-		expect(select?.className).toContain("min-w-[140px]");
-		expect(select?.className).toContain("h-10");
-		expect(select?.className).toContain("rounded-lg");
-		expect(select?.className).toContain("border-gray-300");
-		expect(select?.className).toContain("focus:ring-stone-500");
+		expect(trigger?.className).toContain("min-w-[140px]");
+		expect(trigger?.className).toContain("h-10");
+		expect(trigger?.className).toContain("rounded-lg");
+		expect(trigger?.className).toContain("border-gray-300");
+		expect(trigger?.className).toContain("focus:ring-stone-500");
 	}
 
 	expect(container.querySelector("select[aria-label='Filter board by label']")).toBeNull();

@@ -5,6 +5,9 @@ import type { Task } from '../../types';
 import { formatPriorityLabel } from '../../utils/priority-config';
 import LoadingSpinner from './LoadingSpinner';
 import StoredDate from './StoredDate';
+import FieldFilter from './schema/FieldFilter.tsx';
+import { useSchema } from './schema/SchemaProvider.tsx';
+import type { FieldValue } from '../../schema/field-registry.ts';
 
 interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts'> {
 	statusCounts: Record<string, number>;
@@ -20,12 +23,30 @@ interface StatisticsProps {
 }
 
 const Statistics: React.FC<StatisticsProps> = ({
-	tasks: _tasks,
+	tasks,
 	isLoading: externalLoading,
 	onEditTask,
 	projectName,
 	dateFormat,
 }) => {
+	const { schema, registry } = useSchema();
+	const filterKeys = schema.ui.statistics.filters;
+	const optionsFor = (key: string): string[] | undefined => {
+		if (schema.fields[key]?.values?.length || key === 'assignee') return undefined;
+		const values = (tasks ?? []).flatMap((task) => {
+			const value = registry.getField(task, key);
+			return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+		});
+		return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+	};
+	const [filterValues, setFilterValues] = useState<Record<string, FieldValue | null>>({});
+	const where = filterKeys.flatMap((key) => {
+		const value = filterValues[key];
+		if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return [];
+		if (value === '__unassigned__') return [`${key}=`];
+		return [`${key}=${Array.isArray(value) ? value.join('|') : String(value)}`];
+	});
+	const whereKey = JSON.stringify(where);
 	const [statistics, setStatistics] = useState<StatisticsData | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -68,7 +89,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 				}, 800); // 800ms so users can actually read each message
 
 				// Fetch data (this happens in parallel with message cycling)
-				const data = await apiClient.fetchStatistics();
+				const data = await apiClient.fetchStatistics(JSON.parse(whereKey) as string[]);
 				
 				// Stop the message cycling once data arrives
 				if (messageInterval) {
@@ -98,7 +119,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 				clearInterval(messageInterval);
 			}
 		};
-	}, []);
+	}, [whereKey]);
 
 	if (loading || externalLoading) {
 		return (
@@ -259,6 +280,10 @@ const Statistics: React.FC<StatisticsProps> = ({
 					Overview of your project's task metrics and activity
 				</p>
 			</div>
+			{filterKeys.length > 0 ? <div className="flex flex-wrap items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800" aria-label="Statistics filters">
+				{filterKeys.map((key) => <FieldFilter key={key} context="statistics" fieldKey={key} value={filterValues[key]} options={optionsFor(key)} onChange={(value) => setFilterValues((current) => ({ ...current, [key]: value }))} />)}
+				{where.length > 0 ? <button type="button" onClick={() => setFilterValues({})} className="text-sm text-blue-600 hover:underline dark:text-blue-400">Clear filters</button> : null}
+			</div> : null}
 
 			{/* Key Metrics Cards */}
 			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

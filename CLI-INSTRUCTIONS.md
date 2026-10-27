@@ -122,7 +122,7 @@ Use `--json` for integrations. Task shapes use `schemaVersion: 2`:
 | `search [query] --json` | `{ "schemaVersion": 2, "kind": "search", "results": [...] }` |
 | `schema --json` | `{ "schemaVersion": 2, "kind": "schema", ... }` |
 
-A compact task has `id`, `title`, `fields`, and `unknownFields`. `fields` contains every schema field with a value, including core fields, keyed by its frontmatter name. `unknownFields` preserves stored keys absent from the active schema. List, draft list, and search task entries use this compact shape. Task and draft view add a project-relative `path`, `sections`, and `other`. Markdown sections are strings; checklists are `[{index, text, checked}]`; log sections are `[{author, date, createdAt, auto?, body}]`. `other` is the preserved Markdown outside configured section markers. Field values are not duplicated as top-level properties.
+A compact task has `id`, `title`, `fields`, and `unknownFields`. `fields` contains every schema field with a value, including core fields, keyed by its frontmatter name. It always contains `dependencies`: the stored direct dependency IDs, or `[]` when none are recorded. `unknownFields` preserves stored keys absent from the active schema. List, draft list, and search task entries use this compact shape. Task and draft view add a project-relative `path`, `sections`, and `other`. Markdown sections are strings; checklists are `[{index, text, checked}]`; log sections are `[{author, date, createdAt, auto?, body}]`. `other` is the preserved Markdown outside configured section markers. Field values are not duplicated as top-level properties.
 
 For example:
 

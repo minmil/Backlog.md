@@ -105,6 +105,8 @@ describe("field registry", () => {
 		expect(fields.matches(current, fields.parseCondition("status=done"))).toBe(true);
 		expect(fields.matches(current, fields.parseCondition("uat_date>=today", new Date(2026, 9, 24, 12)))).toBe(true);
 		expect(fields.matches(current, fields.parseCondition("side="))).toBe(true);
+		expect(fields.matches(task(), fields.parseCondition("assignee="))).toBe(true);
+		expect(fields.matches(task(), fields.parseCondition("assignee!="))).toBe(false);
 		expect(() => fields.parseCondition("title=First")).toThrow(/cannot be filtered/);
 		expect(fields.compare("status", "To Do", "Done")).toBeLessThan(0);
 		expect(fields.compare("rank", 2, 10)).toBeLessThan(0);

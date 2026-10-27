@@ -164,6 +164,19 @@ describe("CLI JSON watch", () => {
 		expect(await watch.stderr).toBe("");
 	});
 
+	it("publishes direct dependency edits in replacement snapshots", async () => {
+		await create("TASK-2");
+		await create("TASK-1", { dependencies: ["TASK-2"] });
+		const watch = startWatch();
+		await expectCurrent(watch);
+		const before = JSON.parse(watch.snapshots.at(-1) ?? "").tasks.find((task: Task) => task.id === "TASK-1");
+		expect(before.fields.dependencies).toEqual(["TASK-2"]);
+		await core.updateTaskFromInput("TASK-1", { dependencies: [] }, false);
+		await expectCurrent(watch);
+		const after = JSON.parse(watch.snapshots.at(-1) ?? "").tasks.find((task: Task) => task.id === "TASK-1");
+		expect(after.fields.dependencies).toEqual([]);
+	});
+
 	it("reapplies filters, sorting and limits as tasks enter and leave the result", async () => {
 		await create("TASK-1", { priority: "low", labels: ["cli"] });
 		await create("TASK-2", { priority: "high", status: "Done", labels: ["cli"] });

@@ -689,12 +689,20 @@ export class ApiClient {
 		return response.json();
 	}
 
-	async fetchStatistics(): Promise<
-		TaskStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
+	async fetchStatistics(where: string[] = []): Promise<
+		Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+			statusCounts: Record<string, number>;
+			priorityCounts: Record<string, number>;
+		}
 	> {
+		const query = new URLSearchParams();
+		for (const condition of where) query.append("where", condition);
 		return this.fetchJson<
-			TaskStatistics & { statusCounts: Record<string, number>; priorityCounts: Record<string, number> }
-		>(`${API_BASE}/statistics`);
+			Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+				statusCounts: Record<string, number>;
+				priorityCounts: Record<string, number>;
+			}
+		>(`${API_BASE}/statistics${query.size ? `?${query}` : ""}`);
 	}
 
 	async checkStatus(): Promise<InitializationStatus> {

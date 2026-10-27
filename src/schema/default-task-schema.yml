@@ -6,6 +6,8 @@ users: []
 fields:
   id: {type: id, core: true, managed: true, hidden: true, required: true}
   title: {type: text, core: true, required: true, label: Title}
+  # Add a translated field as a separate value tied to its source:
+  # title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}
   status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
   assignee: {type: user-list, core: true, label: Assignee}
   reporter: {type: user, core: true, label: Reporter}
@@ -40,6 +42,9 @@ ui:
   task_list:
     columns: [status, priority, ordinal, labels, assignee, milestone, created_date]
     filters: [status, priority, milestone, labels]
+  # Add any declared, visible filterable field here to scope every Statistics metric.
+  statistics:
+    filters: [assignee, type, priority]
   milestones:
     row: [status, priority]
   detail:
