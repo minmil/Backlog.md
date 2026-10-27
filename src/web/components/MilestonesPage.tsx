@@ -6,6 +6,7 @@ import { type Milestone, type MilestoneBucket, type Task } from "../../types";
 import { createTaskSearchIndex } from "../../utils/task-search";
 import MilestoneTaskRow from "./MilestoneTaskRow";
 import Modal from "./Modal";
+import SelectControl from "./SelectControl.tsx";
 import StoredDate from "./StoredDate";
 
 type RemoveTaskHandling = "clear" | "reassign";
@@ -1033,21 +1034,22 @@ const MilestonesPage: React.FC<MilestonesPageProps> = ({
 								<span className="block text-xs text-gray-500 dark:text-gray-400">
 									Move matching local tasks to another milestone.
 								</span>
-								<select
+								<SelectControl
+									aria-label="Reassign tasks to milestone"
 									value={removeReassignTo}
 									onChange={(event) => {
 										setRemoveReassignTo(event.target.value);
 										setModalError(null);
 									}}
 									disabled={removeTaskHandling !== "reassign" || !canReassignRemovedMilestone}
-									className="mt-2 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-60"
+									className="mt-2 w-full" minWidthClass="w-full"
 								>
 									{removeReassignOptions.map((milestone) => (
 										<option key={milestone.id} value={milestone.id}>
 											{milestone.title}
 										</option>
 									))}
-								</select>
+								</SelectControl>
 							</span>
 						</label>
 					</div>

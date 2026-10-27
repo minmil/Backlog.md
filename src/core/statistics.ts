@@ -30,6 +30,7 @@ export function getTaskStatistics(
 	drafts: Task[],
 	statuses: string[],
 	priorityOrder?: readonly string[],
+	dependencyTasks: Task[] = tasks,
 ): TaskStatistics {
 	const statusCounts = new Map<string, number>();
 	const priorityCounts = new Map<string, number>();
@@ -126,7 +127,7 @@ export function getTaskStatistics(
 		if (task.dependencies && task.dependencies.length > 0 && task.status !== "Done") {
 			// Check if any dependency is not done
 			const hasBlockingDependency = task.dependencies.some((depId) => {
-				const dep = tasks.find((t) => t.id === depId);
+				const dep = dependencyTasks.find((t) => t.id === depId);
 				return dep && dep.status !== "Done";
 			});
 

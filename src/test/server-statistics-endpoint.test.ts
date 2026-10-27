@@ -45,10 +45,13 @@ type StatisticsResponse = {
 	draftCount: number;
 	statusCounts: Record<string, number>;
 	priorityCounts: Record<string, number>;
+	projectHealth: { blockedTasks: Task[] };
 };
 
-async function requestStatistics(): Promise<StatisticsResponse> {
-	const response = await fetch(`http://127.0.0.1:${serverPort}/api/statistics`);
+async function requestStatistics(where: string[] = []): Promise<StatisticsResponse> {
+	const url = new URL(`http://127.0.0.1:${serverPort}/api/statistics`);
+	for (const condition of where) url.searchParams.append("where", condition);
+	const response = await fetch(url);
 	expect(response.status).toBe(200);
 	return (await response.json()) as StatisticsResponse;
 }
@@ -129,6 +132,35 @@ describe("BacklogServer statistics endpoint", () => {
 			auxiliaryWorktreeDir = null;
 		}
 		await safeCleanup(testDir);
+	});
+
+	it("filters every statistics metric by schema fields including project and assignee", async () => {
+		await server?.stop();
+		server = null;
+		await updateTestTaskSchema(filesystem, (schema) => {
+			if (schema.fields.project) schema.fields.project.values = ["Alpha", "Beta"];
+			schema.users = [
+				{ handle: "@alice", name: "Alice", default: true },
+				{ handle: "@bob", name: "Bob" },
+			];
+		});
+		await filesystem.saveTask(createTask({ id: "TASK-3", project: "Beta", assignee: ["@bob"], priority: "Low" }));
+		await filesystem.saveTask(
+			createTask({
+				id: "TASK-4",
+				project: "Alpha",
+				assignee: ["@alice"],
+				priority: "Urgent",
+				dependencies: ["TASK-3"],
+			}),
+		);
+		await startStatisticsServer();
+		const projectStats = await requestStatistics(["project=Alpha"]);
+		expect(projectStats.totalTasks).toBe(1);
+		expect(projectStats.projectHealth.blockedTasks.map((task) => task.id)).toContain("TASK-4");
+		expect((await requestStatistics(["assignee=@bob"])).totalTasks).toBe(1);
+		expect((await requestStatistics(["assignee="])).totalTasks).toBe(2);
+		expect((await requestStatistics(["project=Alpha", "assignee=@bob"])).totalTasks).toBe(0);
 	});
 
 	it("reuses branch state while reconciling cached working-copy tasks across statistics requests", async () => {

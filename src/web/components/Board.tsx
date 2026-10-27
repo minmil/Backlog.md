@@ -14,7 +14,7 @@ import { BoardLoadingSkeleton } from './BoardLoadingSkeleton';
 import CleanupModal from './CleanupModal';
 import LabelFilterDropdown from './LabelFilterDropdown';
 import FieldFilter from './schema/FieldFilter.tsx';
-import FilterSelect from './FilterSelect.tsx';
+import SelectControl from './SelectControl.tsx';
 import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import { SuccessToast } from './SuccessToast';
@@ -707,7 +707,7 @@ const Board: React.FC<BoardProps> = ({
             <label className="sr-only" htmlFor="batch-move-status">
               Move selected tasks to
             </label>
-            <FilterSelect
+            <SelectControl
               id="batch-move-status"
               value={batchMoveStatus}
               onChange={(event) => setBatchMoveStatus(event.target.value)}
@@ -718,7 +718,7 @@ const Board: React.FC<BoardProps> = ({
                   {status}
                 </option>
               ))}
-            </FilterSelect>
+            </SelectControl>
             <button
               type="button"
               className={BOARD_FILTER_BUTTON_CLASS}
@@ -766,7 +766,7 @@ const Board: React.FC<BoardProps> = ({
               {hasActiveFilters && <button type="button" onClick={onSchemaFiltersClear} className={BOARD_FILTER_BUTTON_CLASS}>Clear filters</button>}
             </div> : onFiltersChange && (
               <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">
-                <FilterSelect
+                <SelectControl
                   aria-label="Filter board by assignee"
                   value={filterAssignee}
                   onChange={e => onFiltersChange({ assignee: e.target.value, labels: normalizedFilterLabels, priority: filterPriority, taskType: filterType, project: filterProject })}
@@ -776,7 +776,7 @@ const Board: React.FC<BoardProps> = ({
                   {uniqueAssignees.map(a => (
                     <option key={a} value={a}>{a}</option>
                   ))}
-                </FilterSelect>
+                </SelectControl>
 
                 <LabelFilterDropdown
                   availableLabels={uniqueLabels}
@@ -786,7 +786,7 @@ const Board: React.FC<BoardProps> = ({
                   className="min-w-[200px]"
                 />
 
-                <FilterSelect
+                <SelectControl
                   aria-label="Filter board by type"
                   value={filterType}
                   onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: filterPriority, taskType: e.target.value, project: filterProject })}
@@ -795,10 +795,10 @@ const Board: React.FC<BoardProps> = ({
                   {typeOptions.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
-                </FilterSelect>
+                </SelectControl>
 
                 {projectOptions.length > 0 && (
-                  <FilterSelect
+                  <SelectControl
                     aria-label="Filter board by project"
                     value={filterProject}
                     onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: filterPriority, taskType: filterType, project: e.target.value })}
@@ -807,10 +807,10 @@ const Board: React.FC<BoardProps> = ({
                     {projectOptions.map(project => (
                       <option key={project} value={project}>{project}</option>
                     ))}
-                  </FilterSelect>
+                  </SelectControl>
                 )}
 
-                <FilterSelect
+                <SelectControl
                   aria-label="Filter board by priority"
                   value={filterPriority}
                   onChange={e => onFiltersChange({ assignee: filterAssignee, labels: normalizedFilterLabels, priority: e.target.value, taskType: filterType, project: filterProject })}
@@ -818,7 +818,7 @@ const Board: React.FC<BoardProps> = ({
                   {priorityOptions.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
-                </FilterSelect>
+                </SelectControl>
 
                 {hasActiveFilters && (
                   <button

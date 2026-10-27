@@ -69,12 +69,29 @@ describe("task schema", () => {
 
 	test("filters reject non-filterable types", () => {
 		expect(getDefaultTaskSchema().ui.board.filters).toContain("priority");
+		expect(getDefaultTaskSchema().ui.statistics.filters).toEqual(["assignee", "type", "priority"]);
 		expect(() => parseTaskSchema(altered("filters: [assignee,", "filters: [title,"))).toThrow(/cannot be filtered/);
+		expect(() => parseTaskSchema(altered("filters: [assignee, type, priority]", "filters: [title]"))).toThrow(
+			/cannot be filtered/,
+		);
+		expect(
+			parseTaskSchema(
+				getDefaultTaskSchemaText().replace("  statistics:\n    filters: [assignee, type, priority]\n", ""),
+			).ui.statistics.filters,
+		).toEqual(["assignee"]);
 	});
 
 	test("translations require declared compatible sources", () => {
 		const valid = `${getDefaultTaskSchemaText()}\n`;
 		expect(parseTaskSchema(valid).sections.description?.kind).toBe("markdown");
+		const translatedField = altered(
+			"  title: {type: text, core: true, required: true, label: Title}",
+			"  title: {type: text, core: true, required: true, label: Title}\n  title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}",
+		);
+		expect(parseTaskSchema(translatedField).fields.title_ja?.translation_of).toBe("title");
+		expect(() => parseTaskSchema(translatedField.replace("title_ja: {type: text", "title_ja: {type: number"))).toThrow(
+			/same type/,
+		);
 		expect(() =>
 			parseTaskSchema(
 				altered(

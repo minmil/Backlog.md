@@ -62,6 +62,7 @@ export interface TaskSchema {
 	ui: {
 		board: { card: string[]; filters: string[] };
 		task_list: { columns: string[]; filters: string[] };
+		statistics: { filters: string[] };
 		milestones: { row: string[] };
 		detail: { order: string[] };
 	};

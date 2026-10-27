@@ -633,7 +633,7 @@ export class BacklogServer {
 						GET: async () => await this.handleGetVersion(),
 					},
 					"/api/statistics": {
-						GET: async () => await this.handleGetStatistics(),
+						GET: async (req: Request) => await this.handleGetStatistics(req),
 					},
 					"/api/status": {
 						GET: async () => await this.handleGetStatus(),
@@ -2257,7 +2257,7 @@ export class BacklogServer {
 		}
 	}
 
-	private async handleGetStatistics(): Promise<Response> {
+	private async handleGetStatistics(req: Request): Promise<Response> {
 		try {
 			const servicesWereReady = this.servicesInitialized;
 			const store = await this.getContentStoreInstance();
@@ -2269,9 +2269,24 @@ export class BacklogServer {
 			const statuses = schema.fields.status?.values ?? Array.from(DEFAULT_STATUSES);
 			const tasks = corpus.identityIndex?.getTasks(true) ?? corpus.activeTasks;
 			const priorities = schema.fields.priority?.values ?? [];
+			const expressions = new URL(req.url).searchParams.getAll("where");
+			let filteredTasks = tasks;
+			let filteredDrafts = drafts;
+			if (expressions.length) {
+				try {
+					const registry = new FieldRegistry(schema);
+					const conditions = expressions.map((expression) => registry.parseCondition(expression));
+					filteredTasks = tasks.filter((task) => conditions.every((condition) => registry.matches(task, condition)));
+					filteredDrafts = drafts.filter((draft) =>
+						conditions.every((condition) => registry.matches(draft, condition)),
+					);
+				} catch (error) {
+					return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+				}
+			}
 
 			// Calculate statistics using the exact same function as CLI
-			const statistics = getTaskStatistics(tasks, drafts, statuses, priorities);
+			const statistics = getTaskStatistics(filteredTasks, filteredDrafts, statuses, priorities, tasks);
 
 			// Convert Maps to objects for JSON serialization
 			const response = {

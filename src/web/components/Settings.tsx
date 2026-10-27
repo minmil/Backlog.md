@@ -3,6 +3,7 @@ import { apiClient } from '../lib/api';
 import { SuccessToast } from './SuccessToast';
 import type { BacklogConfig } from '../../types';
 import { useSchema } from './schema/SchemaProvider.tsx';
+import SelectControl from './SelectControl.tsx';
 
 const Settings: React.FC = () => {
 	const { schema } = useSchema();
@@ -153,16 +154,17 @@ const Settings: React.FC = () => {
 								<label htmlFor="dateFormat" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
 									Date Format
 								</label>
-								<select
+								<SelectControl
 									id="dateFormat"
+									aria-label="Date Format"
 									value={config.dateFormat}
 									onChange={(e) => handleInputChange('dateFormat', e.target.value)}
-									className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
+									className="w-full" minWidthClass="w-full"
 								>
 									<option value="yyyy-mm-dd">yyyy-mm-dd</option>
 									<option value="dd/mm/yyyy">dd/mm/yyyy</option>
 									<option value="mm/dd/yyyy">mm/dd/yyyy</option>
-								</select>
+								</SelectControl>
 								<p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
 									Controls how dates are displayed in the web UI and TUI. Dates in markdown files are always stored as yyyy-mm-dd.
 								</p>
@@ -327,15 +329,16 @@ const Settings: React.FC = () => {
 								<label htmlFor="taskResolutionStrategy" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
 									Task Resolution Strategy
 								</label>
-								<select
+								<SelectControl
 									id="taskResolutionStrategy"
+									aria-label="Task Resolution Strategy"
 									value={config.taskResolutionStrategy}
 									onChange={(e) => handleInputChange('taskResolutionStrategy', e.target.value as 'most_recent' | 'most_progressed')}
-									className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 transition-colors duration-200"
+									className="w-full" minWidthClass="w-full"
 								>
 									<option value="most_recent">Most Recent</option>
 									<option value="most_progressed">Most Progressed</option>
-								</select>
+								</SelectControl>
 								<p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
 									Strategy for resolving conflicts when tasks exist in multiple branches
 								</p>

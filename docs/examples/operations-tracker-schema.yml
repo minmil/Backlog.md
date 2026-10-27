@@ -49,6 +49,8 @@ ui:
   task_list:
     columns: [status, type, project, priority, tech_action, release_item, raised_date, uat_date, prod_date, ordinal, labels, assignee, milestone, created_date]
     filters: [status, priority, milestone, labels, project, type, side, tech_action, release_item, uat_date]
+  statistics:
+    filters: [project, assignee, type, client_facing, side, tech_action]
   milestones:
     row: [status, priority]
   detail:
