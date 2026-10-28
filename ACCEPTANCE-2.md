@@ -8,10 +8,10 @@ All supplied task fields used repeatable `--field` assignments, including core s
 
 | ID | Title | Selected fields |
 | --- | --- | --- |
-| TASK-1 | Client release | In Progress, @owner, Client A, Change, high, side=us, tech_action=Testing, release_item=true, uat_date=2026-11-04, prod_date=2026-11-10 |
-| TASK-2 | Await client | To Do, @colleague, Client B, Inquiry, side=them, tech_action=Awaiting Client, client_facing=true |
-| TASK-3 | Unscheduled release | Done, @owner, Client A, Incident, tech_action=Released, release_item=true, uat_date unset, prod_date=2026-11-12 |
-| DRAFT-1 | Future change | Draft lifecycle status, Change, Client B, side=us |
+| TASK-1 | Client release | In Progress, @owner, Client 1, Change, high, side=us, tech_action=Testing, release_item=true, uat_date=2026-11-04, prod_date=2026-11-10 |
+| TASK-2 | Await client | To Do, @colleague, Client 2, Inquiry, side=them, tech_action=Awaiting Client, client_facing=true |
+| TASK-3 | Unscheduled release | Done, @owner, Client 1, Incident, tech_action=Released, release_item=true, uat_date unset, prod_date=2026-11-12 |
+| DRAFT-1 | Future change | Draft lifecycle status, Change, Client 2, side=us |
 
 The first task was created with `--section description='Prepare the client release'` and `--add-item acceptance='Client approves UAT'`. Creating TASK-1, TASK-2, and TASK-3 wrote automatic log entries for their `track_changes` field `tech_action`.
 

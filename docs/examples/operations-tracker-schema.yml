@@ -1,4 +1,4 @@
-# Example Operations Tracker. Replace the placeholder users and enum values for your team.
+# Example operations tracker with fictional clients. Replace placeholders for your team.
 users:
   - {handle: "@owner", name: Owner, default: true}
   - {handle: "@colleague", name: Colleague}
@@ -23,7 +23,7 @@ fields:
   subtasks: {type: task-ref-list, core: true, managed: true, hidden: true, label: Subtasks}
   priority: {type: enum, core: true, values: [high, medium, low], label: Priority}
   type: {type: enum, core: true, values: [Change, Inquiry, Incident], label: Category}
-  project: {type: enum, core: true, values: [Client A, Client B], label: Client}
+  project: {type: enum, core: true, values: [Client 1, Client 2], label: Client}
   ordinal: {type: number, core: true, managed: true, label: Ordinal}
   onStatusChange: {type: text, core: true, hidden: true, label: On status change}
   # Computed from Git; read-only and never written as task frontmatter.

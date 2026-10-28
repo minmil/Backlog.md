@@ -155,7 +155,7 @@ ui:
 
 ### 2.6 Shipped schemas
 - `src/schema/default-task-schema.yml`, written by `backlog init`. It contains every core field, with the values and visibility that reproduce today's default behavior. Its sections are `description` (markdown), `acceptance` (checklist, titled "Acceptance Criteria") and `log` (log, titled "Log"). Its users list is empty.
-- `docs/examples/operations-tracker-schema.yml`, an example for the owner's use case. It includes:
+- `docs/examples/operations-tracker-schema.yml`, a fictional operations example. It includes:
   - `title_ja`
   - `description_ja`
   - the custom fields from the handoff: `client_facing`, `side`, `tech_action` (`track_changes: true`), `release_item`, `raised_date`, `uat_date`, `prod_date`
@@ -374,7 +374,7 @@ Produce `AUDIT.md` containing:
 2. Every server endpoint that touches fields, sections or the config keys being moved.
 3. Every CLI command or flag that touches them.
 4. Every TUI and MCP file that will need minimal compile fixes.
-5. **Baseline screenshots** of each screen (board, task list, task detail view and edit, create, milestones, drafts, statistics, settings), in light and dark mode. Take them with Playwright against a sample project of 10 tasks that uses every built-in field and section. Save them under `docs/screenshots/before/`.
+5. **Baseline visual review** of each screen (board, task list, task detail view and edit, create, milestones, drafts, statistics, settings), in light and dark mode. Use a synthetic sample project of 10 tasks that exercises every built-in field and section. Keep any captures outside the repository.
 6. The exact current contents of each UI area, for writing `ui` defaults that reproduce today's UI.
 
 **Done when:** `AUDIT.md` and the screenshots are committed. Post a summary and **continue without waiting**, unless the audit contradicts this plan; in that case **[ASK]**.
@@ -419,7 +419,7 @@ Tests:
 Build `SchemaProvider`, `FieldValue`, `FieldInput`, `FieldFilter`, `EnumBadge`, `SectionBlock` and `OtherContent` under `src/web/components/schema/`, following §6.1. Add unit tests in the style of the existing `src/web` tests: one per type for `FieldValue` and `FieldInput`, and one per kind for `SectionBlock`.
 
 ### Task 7: Board (cards and filters)
-Implement the board rows of §6.3. With the **default** schema, the board must look identical to the baseline screenshots. Compare `docs/screenshots/before/` with a new `docs/screenshots/after/` and note any pixel-level differences. With the **example** schema, the custom fields appear on cards and in filters.
+Implement the board rows of §6.3. With the **default** schema, preserve the baseline board layout. Review it before and after with synthetic data. With the **example** schema, the custom fields appear on cards and in filters.
 
 ### Task 8: Task list
 Implement the task list row of §6.3, with the same before/after comparison and the example-schema check.
@@ -447,7 +447,7 @@ Implement §6.4, and test it with the example schema (`title` / `title_ja`, `des
   - use `--section`, `--check` and `task log` for sections
   - never edit task files by hand
   - copy enum values and user handles exactly
-- Add `docs/examples/AGENTS.md.template` for the owner's future data repo. It covers the tool, the startup commands, the rules, and a "common requests → commands" table written against the example schema.
+- Add `docs/examples/AGENTS.md.template` for users' data repositories. It covers the tool, startup commands, rules, and a "common requests → commands" table written against the fictional example schema.
 
 ### Task 13: Verification and release
 1. Run the full test suite and record the results against the baseline.
@@ -460,7 +460,7 @@ Implement §6.4, and test it with the example schema (`title` / `title_ja`, `des
    - an invalid write rejected with the file unchanged
    - `schema validate` catching a broken reference
    - JSON v2 output samples
-3. Take screenshots, light and dark, of every screen with the example schema, saved to `docs/screenshots/after/`, plus a short visual review note.
+3. Review every screen in light and dark with the fictional example schema and record a short visual review note. Keep any captures outside the repository.
 4. Build `dist/backlog`, check that `--version` reports `1.55.1-cf.2`, run `schema --json`, and tag `v1.55.1-cf.2`.
 5. Update `TECHNICAL-HANDOFF.md` to describe the new state.
 

@@ -1,4 +1,4 @@
-# Operations Tracker agent instructions
+# Operations tracker agent instructions
 
 This repository tracks client work with Backlog.md. Run commands from the repository root. The project schema is `backlog/task-schema.yml` (or the configured backlog directory). Read the live schema before changing work:
 
@@ -27,7 +27,7 @@ These examples use the companion `operations-tracker-schema.yml`. Adjust exact e
 | Show client-facing open work | `backlog task list --where 'client_facing=true' --where 'status!=Done' --plain` |
 | Find release items without UAT dates | `backlog task list --where 'release_item=true' --where 'uat_date=' --show-fields project,uat_date,prod_date --plain` |
 | Order production work by date | `backlog task list --where 'release_item=true' --sort prod_date --show-fields prod_date,tech_action --plain` |
-| Add a client inquiry | `backlog task create 'Client inquiry' --field type=Inquiry --field project='Client A' --field side=them --field client_facing=true --section description='Client question and context'` |
+| Add a client inquiry | `backlog task create 'Client inquiry' --field type=Inquiry --field project='Client 1' --field side=them --field client_facing=true --section description='Client question and context'` |
 | Assign an owner and record an update | `backlog task edit TASK-1 --field assignee=@owner` then `backlog task log TASK-1 'Called client' --author @owner --date 2026-10-24` |
 | Complete a verified acceptance item | `backlog task edit TASK-1 --check acceptance:1` |
 

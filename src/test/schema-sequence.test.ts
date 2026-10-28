@@ -25,7 +25,7 @@ async function project() {
 		schema.fields.client_ref = {
 			type: "sequence",
 			scope: "project",
-			prefixes: { Client 1: "C1", "Client 2": "C2" },
+			prefixes: { "Client 1": "C1", "Client 2": "C2" },
 			pad: 3,
 			assign_when: { client_facing: true },
 		};
@@ -97,7 +97,10 @@ test("drafts wait for promotion and manual references cannot duplicate, mismatch
 	).task;
 	expect(registry.getField(manual, "client_ref")).toBe("C1-015");
 	expect(
-		registry.getField((await core.createTaskFromInput({ title: "Next", project: "Client 1" }, false)).task, "client_ref"),
+		registry.getField(
+			(await core.createTaskFromInput({ title: "Next", project: "Client 1" }, false)).task,
+			"client_ref",
+		),
 	).toBe("C1-016");
 	await expect(core.updateTaskFromInput(manual.id, { clearSchemaFields: ["client_ref"] }, false)).rejects.toThrow(
 		/permanent reference/,

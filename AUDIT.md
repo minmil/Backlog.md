@@ -1,6 +1,6 @@
 # Task schema audit (before behavior changes)
 
-Base: `v1.55.1-cf.1` (`c645ca5`). The browser reference project is `/tmp/schema-audit`, copied from the nine-task custom-fields acceptance project, with a tenth task, one milestone, and one draft added through the CLI. Its pre-schema data files are archived under `docs/screenshots/sample/backlog/` for later visual comparison. Screenshots are under `docs/screenshots/before/` and can be recaptured with `docs/screenshots/capture-baseline.cjs` while the **built** app serves the sample on port 6421.
+Base: `v1.55.1-cf.1` (`c645ca5`). The browser reference project was a synthetic ten-task sample with one milestone and one draft, served by the built app for visual review. The sample files and captures were removed from this public repository; new visual checks should use fictional data and keep captures outside the repository.
 
 ## Storage and design discrepancy requiring owner choice
 

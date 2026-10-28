@@ -90,7 +90,7 @@ describe("schema field components", () => {
 
 	it("shows sequence references as read-only and previews assignment on create", () => {
 		const schema = schemaWithField("sequence");
-		schema.fields.sample = { type: "sequence", label: "Client ref", scope: "project", prefixes: { Client 1: "C1" }, pad: 3, assign_when: { client_facing: true } };
+		schema.fields.sample = { type: "sequence", label: "Client ref", scope: "project", prefixes: { "Client 1": "C1" }, pad: 3, assign_when: { client_facing: true } };
 		schema.fields.project = { ...schema.fields.project!, hidden: false, values: ["Client 1"] };
 		schema.fields.client_facing = { type: "bool" };
 		const badge = renderToStaticMarkup(<SchemaProvider initialSchema={schema}><FieldValue fieldKey="sample" value="C1-007" variant="card" /></SchemaProvider>);
