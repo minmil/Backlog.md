@@ -22,12 +22,57 @@ describe("schema task API", () => {
 		await initializeFilesystemTestProject(core, "Schema API");
 		await updateTestTaskSchema(core.filesystem, (schema) => {
 			schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+			const title = schema.fields.title;
+			const description = schema.sections.description;
+			if (!title || !description) throw new Error("Default schema is incomplete");
+			title.lang = "en";
+			description.lang = "en";
+			schema.fields.title_ja = { type: "text", label: "Title (JA)", lang: "ja", translation_of: "title" };
+			schema.sections.description_ja = {
+				kind: "markdown",
+				title: "Description (JA)",
+				lang: "ja",
+				translation_of: "description",
+			};
 			schema.fields.side = { type: "enum", values: ["Buyer", "Seller"], label: "Side" };
 			schema.fields.due_date = { ...schema.fields.due_date!, overdue_when: { status: ["To Do", "In Progress"] } };
 		});
 		server = new BacklogServer(directory);
 		await server.start(0, false);
 		baseUrl = `http://127.0.0.1:${server.getPort()}`;
+	});
+
+	it("returns translated display projections and rejects unsupported languages", async () => {
+		const schema = await (await fetch(`${baseUrl}/api/schema`)).json();
+		expect(schema.displayLanguages).toEqual(["en", "ja"]);
+		expect(schema.defaultLanguage).toBe("en");
+		const response = await fetch(`${baseUrl}/api/tasks`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				title: "Example task",
+				fields: { title_ja: "例のタスク" },
+				sections: { description: "English body", description_ja: "日本語の本文" },
+			}),
+		});
+		expect(response.status).toBe(201);
+		const created = await response.json();
+		const list = await (await fetch(`${baseUrl}/api/tasks?lang=ja`)).json();
+		expect(list.find((item: { id: string }) => item.id === created.id).display).toMatchObject({
+			lang: "ja",
+			title: "例のタスク",
+			fields: { title: "例のタスク" },
+			fallback: [],
+		});
+		const view = await (await fetch(`${baseUrl}/api/tasks/${created.id}?lang=ja`)).json();
+		expect(view.display.sections.description).toBe("日本語の本文");
+		const search = await (await fetch(`${baseUrl}/api/search?query=Example&types=task&lang=ja`)).json();
+		expect(search.find((item: { type: string }) => item.type === "task").task.display.title).toBe("例のタスク");
+		for (const path of ["/api/tasks", `/api/tasks/${created.id}`, "/api/search"]) {
+			const invalid = await fetch(`${baseUrl}${path}?lang=de`);
+			expect(invalid.status).toBe(400);
+			expect((await invalid.json()).allowedLanguages).toEqual(["en", "ja"]);
+		}
 	});
 
 	it("returns overdue arrays and filters the task API by an overdue date field", async () => {
