@@ -7,6 +7,7 @@ import { FileSystem } from "../file-system/operations.ts";
 import { taskListJson } from "../formatters/json-output.ts";
 import { parseTask } from "../markdown/parser.ts";
 import { serializeTask } from "../markdown/serializer.ts";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { FieldRegistry, type FieldValue } from "../schema/field-registry.ts";
 import { getDefaultTaskSchemaText, parseTaskSchema } from "../schema/index.ts";
 import type { Task } from "../types/index.ts";
@@ -53,6 +54,76 @@ function task(): Task {
 }
 
 describe("field registry", () => {
+	test("resolves field and section translation groups with source fallback", () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		const title = schema.fields.title;
+		const description = schema.sections.description;
+		if (!title || !description) throw new Error("Default schema is missing translation sources");
+		title.lang = "en";
+		schema.fields.title_ja = { type: "text", lang: "ja", translation_of: "title" };
+		schema.fields.title_fr = { type: "text", lang: "fr", translation_of: "title" };
+		schema.fields.note = { type: "text" };
+		description.lang = "en";
+		schema.sections.description_ja = {
+			kind: "markdown",
+			title: "Description JA",
+			lang: "ja",
+			translation_of: "description",
+		};
+		const fields = new FieldRegistry(schema);
+		const translated = {
+			...task(),
+			fieldValues: { title_ja: "最初", title_fr: "Premier", note: "Shared" },
+			sections: { description: "English", description_ja: "日本語", acceptance: [] },
+		};
+		expect(fields.displayLanguages).toEqual(["en", "ja", "fr"]);
+		expect(fields.defaultLanguage).toBe("en");
+		expect(fields.translationGroup("title_ja")).toEqual(["title", "title_ja", "title_fr"]);
+		expect(fields.resolveDisplay(translated, "title", "ja")).toEqual({ value: "最初", lang: "ja", fallback: false });
+		expect(fields.resolveDisplay(translated, "title", "fr")).toEqual({ value: "Premier", lang: "fr", fallback: false });
+		expect(fields.resolveDisplay({ ...translated, fieldValues: { title_ja: "" } }, "title", "ja")).toEqual({
+			value: "First",
+			lang: "en",
+			fallback: true,
+		});
+		expect(fields.resolveDisplay(translated, "note", "ja")).toEqual({
+			value: "Shared",
+			lang: undefined,
+			fallback: false,
+		});
+		expect(fields.resolveSectionDisplay(translated, "description", "ja")).toEqual({
+			value: "日本語",
+			lang: "ja",
+			fallback: false,
+		});
+		expect(
+			fields.resolveSectionDisplay(
+				{ ...translated, sections: { description: "English", description_ja: "" } },
+				"description",
+				"ja",
+			),
+		).toEqual({ value: "English", lang: "en", fallback: true });
+		expect(fields.resolveSectionDisplay(translated, "acceptance", "ja")).toEqual({
+			value: [],
+			lang: undefined,
+			fallback: false,
+		});
+		expect(fields.translationOrder(["title", "title_ja", "title_fr", "note"], "ja")).toEqual([
+			"title_ja",
+			"title",
+			"title_fr",
+			"note",
+		]);
+		expect(() => fields.validateDisplayLanguage("de")).toThrow(/Allowed languages: en, ja, fr/);
+	});
+
+	test("uses the first declared language when the title has no language", () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.note = { type: "text", lang: "fr" };
+		const fields = new FieldRegistry(schema);
+		expect(fields.defaultLanguage).toBe("fr");
+		expect(fields.resolveDisplay(task(), "title", "fr")).toEqual({ value: "First", lang: undefined, fallback: false });
+	});
 	test("reads and updates core and custom fields through the same API", () => {
 		const fields = registry();
 		const original = task();
