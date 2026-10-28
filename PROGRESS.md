@@ -1,5 +1,11 @@
 # Schema-driven tracker progress
 
+## History publication and fresh-clone verification (2026-10-28)
+
+Part P published the reviewed rewritten history to the existing fork. The only force-push in this round moved `main` to `619e8423` and published the rewritten `v1.55.1-cf.1` through `cf.3` tags; the stale review branch was deleted. The upstream `v1.55.1` commit stayed at `603d90af`. Public tag targets and the cf.3 release title and empty notes were verified on GitHub. Tag publication did not start a new release workflow run, so the six existing cf.3 assets were not rebuilt. The pre-publication gate passed with 3,383 pass / 46 skip / 22 known fail, plus passing check, types, and build.
+
+Part 0 removed the old checkout and cloned the published fork afresh. Local `main` matched `origin/main`; all-ref searches found no audited work content or matching commit messages, and no screenshot path was reachable. The three cf tags pointed to the expected rewritten commits with clean annotation text. The four fork commit IDs in `UPSTREAM-SYNC.md` resolved and their diffs matched the listed fixes. Origin retained 15 other inherited branches (`experiment/codex-integration`, nine `pr669/*` branches, and five `tasks/*` branches); none was changed by this publication. The fresh-clone full suite reported **3,383 pass / 46 skip / 22 known fail / 3,451 total** across 317 files, with failure names identical to the pre-publication gate. `bun run check`, `bun run check:types`, and `bun run build` passed.
+
 ## Fork release delivery (2026-10-25)
 
 The prototype branches were merged into the fork's `main` at `329a37fa`. The fork's release workflow now runs only for new `vMAJOR.MINOR.PATCH-cf.N` tags, builds six standalone executables, and attaches them to a GitHub Release. The npm publishing, package installation checks, tag rewriting, and `package.json` version-sync jobs were removed. Fork installation and agent release instructions now describe the binary download path. No new tag or GitHub Release has been created for this workflow yet.
