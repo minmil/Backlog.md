@@ -15,3 +15,5 @@ This public fork retains Markdown task files and a YAML task schema. Examples an
 The Part 1 gate completed at 3,396 pass, 46 skip, and 22 known failures across 319 files; `check`, `check:types`, and `build` pass. The known baseline is 19 archive/record cases and three Nix cases requiring Node 26.12.1 on a Node 24 host. TUI and MCP feature upgrades remain outside the owner-approved scope; their related tests stay skipped. The browser language display is focused on task-facing surfaces; app chrome, field labels, section titles, and enum values remain in their configured language. Screenshots used for review live outside this repository under `/tmp/lang-screenshots/`.
 
 See `PROGRESS.md` for commit-by-commit work and gate counts, `KNOWN-FAILURES.md` for the baseline, and `UPSTREAM-SYNC.md` for the last reviewed upstream changes.
+
+The current release tag is `v1.55.1-cf.4` on the tested language-display merge. GitHub did not start an automatic `cf.4` release workflow; build from the tag when binaries are needed.
