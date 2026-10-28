@@ -8,6 +8,7 @@ import StoredDate from './StoredDate';
 import FieldFilter from './schema/FieldFilter.tsx';
 import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue } from '../../schema/field-registry.ts';
+import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
 
 interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts'> {
 	statusCounts: Record<string, number>;
@@ -169,7 +170,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 			>
 				<StatusIcon status={task.status} />
 				<div className="flex-1 min-w-0">
-					<p className="font-medium text-gray-900 dark:text-gray-100 truncate">{task.title}</p>
+					<p className="font-medium text-gray-900 dark:text-gray-100 truncate"><TaskDisplayTitle task={task} /></p>
 					<p className="text-sm text-gray-500 dark:text-gray-400">
 						{task.id} • {showDate === 'created' ? 'Created' : 'Updated'} <StoredDate value={displayDate} dateFormat={dateFormat} />
 					</p>

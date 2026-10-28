@@ -7,6 +7,7 @@ import { useTheme } from "../../contexts/ThemeContext.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
 import SelectControl from "../SelectControl.tsx";
+import { FallbackLanguageCode } from "./DisplayLanguageContext.tsx";
 
 interface Props {
 	sectionId: string;
@@ -18,9 +19,10 @@ interface Props {
 	readOnly?: boolean;
 	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (hasDraft: boolean) => void;
+	fallbackLang?: string;
 }
 
-export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange }: Props): ReactElement | null {
+export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang }: Props): ReactElement | null {
 	const { schema } = useSchema();
 	const { theme } = useTheme();
 	const section = schema.sections[sectionId];
@@ -64,5 +66,5 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 			</div>
 		);
 	}
-	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100"><span>{title}</span>{section.lang ? <LanguagePill lang={section.lang} /> : null}</h2>{content}</section>;
+	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100"><span>{title}</span>{section.lang ? <LanguagePill lang={section.lang} /> : null}</h2>{content}{fallbackLang ? <FallbackLanguageCode lang={fallbackLang} /> : null}</section>;
 }

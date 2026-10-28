@@ -4,6 +4,8 @@ import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from 
 import FieldValue from './schema/FieldValue.tsx';
 import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
+import TaskDisplayTitle, { useTaskDisplay } from './schema/TaskDisplayTitle.tsx';
+import { FallbackLanguageCode } from './schema/DisplayLanguageContext.tsx';
 
 interface TaskCardProps {
   task: Task;
@@ -75,8 +77,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const [isDragging, setIsDragging] = React.useState(false);
   const [showBranchTooltip, setShowBranchTooltip] = React.useState(false);
   const { schema, registry } = useSchema();
+  const { resolve, title, showFallback } = useTaskDisplay();
   const cardFields = schema.ui.board.card.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const fieldValue = (key: string): RegistryFieldValue | undefined => {
+    if (schema.fields[key]?.lang || registry.translationGroup(key).length > 1) return resolve(task, key).value;
     const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
     return supplied?.[key] ?? registry.getField(task, key);
   };
@@ -90,8 +94,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const isFromOtherBranch = Boolean(task.branch);
   const acceptanceCriteriaProgress = getAcceptanceCriteriaProgressCounts(task);
   const accessibleLabel = acceptanceCriteriaProgress
-    ? `Open ${task.id}: ${task.title}. Acceptance criteria progress: ${acceptanceCriteriaProgress.checked} of ${acceptanceCriteriaProgress.total}`
-    : `Open ${task.id}: ${task.title}`;
+    ? `Open ${task.id}: ${String(title(task).value ?? '')}. Acceptance criteria progress: ${acceptanceCriteriaProgress.checked} of ${acceptanceCriteriaProgress.total}`
+    : `Open ${task.id}: ${String(title(task).value ?? '')}`;
 
   const handleDragStart = (e: React.DragEvent) => {
     // Prevent dragging cross-branch tasks
@@ -225,7 +229,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 font-mono transition-colors duration-200">{task.id}</span>
-            {badgeFields.map((key) => <FieldValue key={key} fieldKey={key} value={fieldValue(key)} variant="card" overdue={task.overdue?.includes(key)} />)}
+            {badgeFields.map((key) => { const display = resolve(task, key); return <span key={key}><FieldValue fieldKey={key} value={fieldValue(key)} variant="card" overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>; })}
           </div>
           {(acceptanceCriteriaProgress || priorityValue) && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -241,10 +245,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
             ? 'text-gray-600 dark:text-gray-400'
             : 'text-gray-900 dark:text-gray-100'
         }`}>
-          {task.title}
+          <TaskDisplayTitle task={task} />
         </h4>
 
-        {listFields.map((key) => { const value = fieldValue(key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" overdue={task.overdue?.includes(key)} /></div> : null; })}
+        {listFields.map((key) => { const value = fieldValue(key); const display = resolve(task, key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</div> : null; })}
 
         {/* Footer with dates and assignee */}
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[10px] text-gray-400 dark:text-gray-500 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-600/50 transition-colors duration-200">
@@ -254,13 +258,15 @@ const TaskCard: React.FC<TaskCardProps> = ({
           <span className="flex flex-wrap gap-x-2 gap-y-1">{adjacentDateFields.map((key) => {
             const value = fieldValue(key);
             if (value === undefined || value === null || value === '') return null;
-            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></span>;
+            const display = resolve(task, key);
+            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>;
           })}</span>
           {trailingFields.map((key) => {
             const value = fieldValue(key);
             if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
             const label = key === 'created_date' ? '' : key === 'updated_date' ? 'Updated: ' : key === 'due_date' ? 'Due: ' : `${schema.fields[key]?.label ?? key}: `;
-            return <span key={key}>{label}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></span>;
+            const display = resolve(task, key);
+            return <span key={key}>{label}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>;
           })}
         </div>
       </div>

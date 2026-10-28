@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { type Task } from '../../types';
 import StoredDate from './StoredDate';
 import { formatPriorityLabel } from '../../utils/priority-config';
+import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
 
 interface DraftsListProps {
   onEditTask: (task: Task) => void;
@@ -139,7 +140,7 @@ const DraftsList: React.FC<DraftsListProps> = ({ onEditTask, onNewDraft, dateFor
                 <div className="flex items-start justify-between">
                   <div className="flex-1 cursor-pointer" onClick={() => onEditTask(draft)}>
                     <div className="flex items-center space-x-3 mb-2">
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-white">{draft.title}</h3>
+                      <h3 className="text-lg font-medium text-gray-900 dark:text-white"><TaskDisplayTitle task={draft} /></h3>
                       {draft.priority && (
                         <span className={`px-2 py-1 text-xs font-medium rounded-circle ${getPriorityColor(draft.priority)}`}>
                           {formatPriorityLabel(draft.priority)}

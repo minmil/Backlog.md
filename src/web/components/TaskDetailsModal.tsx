@@ -15,6 +15,7 @@ import { buildTaskIdIndex, resolveTaskReference } from "../utils/task-id-links";
 import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "../../utils/task-subtasks.ts";
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
+import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
 
 interface Props {
   task?: Task | TaskDetail; // Optional for create mode
@@ -815,6 +816,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   };
 
 	const canDemote = Boolean(task && !isDraftMode && !isOpenDraft && !isReadOnly);
+	const { title: displayTitle } = useTaskDisplay();
   const displayId = task?.id ?? "";
 
   return (
@@ -830,7 +832,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
         refreshAfterCommentChange();
         onClose();
       }}
-      title={isCreateMode ? (isDraftMode ? "Create New Draft" : "Create New Task") : `${displayId} — ${task.title}`}
+      title={isCreateMode ? (isDraftMode ? "Create New Draft" : "Create New Task") : <>{displayId} — <TaskDisplayTitle task={task} /></>}
       maxWidthClass="max-w-5xl"
       disableEscapeClose={mode === "edit" || mode === "create" || demoting}
       actions={
@@ -933,12 +935,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
                 data-parent-task-id={parentTask.id}
                 data-parent-task-href={createUrlPath('/tasks', parentTask.id, parentTask.title)}
                 className="group inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1 text-left text-gray-700 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:hover:bg-transparent dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white"
-                aria-label={`Open parent task ${parentTask.id}: ${parentTask.title} (${parentTask.status})`}
+                aria-label={`Open parent task ${parentTask.id}: ${String(displayTitle(parentTask).value ?? "")} (${parentTask.status})`}
               >
                 <span className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
                   {parentTask.id}
                 </span>
-                <span className="min-w-0 break-words font-medium">{parentTask.title}</span>
+                <span className="min-w-0 break-words font-medium"><TaskDisplayTitle task={parentTask} /></span>
                 <HierarchyStatusBadge status={parentTask.status} statuses={availableStatuses} />
               </button>
             </li>
@@ -995,7 +997,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                       data-subtask-id={subtask.id}
                       data-subtask-href={createUrlPath('/tasks', subtask.id, subtask.title)}
                       className="group flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors duration-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/50"
-                      aria-label={`Open subtask ${subtask.id}: ${subtask.title} (${subtask.status})`}
+                      aria-label={`Open subtask ${subtask.id}: ${String(displayTitle(subtask).value ?? "")} (${subtask.status})`}
                     >
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2">
@@ -1013,7 +1015,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                           )}
                         </span>
                         <span className="mt-1 block break-words text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {subtask.title}
+                          <TaskDisplayTitle task={subtask} />
                         </span>
                       </span>
                       <HierarchyChevron />
@@ -1027,7 +1029,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
           {dependencyGraph && dependencyGraph.nodes.length > 1 && (
             <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <SectionHeader title="Dependency Graph" />
-              <DependencyGraphSection graph={dependencyGraph} />
+              <DependencyGraphSection graph={dependencyGraph} tasks={availableTasks} />
             </section>
           )}
 

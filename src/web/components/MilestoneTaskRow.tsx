@@ -1,5 +1,6 @@
 import React from "react";
 import type { Task } from "../../types";
+import TaskDisplayTitle from "./schema/TaskDisplayTitle.tsx";
 
 interface MilestoneTaskRowProps {
 	task: Task;
@@ -52,7 +53,7 @@ const MilestoneTaskRow: React.FC<MilestoneTaskRowProps> = ({
 					isDone ? "line-through text-gray-500" : "text-gray-900 dark:text-gray-100"
 				}`}
 			>
-				{task.title}
+				<TaskDisplayTitle task={task} />
 			</span>
 		</div>
 

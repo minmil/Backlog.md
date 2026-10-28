@@ -3,7 +3,7 @@ import React, { useEffect, useRef } from "react";
 interface ModalProps {
 	isOpen: boolean;
 	onClose: () => void;
-	title: string;
+	title: React.ReactNode;
 	children: React.ReactNode;
 	maxWidthClass?: string; // e.g., "max-w-4xl"
 	disableEscapeClose?: boolean; // when true, Escape and backdrop click won't close (child can handle it)

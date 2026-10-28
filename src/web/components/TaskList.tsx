@@ -21,6 +21,8 @@ import FieldValue from "./schema/FieldValue.tsx";
 import FieldFilter from "./schema/FieldFilter.tsx";
 import SelectControl from "./SelectControl.tsx";
 import { useSchema } from "./schema/SchemaProvider.tsx";
+import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
+import { FallbackLanguageCode } from "./schema/DisplayLanguageContext.tsx";
 import CleanupModal from "./CleanupModal";
 import StoredDate from "./StoredDate";
 import AcceptanceCriteriaProgress, { getAcceptanceCriteriaProgressCounts } from "./AcceptanceCriteriaProgress";
@@ -124,12 +126,14 @@ const TaskList: React.FC<TaskListProps> = ({
 	isLoading = false,
 }) => {
 	const { schema, registry } = useSchema();
+	const { resolve: resolveDisplayField, title: displayTitle, showFallback, lang: displayLang } = useTaskDisplay();
 	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
 	const filterKeys = schema.ui.task_list.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
 	const customFilterKeys = filterKeys.filter((key) => !["status", "priority", "milestone", "labels"].includes(key));
 	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
 	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
 	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
+		if (schema.fields[key]?.lang || registry.translationGroup(key).length > 1) return resolveDisplayField(task, key).value;
 		const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
 		return supplied?.[key] ?? registry.getField(task, key);
 	};
@@ -673,14 +677,17 @@ const TaskList: React.FC<TaskListProps> = ({
 			if (sortColumn === "ordinal" && (left === undefined || right === undefined)) {
 				if (left !== right) return left === undefined ? 1 : -1;
 			}
-			const result = registry.compare(sortColumn, left, right, sortColumn === "priority" ? priorityOrder : undefined);
+			const result = sortColumn === "title"
+				? String(left ?? "").localeCompare(String(right ?? ""), displayLang)
+				: registry.compare(sortColumn, left, right, sortColumn === "priority" ? priorityOrder : undefined);
 			if (result !== 0) return sortDirection === "asc" ? result : -result;
 			if (sortColumn === "ordinal") return compareTaskIdsAscending(a, b);
 			return compareTaskIdsDescending(a.id, b.id);
 		});
-	}, [displayTasks, priorityOrder, registry, sortColumn, sortDirection]);
+	}, [displayTasks, priorityOrder, registry, sortColumn, sortDirection, displayLang]);
 	const renderFieldCell = (task: Task, key: string) => {
 		const value = fieldValue(task, key);
+		const display = resolveDisplayField(task, key);
 		if (key === "status") return <td key={key} className="px-3 py-2.5"><span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getStatusColor(String(value ?? ""))}`}>{value}</span></td>;
 		if (key === "priority") return <td key={key} className="px-3 py-2.5">{value ? <span className={`inline-flex rounded-circle px-2 py-0.5 text-[11px] font-medium ${getPriorityColor(String(value))}`}>{formatPriorityLabel(String(value), priorityOrder)}</span> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}</td>;
 		if (key === "ordinal") return <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">{value ?? <span className="text-gray-300 dark:text-gray-600">—</span>}</td>;
@@ -690,7 +697,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			const label = value ? getMilestoneLabel(String(value), milestoneEntities) : "—";
 			return <td key={key} className="px-3 py-2.5 text-xs text-gray-600 dark:text-gray-300 truncate" title={label}>{label}</td>;
 		}
-		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} /></td>;
+		return <td key={key} className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap"><FieldValue fieldKey={key} value={value} variant="cell" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</td>;
 	};
 	const visibleTasks = sortedDisplayTasks.filter((task) => (!overdueOnly || (task.overdue?.length ?? 0) > 0) && customFilterKeys.every((key) => {
 		const wanted = customFilters[key];
@@ -846,10 +853,10 @@ const TaskList: React.FC<TaskListProps> = ({
 																? "text-gray-600 dark:text-gray-300"
 																: "text-gray-900 dark:text-gray-100"
 														} rounded text-left focus:outline-none focus:ring-2 focus:ring-stone-500`}
-														title={task.title}
-														aria-label={`Open ${task.id}: ${task.title}`}
+														title={String(displayTitle(task).value ?? "")}
+														aria-label={`Open ${task.id}: ${String(displayTitle(task).value ?? "")}`}
 													>
-														{task.title}
+														<TaskDisplayTitle task={task} />
 													</button>
 													{isFromOtherBranch && task.branch && (
 														<span
