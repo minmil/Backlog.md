@@ -10,6 +10,8 @@ import {
   nodesInDirection,
 } from '../../utils/dependency-graph.ts';
 import { createUrlPath } from '../utils/urlHelpers';
+import type { Task } from '../../types/index.ts';
+import TaskDisplayTitle, { useTaskDisplay } from './schema/TaskDisplayTitle.tsx';
 
 /**
  * Keep an in-app task link on the page the reader is already on: opening a dependency from the
@@ -64,10 +66,13 @@ const REPEAT_LABELS: Record<NonNullable<DependencyTreeNode['repeat']>, string> =
   repeat: 'Shown above',
 };
 
-const NodeRow: React.FC<{ entry: DependencyTreeNode; direction: DependencyDirection }> = ({ entry, direction }) => {
+const NodeRow: React.FC<{ entry: DependencyTreeNode; direction: DependencyDirection; tasks?: Task[] }> = ({ entry, direction, tasks }) => {
   const { node } = entry;
   const taskHref = useTaskHref();
-  const label = `${node.id}${node.title ? ` - ${node.title}` : ''}`;
+  const { title } = useTaskDisplay();
+  const task = tasks?.find((candidate) => candidate.id === node.id);
+  const shownTitle = task ? String(title(task).value ?? '') : node.title;
+  const label = `${node.id}${shownTitle ? ` - ${shownTitle}` : ''}`;
 
   return (
     <div
@@ -78,12 +83,12 @@ const NodeRow: React.FC<{ entry: DependencyTreeNode; direction: DependencyDirect
     >
       {node.state === 'resolved' ? (
         <Link
-          to={taskHref(node.id, node.title)}
+          to={taskHref(node.id, shownTitle)}
           className="min-w-0 break-words text-sm text-gray-900 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
           aria-label={`Open ${label}`}
         >
           <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{node.id}</span>
-          {node.title ? <span className="ml-2">{node.title}</span> : null}
+          {shownTitle ? <span className="ml-2">{task ? <TaskDisplayTitle task={task} /> : shownTitle}</span> : null}
         </Link>
       ) : (
         <span className="min-w-0 break-words font-mono text-xs text-gray-500 dark:text-gray-400">{node.id}</span>
@@ -98,17 +103,18 @@ const NodeRow: React.FC<{ entry: DependencyTreeNode; direction: DependencyDirect
   );
 };
 
-const TreeList: React.FC<{ entries: DependencyTreeNode[]; direction: DependencyDirection; nested: boolean }> = ({
+const TreeList: React.FC<{ entries: DependencyTreeNode[]; direction: DependencyDirection; nested: boolean; tasks?: Task[] }> = ({
   entries,
   direction,
   nested,
+  tasks,
 }) => (
   <ul className={nested ? 'ml-2 border-l border-gray-200 pl-3 dark:border-gray-700' : 'space-y-0.5'}>
     {entries.map((entry) => (
       <li key={entry.node.id}>
-        <NodeRow entry={entry} direction={direction} />
+        <NodeRow entry={entry} direction={direction} tasks={tasks} />
         {entry.children.length > 0 ? (
-          <TreeList entries={entry.children} direction={direction} nested />
+          <TreeList entries={entry.children} direction={direction} nested tasks={tasks} />
         ) : null}
       </li>
     ))}
@@ -120,7 +126,7 @@ const TreeList: React.FC<{ entries: DependencyTreeNode[]; direction: DependencyD
  * real structure a screen reader can announce rather than by drawn characters. Each node appears
  * once; a diamond or a cycle is marked instead of repeated.
  */
-export const DependencyGraphSection: React.FC<{ graph: DependencyGraph }> = ({ graph }) => {
+export const DependencyGraphSection: React.FC<{ graph: DependencyGraph; tasks?: Task[] }> = ({ graph, tasks }) => {
   const resolved = graph;
 
   const sections = DIRECTIONS.map(({ direction, heading }) => {
@@ -148,7 +154,7 @@ export const DependencyGraphSection: React.FC<{ graph: DependencyGraph }> = ({ g
               {`${section.direct} direct, ${section.reached.length} total`}
             </span>
           </div>
-          <TreeList entries={section.tree} direction={section.direction} nested={false} />
+        <TreeList entries={section.tree} direction={section.direction} nested={false} tasks={tasks} />
         </section>
       ))}
     </div>

@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 
 import { Link, useLocation } from 'react-router-dom';
 import { type Task } from '../../types';
 import { buildTaskIdIndex, resolveTaskReference } from '../utils/task-id-links';
+import TaskDisplayTitle, { useTaskDisplay } from './schema/TaskDisplayTitle.tsx';
+import { useSchema } from './schema/SchemaProvider.tsx';
 
 const CHIP_LABEL_CLASS = 'truncate max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]';
 
@@ -53,6 +55,8 @@ interface DependencyInputProps {
 }
 
 const DependencyInput: React.FC<DependencyInputProps> = ({ value, onChange, availableTasks, suggestableTasks, currentTaskId, label = 'Dependencies', disabled }) => {
+  const { title } = useTaskDisplay();
+  const { registry } = useSchema();
   const [inputValue, setInputValue] = useState('');
   const [suggestions, setSuggestions] = useState<Task[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -72,14 +76,14 @@ const DependencyInput: React.FC<DependencyInputProps> = ({ value, onChange, avai
         task.id !== currentTaskId && // Don't suggest current task
         !value.includes(task.id) && // Don't suggest already added tasks
         (task.id.toLowerCase().includes(inputValue.toLowerCase()) ||
-         task.title.toLowerCase().includes(inputValue.toLowerCase()))
+         registry.translationGroup('title').some((key) => String(registry.getField(task, key) ?? '').toLowerCase().includes(inputValue.toLowerCase())))
       );
       setSuggestions(filtered);
       setSelectedIndex(0);
     } else {
       setSuggestions([]);
     }
-  }, [inputValue, suggestionSource, value, currentTaskId]);
+  }, [inputValue, suggestionSource, value, currentTaskId, registry]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -156,7 +160,7 @@ const DependencyInput: React.FC<DependencyInputProps> = ({ value, onChange, avai
             <div className="flex flex-wrap gap-2 mb-2">
               {value.map((taskId, index) => {
                 const dependency = resolveDependency(taskId);
-                const display = dependency ? `${dependency.id} - ${dependency.title}` : taskId;
+                const display = dependency ? `${dependency.id} - ${String(title(dependency).value ?? '')}` : taskId;
                 return (
                 <span
                   key={index}
@@ -216,7 +220,7 @@ const DependencyInput: React.FC<DependencyInputProps> = ({ value, onChange, avai
 	                }`}
 	              >
                 <div className="font-medium text-gray-900 dark:text-white">{task.id}</div>
-                <div className="text-gray-600 dark:text-gray-300 break-words whitespace-normal">{task.title}</div>
+                <div className="text-gray-600 dark:text-gray-300 break-words whitespace-normal"><TaskDisplayTitle task={task} /></div>
               </button>
             ))}
           </div>

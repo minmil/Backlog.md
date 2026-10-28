@@ -4,6 +4,8 @@
 
 Run `backlog schema --json` to inspect field keys, exact values, user handles, and sections. Use `--field key=value`, `--clear-field key`, `task list --where 'key=value'`, `--sort key[:asc|:desc]`, and `--show-fields key1,key2` for declared fields. Copy enum values and user handles exactly. Make writes through the CLI.
 
+Before producing Japanese-language task material, run `backlog i18n missing --lang ja`, then read or export with `--lang ja`. The report identifies untranslated source values for review; CLI and browser reads show marked fallback values until a translation is added.
+
 When a date field declares `overdue_when`, `task list --overdue <fieldKey>` selects overdue tasks; several `--overdue` flags combine with OR and also work with `--where`.
 
 Use this guide when you are working on an existing Backlog task.

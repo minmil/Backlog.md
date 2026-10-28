@@ -536,15 +536,24 @@ export class BacklogServer {
 						POST: async (req: Request) => await this.handleCreateTask(req),
 					},
 					"/api/task/:id": {
-						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id),
+						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id, req),
 					},
 					"/api/tasks/:id": {
-						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id),
+						GET: async (req: Request & { params: { id: string } }) => await this.handleGetTask(req.params.id, req),
 						PUT: async (req: Request & { params: { id: string } }) => await this.handleUpdateTask(req, req.params.id),
 						PATCH: async (req: Request & { params: { id: string } }) => await this.handlePatchTask(req, req.params.id),
 					},
 					"/api/schema": {
-						GET: async () => Response.json({ schemaVersion: 2, kind: "schema", ...this.core.filesystem.taskSchema }),
+						GET: async () => {
+							const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+							return Response.json({
+								schemaVersion: 2,
+								kind: "schema",
+								...registry.schema,
+								displayLanguages: registry.displayLanguages,
+								defaultLanguage: registry.defaultLanguage ?? null,
+							});
+						},
 					},
 					"/api/tasks/:id/archive": {
 						POST: async (req: Request & { params: { id: string } }) => await this.handleArchiveTask(req.params.id),
@@ -841,6 +850,19 @@ export class BacklogServer {
 	}
 
 	// Task handlers
+	private readDisplayLanguage(req: Request | undefined, registry: FieldRegistry): string | Response | undefined {
+		const lang = req?.url ? new URL(req.url).searchParams.get("lang") : null;
+		if (lang === null) return undefined;
+		try {
+			return registry.validateDisplayLanguage(lang);
+		} catch (error) {
+			return Response.json(
+				{ error: error instanceof Error ? error.message : String(error), allowedLanguages: registry.displayLanguages },
+				{ status: 400 },
+			);
+		}
+	}
+
 	private async handleListTasks(req: Request): Promise<Response> {
 		let refreshCrossBranch = this.servicesInitialized;
 		await this.ensureServicesReady();
@@ -866,6 +888,8 @@ export class BacklogServer {
 		const labels = labelParams.map((label) => label.trim()).filter((label) => label.length > 0);
 
 		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+		const lang = this.readDisplayLanguage(req, registry);
+		if (lang instanceof Response) return lang;
 		const overdueKeys = url.searchParams.getAll("overdue");
 		for (const key of overdueKeys) {
 			const field = registry.schema.fields[key];
@@ -940,12 +964,15 @@ export class BacklogServer {
 		return Response.json(
 			tasks
 				.filter((task) => overdueKeys.length === 0 || overdueKeys.some((key) => registry.isOverdue(task, key)))
-				.map((task) => this.taskResponse(task, registry)),
+				.map((task) => this.taskResponse(task, registry, lang)),
 		);
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
 		try {
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const lang = this.readDisplayLanguage(req, registry);
+			if (lang instanceof Response) return lang;
 			const url = new URL(req.url);
 			const query = url.searchParams.get("query") ?? undefined;
 			const limitParam = url.searchParams.get("limit");
@@ -1112,10 +1139,9 @@ export class BacklogServer {
 			}
 
 			const results = searchService.search({ query, limit, types, filters });
-			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 			return Response.json(
 				results.map((result) =>
-					result.type === "task" ? { ...result, task: this.taskResponse(result.task, registry) } : result,
+					result.type === "task" ? { ...result, task: this.taskResponse(result.task, registry, lang) } : result,
 				),
 			);
 		} catch (error) {
@@ -1127,12 +1153,16 @@ export class BacklogServer {
 	private taskResponse(
 		task: Task,
 		registry = new FieldRegistry(this.core.filesystem.taskSchema),
+		lang?: string,
+		includeDisplaySections = false,
 	): Record<string, unknown> {
 		const body = parseSections(task.rawContent ?? "", registry.schema);
+		const sections = task.sections ?? body.sections;
 		return {
 			...task,
-			...toSchemaTaskJson(task, registry),
-			sections: task.sections ?? body.sections,
+			...toSchemaTaskJson(task, registry, lang),
+			...(lang && includeDisplaySections ? { display: registry.taskDisplay({ ...task, sections }, lang, true) } : {}),
+			sections,
 			other: task.other ?? body.other,
 		};
 	}
@@ -1277,11 +1307,16 @@ export class BacklogServer {
 	 * One task, as a detail read returns it: the record plus the relationships derived at read time,
 	 * so the browser gets the dependency graph in the same response that opens the task.
 	 */
-	private async handleGetTask(taskId: string): Promise<Response> {
+	private async handleGetTask(taskId: string, req?: Request): Promise<Response> {
+		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+		const lang = this.readDisplayLanguage(req, registry);
+		if (lang instanceof Response) return lang;
 		const resolved = await this.resolveDetailTask(taskId);
 		if (resolved instanceof Response) return resolved;
 		await this.ensureServicesReady();
-		return Response.json(this.taskResponse(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true })));
+		return Response.json(
+			this.taskResponse(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true }), registry, lang, true),
+		);
 	}
 
 	private async handlePatchTask(req: Request, taskId: string): Promise<Response> {

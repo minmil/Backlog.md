@@ -1,3 +1,4 @@
+import type { SectionValue } from "../markdown/sections.ts";
 import { taskFrontmatter } from "../markdown/task-frontmatter.ts";
 import type { Task } from "../types/index.ts";
 import { parseSequenceReference } from "./sequence.ts";
@@ -11,6 +12,12 @@ export interface FieldCondition {
 	operator: FieldOperator;
 	values: FieldValue[];
 	presence?: "set" | "unset";
+}
+
+export interface DisplayValue<T> {
+	value: T | undefined;
+	lang: string | undefined;
+	fallback: boolean;
 }
 
 const CORE_PROPERTIES: Record<string, keyof Task> = {
@@ -85,17 +92,139 @@ function isValue(value: unknown): value is FieldValue {
 
 export class FieldRegistry {
 	private readonly users: Set<string>;
+	readonly displayLanguages: string[];
+	readonly defaultLanguage: string | undefined;
 
 	constructor(
 		readonly schema: TaskSchema,
 		private readonly references: { taskIds?: Set<string>; milestoneIds?: Set<string> } = {},
 	) {
 		this.users = new Set(schema.users.map((user) => user.handle));
+		this.displayLanguages = [
+			...new Set(
+				[
+					...Object.values(schema.fields).map((field) => field.lang),
+					...Object.values(schema.sections).map((section) => section.lang),
+				].filter((lang): lang is string => Boolean(lang)),
+			),
+		];
+		this.defaultLanguage = schema.fields.title?.lang ?? this.displayLanguages[0];
 		const persisted = Object.keys(taskFrontmatter({} as Task));
 		const mapped = Object.keys(CORE_PROPERTIES).filter((key) => key !== "branch");
 		if (persisted.some((key) => !mapped.includes(key)) || mapped.some((key) => !persisted.includes(key))) {
 			throw new Error("Field registry core keys differ from the task serializer");
 		}
+	}
+
+	validateDisplayLanguage(lang: string): string {
+		if (!this.displayLanguages.includes(lang)) {
+			throw new Error(
+				`Invalid display language "${lang}". Allowed languages: ${this.displayLanguages.join(", ") || "none"}`,
+			);
+		}
+		return lang;
+	}
+
+	private sourceKey(key: string, kind: "field" | "section"): string {
+		const definitions = kind === "field" ? this.schema.fields : this.schema.sections;
+		const definition = definitions[key];
+		if (!definition) throw new Error(`Unknown task ${kind} "${key}"`);
+		return definition.translation_of ?? key;
+	}
+
+	translationGroup(key: string, kind: "field" | "section" = "field"): string[] {
+		const definitions = kind === "field" ? this.schema.fields : this.schema.sections;
+		const source = this.sourceKey(key, kind);
+		if (kind === "section" && this.schema.sections[source]?.kind !== "markdown") return [key];
+		return [
+			source,
+			...Object.keys(definitions).filter((candidate) => definitions[candidate]?.translation_of === source),
+		];
+	}
+
+	translationOrder(keys: string[], lang?: string, kind: "field" | "section" = "field"): string[] {
+		const available = new Set(keys);
+		const seen = new Set<string>();
+		const ordered: string[] = [];
+		for (const key of keys) {
+			if (seen.has(key)) continue;
+			const members = this.translationGroup(key, kind).filter((member) => available.has(member));
+			const definitions = kind === "field" ? this.schema.fields : this.schema.sections;
+			const selected = lang ? members.find((member) => definitions[member]?.lang === lang) : undefined;
+			for (const member of selected ? [selected, ...members.filter((item) => item !== selected)] : members) {
+				if (!seen.has(member)) ordered.push(member);
+				seen.add(member);
+			}
+		}
+		return ordered;
+	}
+
+	resolveDisplay(task: Task, key: string, lang: string): DisplayValue<FieldValue> {
+		const source = this.sourceKey(key, "field");
+		const group = this.translationGroup(source);
+		const selected = group.find((member) => this.schema.fields[member]?.lang === lang);
+		const value = selected ? this.getField(task, selected) : undefined;
+		if (
+			value !== undefined &&
+			(typeof value !== "string" || value.trim() !== "") &&
+			(!Array.isArray(value) || value.length > 0)
+		) {
+			return { value, lang, fallback: false };
+		}
+		return {
+			value: this.getField(task, source),
+			lang: this.schema.fields[source]?.lang,
+			fallback: group.length > 1 || Boolean(this.schema.fields[source]?.lang),
+		};
+	}
+
+	resolveSectionDisplay(task: Task, key: string, lang: string): DisplayValue<SectionValue> {
+		const source = this.sourceKey(key, "section");
+		const group = this.translationGroup(source, "section");
+		if (this.schema.sections[source]?.kind !== "markdown") {
+			return { value: task.sections?.[key], lang: this.schema.sections[key]?.lang, fallback: false };
+		}
+		const selected = group.find((member) => this.schema.sections[member]?.lang === lang);
+		const value = selected ? task.sections?.[selected] : undefined;
+		if (typeof value === "string" && value.trim()) return { value, lang, fallback: false };
+		return {
+			value: task.sections?.[source],
+			lang: this.schema.sections[source]?.lang,
+			fallback: group.length > 1 || Boolean(this.schema.sections[source]?.lang),
+		};
+	}
+
+	taskDisplay(task: Task, lang: string, includeSections = false) {
+		this.validateDisplayLanguage(lang);
+		const fields: Record<string, FieldValue | null> = {};
+		const fallback: string[] = [];
+		for (const [key, definition] of Object.entries(this.schema.fields)) {
+			if (definition.translation_of || (!definition.lang && this.translationGroup(key).length === 1)) continue;
+			const resolved = this.resolveDisplay(task, key, lang);
+			fields[key] = resolved.value ?? null;
+			if (resolved.fallback && resolved.value !== undefined && resolved.value !== "") fallback.push(key);
+		}
+		const sections: Record<string, SectionValue | null> = {};
+		if (includeSections) {
+			for (const [key, definition] of Object.entries(this.schema.sections)) {
+				if (
+					definition.kind !== "markdown" ||
+					definition.translation_of ||
+					(!definition.lang && this.translationGroup(key, "section").length === 1)
+				)
+					continue;
+				const resolved = this.resolveSectionDisplay(task, key, lang);
+				sections[key] = resolved.value ?? null;
+				if (resolved.fallback && typeof resolved.value === "string" && resolved.value.trim()) fallback.push(key);
+			}
+		}
+		return {
+			lang,
+			title: String(this.resolveDisplay(task, "title", lang).value ?? ""),
+			fields,
+			fallback,
+			...(includeSections ? { sections } : {}),
+		};
 	}
 
 	private definition(key: string): SchemaField {

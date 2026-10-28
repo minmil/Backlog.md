@@ -848,7 +848,7 @@ export class Core {
 			}
 			let searchService = this.searchService;
 			if (!searchService) {
-				searchService = new SearchService(store);
+				searchService = new SearchService(store, new FieldRegistry(this.filesystem.taskSchema));
 				this.searchService = searchService;
 			}
 			try {
@@ -1293,7 +1293,9 @@ export class Core {
 			if (!includeCrossBranch) {
 				const localTasks = await filesystem.listTasks();
 				if (projectChanged()) continue;
-				const tasks = trimmedQuery ? createTaskSearchIndex(localTasks).search({ query: trimmedQuery }) : localTasks;
+				const tasks = trimmedQuery
+					? createTaskSearchIndex(localTasks, new FieldRegistry(filesystem.taskSchema)).search({ query: trimmedQuery })
+					: localTasks;
 				const filteredTasks = await applyFiltersAndLimit(tasks);
 				if (projectChanged()) continue;
 				return filteredTasks;

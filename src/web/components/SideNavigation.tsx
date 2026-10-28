@@ -16,6 +16,7 @@ import { getWebVersion } from '../utils/version';
 import { apiClient } from '../lib/api';
 import { parseSearchCommandQuery } from '../utils/search-command-query';
 import { buildDocsTree, type DocsTreeNode } from '../lib/docs-tree';
+import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
 
 // Utility functions for ID transformations
 const stripIdPrefix = (id: string): string => {
@@ -566,7 +567,7 @@ const SideNavigation = memo(function SideNavigation({
 									{getResultIcon()}
 									<div className="flex-1 min-w-0">
 										<div className="font-medium truncate">
-											{item.title}
+											{result.type === 'task' ? <TaskDisplayTitle task={(result as TaskSearchResult).task} /> : item.title}
 										</div>
 										<div className="text-xs text-gray-500 dark:text-gray-400 truncate">
 											{result.type.charAt(0).toUpperCase() + result.type.slice(1)} • {item.id}

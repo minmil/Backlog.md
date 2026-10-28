@@ -81,7 +81,7 @@ function cutListJson(page: ListPage<unknown> | undefined): { total?: number; nex
 	return page?.cut ? { total: page.total, nextSkip: page.nextSkip } : {};
 }
 
-export function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
+export function toSchemaTaskJson(task: Task, registry: FieldRegistry, lang?: string) {
 	const fields = Object.fromEntries(
 		Object.keys(registry.schema.fields).flatMap((key) => {
 			const value = registry.getField(task, key);
@@ -100,6 +100,7 @@ export function toSchemaTaskJson(task: Task, registry: FieldRegistry) {
 		fields,
 		unknownFields: task.unknownFields ?? {},
 		overdue: registry.overdueFields(task),
+		...(lang ? { display: registry.taskDisplay(task, lang) } : {}),
 	};
 }
 
@@ -107,11 +108,12 @@ export function taskListJson(
 	tasks: TaskListItem[],
 	page?: ListPage<unknown>,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+	lang?: string,
 ) {
 	return {
 		schemaVersion: 2,
 		kind: "task-list" as const,
-		tasks: tasks.map((task) => toSchemaTaskJson(task, registry)),
+		tasks: tasks.map((task) => toSchemaTaskJson(task, registry, lang)),
 		...cutListJson(page),
 	};
 }
@@ -120,11 +122,12 @@ export function draftListJson(
 	drafts: Task[],
 	page?: ListPage<unknown>,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+	lang?: string,
 ) {
 	return {
 		schemaVersion: 2,
 		kind: "draft-list" as const,
-		drafts: drafts.map((draft) => toSchemaTaskJson(draft, registry)),
+		drafts: drafts.map((draft) => toSchemaTaskJson(draft, registry, lang)),
 		...cutListJson(page),
 	};
 }
@@ -133,13 +136,16 @@ export function taskViewJson(
 	task: TaskDetail,
 	projectRoot: string,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+	lang?: string,
 ) {
 	const body = parseSections(task.rawContent ?? "", registry.schema);
+	const display = lang ? registry.taskDisplay({ ...task, sections: body.sections }, lang, true) : undefined;
 	return {
 		schemaVersion: 2,
 		kind: "task-view" as const,
 		task: {
 			...toSchemaTaskJson(task, registry),
+			...(display ? { display } : {}),
 			path: toProjectRelativePath(projectRoot, task.filePath),
 			sections: body.sections,
 			other: body.other,
@@ -151,13 +157,16 @@ export function draftViewJson(
 	draft: TaskDetail,
 	projectRoot: string,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+	lang?: string,
 ) {
 	const body = parseSections(draft.rawContent ?? "", registry.schema);
+	const display = lang ? registry.taskDisplay({ ...draft, sections: body.sections }, lang, true) : undefined;
 	return {
 		schemaVersion: 2,
 		kind: "draft-view" as const,
 		draft: {
 			...toSchemaTaskJson(draft, registry),
+			...(display ? { display } : {}),
 			path: toProjectRelativePath(projectRoot, draft.filePath),
 			sections: body.sections,
 			other: body.other,
@@ -194,11 +203,12 @@ export function searchJson(
 	docsDir: string,
 	page?: ListPage<unknown>,
 	registry: FieldRegistry = new FieldRegistry(getDefaultTaskSchema()),
+	lang?: string,
 ) {
 	const publicResults: SearchResultJson[] = [];
 	for (const result of results) {
 		if (result.type === "task") {
-			publicResults.push({ type: "task", data: toSchemaTaskJson(result.task, registry) });
+			publicResults.push({ type: "task", data: toSchemaTaskJson(result.task, registry, lang) });
 			continue;
 		}
 		if (result.type === "document") {

@@ -13,7 +13,18 @@ import { formatDependencyGraphLines } from "./dependency-graph-text.ts";
 export type TaskPlainTextOptions = {
 	filePathOverride?: string;
 	registry?: FieldRegistry;
+	lang?: string;
 };
+
+export function plainDisplayField(task: Task, key: string, registry: FieldRegistry, lang?: string): string {
+	const definition = registry.schema.fields[key];
+	const resolved =
+		lang && definition && !definition.translation_of
+			? registry.resolveDisplay(task, key, lang)
+			: { value: registry.getField(task, key), lang: definition?.lang, fallback: false };
+	const value = registry.format(key, resolved.value, "plain");
+	return `${value}${lang && lang !== registry.defaultLanguage && resolved.fallback && value !== "" ? ` [${resolved.lang ?? registry.defaultLanguage ?? lang}]` : ""}`;
+}
 
 export function formatDateForDisplay(dateStr: string, options: UtcDateDisplayOptions = {}): string {
 	return formatUtcDateForDisplay(dateStr, options);
@@ -69,12 +80,12 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 		lines.push("");
 	}
 
-	lines.push(`Task ${task.id} - ${task.title}`);
+	lines.push(`Task ${task.id} - ${plainDisplayField(task, "title", registry, options.lang)}`);
 	lines.push("=".repeat(50));
 	lines.push("");
 	for (const [key, definition] of Object.entries(registry.schema.fields)) {
-		if (definition.hidden || key === "id" || key === "title") continue;
-		const value = registry.getField(task, key);
+		if (definition.hidden || key === "id" || key === "title" || (options.lang && definition.translation_of)) continue;
+		const value = options.lang ? registry.resolveDisplay(task, key, options.lang).value : registry.getField(task, key);
 		if (value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) continue;
 		const label = definition.label ?? key.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 		const formatted =
@@ -82,7 +93,7 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 				? `${formatStatusWithIcon(value)}${task.source === "archived" ? " (archived)" : ""}`
 				: (key === "created_date" || key === "updated_date") && typeof value === "string"
 					? formatDateForDisplay(value, { appendUtcLabel: true })
-					: registry.format(key, value, "plain");
+					: plainDisplayField(task, key, registry, options.lang);
 		lines.push(`${label}: ${formatted}${registry.isOverdue(task, key) ? " (overdue)" : ""}`);
 	}
 
@@ -102,11 +113,18 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	lines.push(...formatDependencyGraphBlock(task));
 
 	const body = parseSections(task.rawContent ?? "", registry.schema);
+	const sectionTask = { ...task, sections: { ...body.sections, ...task.sections } };
 	for (const [id, definition] of Object.entries(registry.schema.sections)) {
-		const value = task.sections?.[id] ?? body.sections[id];
+		if (options.lang && definition.translation_of) continue;
+		const resolved = options.lang ? registry.resolveSectionDisplay(sectionTask, id, options.lang) : undefined;
+		const value = resolved ? resolved.value : sectionTask.sections[id];
 		lines.push("", `${definition.title}:`, "-".repeat(50));
 		if (definition.kind === "markdown") {
-			lines.push(transformCodePathsPlain(String(value ?? "")));
+			const suffix =
+				options.lang && options.lang !== registry.defaultLanguage && resolved?.fallback && value
+					? ` [${resolved.lang ?? registry.defaultLanguage ?? options.lang}]`
+					: "";
+			lines.push(`${transformCodePathsPlain(String(value ?? ""))}${suffix}`);
 		} else if (definition.kind === "checklist") {
 			for (const [index, item] of ((value ?? []) as SchemaChecklistItem[]).entries()) {
 				lines.push(`- [${item.checked ? "x" : " "}] #${index + 1} ${transformCodePathsPlain(item.text)}`);
@@ -126,11 +144,11 @@ export function formatTaskPlainText(task: TaskDetail, options: TaskPlainTextOpti
 	return lines.join("\n");
 }
 
-export function formatPlainTaskListFields(task: Task, names: string[], registry: FieldRegistry): string {
+export function formatPlainTaskListFields(task: Task, names: string[], registry: FieldRegistry, lang?: string): string {
 	return names
 		.map(
 			(name) =>
-				`${name}=${registry.format(name, registry.getField(task, name), "plain")}${registry.isOverdue(task, name) ? " (overdue)" : ""}`,
+				`${name}=${plainDisplayField(task, name, registry, lang)}${registry.isOverdue(task, name) ? " (overdue)" : ""}`,
 		)
 		.join(" ");
 }

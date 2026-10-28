@@ -1,4 +1,6 @@
 import Fuse, { type FuseResult, type FuseResultMatch } from "fuse.js";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import { FieldRegistry } from "../schema/field-registry.ts";
 import type {
 	Decision,
 	Document,
@@ -58,7 +60,10 @@ export class SearchService {
 	private collection: SearchEntity[] = [];
 	private version = 0;
 
-	constructor(private readonly store: ContentStore) {}
+	constructor(
+		private readonly store: ContentStore,
+		private readonly registry = new FieldRegistry(getDefaultTaskSchema()),
+	) {}
 
 	async ensureInitialized(): Promise<void> {
 		if (this.initialized) {
@@ -157,7 +162,7 @@ export class SearchService {
 
 	private applySnapshot(tasks: Task[], documents: Document[], decisions: Decision[]): void {
 		this.tasks = tasks.map((task) => ({
-			...buildTaskSearchFields(task),
+			...buildTaskSearchFields(task, this.registry),
 			type: "task",
 			task,
 		}));

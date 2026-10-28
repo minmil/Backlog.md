@@ -5,7 +5,7 @@ users:
 
 fields:
   id: {type: id, core: true, managed: true, hidden: true, required: true}
-  title: {type: text, core: true, required: true, label: Title}
+  title: {type: text, core: true, required: true, label: Title, lang: en}
   title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}
   status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
   assignee: {type: user-list, core: true, label: Assignee}
@@ -37,7 +37,7 @@ fields:
   prod_date: {type: date, label: Production date}
 
 sections:
-  description: {kind: markdown, title: Description}
+  description: {kind: markdown, title: Description, lang: en}
   description_ja: {kind: markdown, title: Description (JA), lang: ja, translation_of: description}
   acceptance: {kind: checklist, title: Acceptance Criteria}
   log: {kind: log, title: Log}

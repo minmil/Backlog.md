@@ -6,6 +6,8 @@ Use the Backlog.md CLI to create, read, and update task, document, and decision 
 
 Run `backlog schema --json` first in a project. `task-schema.yml` defines field keys, exact enum values, user handles, sections, and display order. Use `--field key=value` to set a declared field, `--clear-field key` to clear one, `task list --where 'key=value'` to filter, `--sort key[:asc|:desc]` to order, and `--show-fields key1,key2` to add fields to plain list rows. Copy enum values and handles exactly. Shortcut flags such as `-s`, `-a`, and `--priority` use the same field validation.
 
+When preparing Japanese-language material in a project with translations, read tasks with `--lang ja` and run `backlog i18n missing --lang ja` first. `backlog schema --json` lists the available display languages. The browser language toggle and `?lang=ja` use the same source values and fallback rules. Keep field keys and enum values exactly as declared in the schema.
+
 Use `--plain` for readable task context. Use `--json` for structured data; task JSON is schema version 2 with `fields` and `unknownFields`, and task view also includes `sections` and `other`.
 
 ## Choose the relevant workflow

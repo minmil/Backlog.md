@@ -14,6 +14,8 @@ import InitializationScreen from './components/InitializationScreen';
 import LoadingSpinner from './components/LoadingSpinner';
 import { SuccessToast } from './components/SuccessToast';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { DisplayLanguageProvider } from './components/schema/DisplayLanguageContext.tsx';
+import { useTaskDisplay } from './components/schema/TaskDisplayTitle.tsx';
 import { TaskIdIndexProvider } from './contexts/TaskIdIndexContext';
 import {
 	type Decision,
@@ -300,6 +302,7 @@ function AppContent() {
   const routeBasePath = tasksRouteWithTitle || tasksRoute ? '/tasks' : boardRouteWithTitle || boardRoute ? '/board' : null;
   const routeNavigationState = getTaskRouteNavigationState(location.state);
   const taskRouteError = routeNavigationState.taskRouteError;
+  const { title: displayTaskTitle } = useTaskDisplay();
 
   // Set version data attribute on body
   React.useEffect(() => {
@@ -481,12 +484,15 @@ function AppContent() {
     }
   }, [isOnline, loadAllData]);
 
-  // Update document title when project name changes
+  // Keep the browser tab in the selected language on task routes.
   React.useEffect(() => {
     if (projectName) {
-      document.title = `${projectName} - Task Management`;
+      const routeTask = routeTaskId ? tasks.find((candidate) => candidate.id === routeTaskId) : undefined;
+      document.title = routeTask
+        ? `${String(displayTaskTitle(routeTask).value ?? routeTask.title)} - ${projectName}`
+        : `${projectName} - Task Management`;
     }
-  }, [projectName]);
+  }, [projectName, routeTaskId, tasks, displayTaskTitle]);
 
   // Mark that we've been running after initial load
   useEffect(() => {
@@ -1117,7 +1123,7 @@ function AppContent() {
 function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <DisplayLanguageProvider><AppContent /></DisplayLanguageProvider>
     </BrowserRouter>
   );
 }

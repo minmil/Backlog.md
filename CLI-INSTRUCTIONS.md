@@ -12,6 +12,20 @@ All examples use the `backlog` command, available after installing the `backlog.
 
 Use repeatable `--field key=value` on task creation and edit, and `--clear-field key` on edit. Built-in shortcut flags use the same registry validation. `task list --where <expr>` filters any declared field; repeat it to combine conditions with AND. Supported operators are `=` and `!=` for all types and `<`, `<=`, `>`, `>=` for dates and datetimes. `key=` means unset, `key!=` means set, and `key=a|b` accepts either value. Date expressions accept `today`, `+Nd`, and `-Nd`, resolved using the machine's local time zone. Sort fields with `--sort key[:asc|:desc]`; unset values sort last. `task list --plain --show-fields k1,k2` appends selected values.
 
+### Display languages
+
+Schema fields and Markdown sections can declare `lang` and `translation_of`. A language selection changes displayed values, while stored fields and section text remain available unchanged. The browser shows a language toggle when the schema declares at least two languages; its choice is saved locally and reflected in `?lang=ja` so links open in the selected language. Missing translations show the source value with a small source-language code. Field labels, section titles, enum values, and interface text do not change.
+
+Use `--lang <code>` with `task list`, `task view`, `task <id>`, `draft list`, `draft view`, `search`, and `board export`. The code must occur in `backlog schema --json` under `displayLanguages`; `BACKLOG_LANG` sets a default for CLI reads. The selected language also controls title sorting. Text search matches every declared translation. Plain output marks fallback values with a suffix such as `[en]`. With `--show-fields`, a source key resolves to the selected language; a specific translated member retains its own value.
+
+```bash
+backlog task list --plain --lang ja --show-fields title,title_ja
+backlog task view TASK-1 --json --lang ja
+backlog i18n missing --lang ja --json
+```
+
+Language-aware task JSON stays at schema version 2 and adds `display: { lang, title, fields, fallback }`; task view also includes `display.sections`. Existing `fields` and `sections` are unchanged, and reads without a language do not gain `display`. `backlog i18n missing` reports tasks with empty translated members and nonempty source values; use `--lang` to choose one target language, `--where` to restrict tasks, or `--json` for machine-readable output (`kind: "i18n-missing"`). Run it before producing material in another language.
+
 For date fields with an `overdue_when` rule, `task list --overdue <fieldKey>` selects tasks whose date is before the local day and whose conditions match. Repeat the flag for OR across date fields; other filters, including `--where`, still apply.
 
 | Action      | Example                                              |

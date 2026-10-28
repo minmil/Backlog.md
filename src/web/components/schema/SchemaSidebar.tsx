@@ -4,6 +4,7 @@ import FieldInput from "./FieldInput.tsx";
 import FieldValue from "./FieldValue.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
+import { useDisplayLanguage, FallbackLanguageCode } from "./DisplayLanguageContext.tsx";
 
 export function detailFieldOrder(schema: ReturnType<typeof useSchema>["schema"]): string[] {
 	const all = Object.keys(schema.fields).filter((key) => !schema.fields[key]?.hidden);
@@ -31,13 +32,17 @@ interface Props {
 }
 
 export default function SchemaSidebar({ values, onChange, mode, readOnly, draft, errors, availableTasks, milestones, dateFormat, overdueFields }: Props) {
-	const { schema } = useSchema();
+	const { schema, registry } = useSchema();
+	const { lang, defaultLanguage } = useDisplayLanguage();
+	const orderedFields = registry.translationOrder(detailFieldOrder(schema), mode === "view" ? lang : undefined);
 	return <>
-		{detailFieldOrder(schema).filter((key) => mode !== "create" || key !== "title").map((key) => {
+		{orderedFields.filter((key) => mode !== "create" || key !== "title").map((key) => {
 			const field = schema.fields[key];
 			if (!field) return null;
 			const value = values[key];
 			if (mode === "view" && (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0))) return null;
+			const source = field.translation_of ?? key;
+			const fallback = mode === "view" && lang && lang !== defaultLanguage && source === key && registry.translationGroup(key).length > 1 && !registry.translationGroup(key).some((member) => member !== key && schema.fields[member]?.lang === lang && values[member]);
 			const editable = mode !== "view" && !readOnly && field.type !== "sequence" && !(draft && key === "status");
 			const willAssign = field.type === "sequence" && mode === "create" && !draft && !values[key] &&
 				Boolean(field.scope && typeof values[field.scope] === "string" && field.prefixes?.[values[field.scope] as string]) &&
@@ -53,7 +58,7 @@ export default function SchemaSidebar({ values, onChange, mode, readOnly, draft,
 			) : (
 				<div key={key} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
 					<div className="mb-1 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100"><span>{field.label ?? key}</span>{field.lang ? <LanguagePill lang={field.lang} /> : null}</div>
-					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} overdue={overdueFields?.includes(key)} milestones={milestones} />{willAssign ? <span className="text-xs text-gray-500 dark:text-gray-400">Assigned on save</span> : null}</div>
+					<div className="text-sm text-gray-700 dark:text-gray-300"><FieldValue fieldKey={key} value={values[key]} variant="detail" dateFormat={dateFormat} overdue={overdueFields?.includes(key)} milestones={milestones} />{fallback ? <FallbackLanguageCode lang={field.lang} /> : null}{willAssign ? <span className="text-xs text-gray-500 dark:text-gray-400">Assigned on save</span> : null}</div>
 				</div>
 			);
 		})}

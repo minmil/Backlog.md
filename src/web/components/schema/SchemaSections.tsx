@@ -3,6 +3,7 @@ import type { TaskSchema } from "../../../schema/types.ts";
 import OtherContent from "./OtherContent.tsx";
 import SectionBlock from "./SectionBlock.tsx";
 import { useSchema } from "./SchemaProvider.tsx";
+import { useDisplayLanguage } from "./DisplayLanguageContext.tsx";
 
 export function sectionOrder(schema: TaskSchema): string[] {
 	const keys = Object.keys(schema.sections);
@@ -24,11 +25,16 @@ interface Props {
 }
 
 export default function SchemaSections({ values, other, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange }: Props) {
-	const { schema } = useSchema();
+	const { schema, registry } = useSchema();
+	const { lang, defaultLanguage } = useDisplayLanguage();
+	const order = registry.translationOrder(sectionOrder(schema), mode === "view" ? lang : undefined, "section");
 	return <>
-		{sectionOrder(schema).map((id) => {
+		{order.map((id) => {
+			const section = schema.sections[id];
+			const source = section?.translation_of ?? id;
+			const fallback = mode === "view" && lang && lang !== defaultLanguage && source === id && section?.kind === "markdown" && Boolean(values[id]) && !registry.translationGroup(id, "section").some((member) => member !== id && schema.sections[member]?.lang === lang && values[member]);
 			return <div key={id}>
-				<SectionBlock sectionId={id} value={values[id]} mode={mode} onChange={(value) => onChange(id, value)} onToggleChecklist={(index, checked) => onToggleChecklist?.(id, index, checked)} checklistBusy={checklistBusy} readOnly={readOnly} onAppendLog={(entry) => onAppendLog?.(id, entry)} onLogDraftChange={(hasDraft) => onLogDraftChange?.(id, hasDraft)} />
+				<SectionBlock sectionId={id} value={values[id]} mode={mode} onChange={(value) => onChange(id, value)} onToggleChecklist={(index, checked) => onToggleChecklist?.(id, index, checked)} checklistBusy={checklistBusy} readOnly={readOnly} onAppendLog={(entry) => onAppendLog?.(id, entry)} onLogDraftChange={(hasDraft) => onLogDraftChange?.(id, hasDraft)} fallbackLang={fallback ? section?.lang : undefined} />
 			</div>;
 		})}
 		<OtherContent other={other} />

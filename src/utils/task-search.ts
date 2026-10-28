@@ -85,10 +85,19 @@ export function buildTaskSearchBodyText(task: Task): string {
 }
 
 /** Build every field the shared Fuse configuration indexes, so keys and content cannot drift. */
-export function buildTaskSearchFields(task: Task): TaskSearchFields {
+export function buildTaskSearchFields(
+	task: Task,
+	registry = new FieldRegistry(getDefaultTaskSchema()),
+): TaskSearchFields {
+	const translatedFields = Object.keys(registry.schema.fields)
+		.filter((key) => registry.schema.fields[key]?.translation_of)
+		.flatMap((key) => {
+			const value = registry.getField(task, key);
+			return value === undefined ? [] : [Array.isArray(value) ? value.join(" ") : String(value)];
+		});
 	return {
 		title: task.title,
-		bodyText: buildTaskSearchBodyText(task),
+		bodyText: [buildTaskSearchBodyText(task), ...translatedFields].filter(Boolean).join("\n\n"),
 		id: task.id,
 		idVariants: createTaskIdSearchVariants(task.id),
 		dependencyIds: (task.dependencies ?? []).flatMap((dependency) => createTaskIdSearchVariants(dependency)),
@@ -230,8 +239,11 @@ export function createTaskFilterMatcher(options: TaskFilterOptions, corpus: Task
  * Create an in-memory search index for tasks. Useful when the corpus is already loaded and the
  * caller wants to run several queries over it without rebuilding the index each time.
  */
-export function createTaskSearchIndex(tasks: Task[]): TaskSearchIndex {
-	const entries = tasks.map((task) => ({ task, fields: buildTaskSearchFields(task) }));
+export function createTaskSearchIndex(
+	tasks: Task[],
+	registry = new FieldRegistry(getDefaultTaskSchema()),
+): TaskSearchIndex {
+	const entries = tasks.map((task) => ({ task, fields: buildTaskSearchFields(task, registry) }));
 	const fuse = new Fuse(
 		entries.map((entry) => entry.fields),
 		TASK_SEARCH_FUSE_OPTIONS,
@@ -253,7 +265,7 @@ export function createTaskSearchIndex(tasks: Task[]): TaskSearchIndex {
 
 export function applyTaskFilters(tasks: Task[], options: TaskFilterOptions, index?: TaskSearchIndex): Task[] {
 	if (options.query?.trim()) {
-		return (index ?? createTaskSearchIndex(tasks)).search(options);
+		return (index ?? createTaskSearchIndex(tasks, options.registry)).search(options);
 	}
 	const matches = createTaskFilterMatcher(options, tasks);
 	return tasks.filter(matches);
