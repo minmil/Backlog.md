@@ -73,6 +73,7 @@ describe("field registry", () => {
 		const fields = new FieldRegistry(schema);
 		const translated = {
 			...task(),
+			isReady: true,
 			fieldValues: { title_ja: "最初", title_fr: "Premier", note: "Shared" },
 			sections: { description: "English", description_ja: "日本語", acceptance: [] },
 		};
@@ -114,6 +115,13 @@ describe("field registry", () => {
 			"title_fr",
 			"note",
 		]);
+		expect(taskListJson([translated], undefined, fields).tasks[0]).not.toHaveProperty("display");
+		expect(taskListJson([translated], undefined, fields, "ja").tasks[0]?.display).toEqual({
+			lang: "ja",
+			title: "最初",
+			fields: { title: "最初" },
+			fallback: [],
+		});
 		expect(() => fields.validateDisplayLanguage("de")).toThrow(/Allowed languages: en, ja, fr/);
 	});
 

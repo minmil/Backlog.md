@@ -194,6 +194,39 @@ export class FieldRegistry {
 		};
 	}
 
+	taskDisplay(task: Task, lang: string, includeSections = false) {
+		this.validateDisplayLanguage(lang);
+		const fields: Record<string, FieldValue | null> = {};
+		const fallback: string[] = [];
+		for (const [key, definition] of Object.entries(this.schema.fields)) {
+			if (definition.translation_of || (!definition.lang && this.translationGroup(key).length === 1)) continue;
+			const resolved = this.resolveDisplay(task, key, lang);
+			fields[key] = resolved.value ?? null;
+			if (resolved.fallback && resolved.value !== undefined && resolved.value !== "") fallback.push(key);
+		}
+		const sections: Record<string, SectionValue | null> = {};
+		if (includeSections) {
+			for (const [key, definition] of Object.entries(this.schema.sections)) {
+				if (
+					definition.kind !== "markdown" ||
+					definition.translation_of ||
+					(!definition.lang && this.translationGroup(key, "section").length === 1)
+				)
+					continue;
+				const resolved = this.resolveSectionDisplay(task, key, lang);
+				sections[key] = resolved.value ?? null;
+				if (resolved.fallback && typeof resolved.value === "string" && resolved.value.trim()) fallback.push(key);
+			}
+		}
+		return {
+			lang,
+			title: String(this.resolveDisplay(task, "title", lang).value ?? ""),
+			fields,
+			fallback,
+			...(includeSections ? { sections } : {}),
+		};
+	}
+
 	private definition(key: string): SchemaField {
 		const field = this.schema.fields[key];
 		if (!field)
