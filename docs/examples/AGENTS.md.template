@@ -15,6 +15,7 @@ Use `backlog browser --no-open` to review the board locally. If the project has 
 2. Read field keys, enum values, user handles, and section IDs from `backlog schema --json`. Copy enum values and `@handles` exactly.
 3. Write through `backlog task create`, `backlog task edit`, and `backlog task log`. Never edit task Markdown files by hand. Use `--field key=value` for core and custom fields, `--section id=text` for Markdown, `--add-item` or `--check` for checklists, and `task log` for dated updates. The CLI preserves IDs, references, and unknown content.
 4. Query with `--where`, `--sort`, and `--show-fields`. Check the returned task IDs and values before reporting a result. Use `--json` for scripts.
+   For Japanese-language reports, run `backlog i18n missing --lang ja` and use `--lang ja` on task, draft, search, or board-export reads. Verify fallback markers before sharing an untranslated value.
 5. Finish a task only after verifying its acceptance items, recording the result in the log, and moving it to the schema's final status.
 
 ## Common requests
