@@ -41,7 +41,7 @@ import {
 	taskListJson,
 	taskViewJson,
 } from "./formatters/json-output.ts";
-import { formatPlainTaskListFields, formatTaskPlainText } from "./formatters/task-plain-text.ts";
+import { formatPlainTaskListFields, formatTaskPlainText, plainDisplayField } from "./formatters/task-plain-text.ts";
 import {
 	type AgentInstructionFile,
 	addAgentInstructions,
@@ -54,6 +54,7 @@ import {
 	isGitRepository,
 	updateReadmeWithBoard,
 } from "./index.ts";
+import { parseSections } from "./markdown/sections.ts";
 import { MilestoneHandlers, type MilestoneRemoveArgs } from "./mcp/tools/milestones/handlers.ts";
 import type { CallToolResult } from "./mcp/types.ts";
 import { applyCreateFieldAssignments } from "./schema/create-input.ts";
@@ -314,7 +315,7 @@ function formatTaskEditError(error: unknown, taskId: string, commandKind = "task
 
 function formatPlainTaskListRow(
 	task: Task,
-	options: { includeStatus?: boolean; showFields?: string[]; registry?: FieldRegistry } = {},
+	options: { includeStatus?: boolean; showFields?: string[]; registry?: FieldRegistry; lang?: string } = {},
 ): string {
 	const registry = options.registry ?? new FieldRegistry(getDefaultTaskSchema());
 	const priority = registry.getField(task, "priority");
@@ -329,8 +330,10 @@ function formatPlainTaskListRow(
 		typeof due === "string"
 			? ` (due ${formatUtcDateForDisplay(due)}${registry.isOverdue(task, "due_date") ? " (overdue)" : ""})`
 			: "";
-	const fields = options.showFields?.length ? ` ${formatPlainTaskListFields(task, options.showFields, registry)}` : "";
-	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${task.title}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
+	const fields = options.showFields?.length
+		? ` ${formatPlainTaskListFields(task, options.showFields, registry, options.lang)}`
+		: "";
+	return `  ${priorityIndicator}${typeIndicator}${task.id} - ${plainDisplayField(task, "title", registry, options.lang)}${statusIndicator}${acceptanceCriteria}${dueDate}${fields}`;
 }
 
 async function normalizeCliStatusList(core: Core, values: string[], optionName: string): Promise<string[] | null> {
@@ -1174,6 +1177,23 @@ if (shouldRunMigration) {
 }
 
 const program = new Command();
+program.option("--lang <code>", "display translated task content in this schema language");
+
+function cliDisplayLanguage(
+	options: { lang?: string },
+	registry: FieldRegistry,
+	parent?: Command,
+): string | null | undefined {
+	const requested = options.lang ?? parent?.opts().lang ?? program.opts().lang ?? process.env.BACKLOG_LANG;
+	if (requested === undefined) return undefined;
+	try {
+		return registry.validateDisplayLanguage(requested);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
+		return null;
+	}
+}
 program
 	.name("backlog")
 	.description("Backlog.md - Project management CLI")
@@ -1225,6 +1245,87 @@ schemaCommand
 			return;
 		}
 		console.log("Task schema and stored task fields are valid.");
+	});
+
+program
+	.command("i18n")
+	.description("inspect missing task translations")
+	.command("missing")
+	.description("list tasks whose declared translations are empty")
+	.option("--lang <code>", "check one display language; by default check every non-default language")
+	.option("--where <expr>", "filter a declared schema field (repeatable; AND)", createMultiValueAccumulator())
+	.option("--json", "print versioned machine-readable JSON output")
+	.action(async (options: { lang?: string; where?: string[]; json?: boolean }) => {
+		const root = await requireProjectRoot();
+		const core = new Core(root);
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const requested = options.lang ?? program.opts().lang;
+		let languages = registry.displayLanguages.filter((lang) => lang !== registry.defaultLanguage);
+		if (requested !== undefined) {
+			try {
+				languages = [registry.validateDisplayLanguage(requested)];
+			} catch (error) {
+				console.error(error instanceof Error ? error.message : String(error));
+				process.exitCode = 1;
+				return;
+			}
+		}
+		let conditions: ReturnType<FieldRegistry["parseCondition"]>[];
+		try {
+			conditions = toStringArray(options.where).map((where) => registry.parseCondition(where));
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
+			process.exitCode = 1;
+			return;
+		}
+		const isPopulated = (value: unknown) =>
+			typeof value === "string"
+				? Boolean(value.trim())
+				: Array.isArray(value)
+					? value.length > 0
+					: value !== undefined && value !== null;
+		const rows = (await core.queryTasks({ includeCrossBranch: false }))
+			.filter((task) => conditions.every((condition) => registry.matches(task, condition)))
+			.map((task) => {
+				const parsed = parseSections(task.rawContent ?? "", registry.schema);
+				const withSections = { ...task, sections: { ...parsed.sections, ...task.sections } };
+				const missing: Array<{ lang: string; key: string; sourceValue: unknown }> = [];
+				for (const lang of languages) {
+					for (const [key, definition] of Object.entries(registry.schema.fields)) {
+						if (definition.translation_of) continue;
+						const member = registry
+							.translationGroup(key)
+							.find((candidate) => registry.schema.fields[candidate]?.lang === lang);
+						if (!member || member === key) continue;
+						const sourceValue = registry.getField(task, key);
+						if (isPopulated(sourceValue) && !isPopulated(registry.getField(task, member)))
+							missing.push({ lang, key, sourceValue });
+					}
+					for (const [key, definition] of Object.entries(registry.schema.sections)) {
+						if (definition.kind !== "markdown" || definition.translation_of) continue;
+						const member = registry
+							.translationGroup(key, "section")
+							.find((candidate) => registry.schema.sections[candidate]?.lang === lang);
+						if (!member || member === key) continue;
+						const sourceValue = withSections.sections[key];
+						if (isPopulated(sourceValue) && !isPopulated(withSections.sections[member]))
+							missing.push({ lang, key, sourceValue });
+					}
+				}
+				return {
+					id: task.id,
+					...(registry.schema.fields.client_ref ? { client_ref: registry.getField(task, "client_ref") ?? null } : {}),
+					missing,
+				};
+			})
+			.filter((row) => row.missing.length > 0);
+		if (options.json) printJson({ schemaVersion: 2, kind: "i18n-missing", tasks: rows });
+		else if (rows.length === 0) console.log("No missing translations.");
+		else
+			for (const row of rows) {
+				console.log(`${row.id}${row.client_ref ? ` (${row.client_ref})` : ""}`);
+				for (const entry of row.missing) console.log(`  ${entry.lang}:${entry.key} = ${String(entry.sourceValue)}`);
+			}
 	});
 
 program
@@ -2102,7 +2203,7 @@ addHelpSchema(program.command("init [projectName]"), {
 		},
 	);
 
-const taskCmd = program.command("task").aliases(["tasks"]);
+const taskCmd = program.command("task").aliases(["tasks"]).option("--lang <code>", "display language");
 
 /** `--json` and `--plain` may be given to the parent `task` command as well as to its subcommand. */
 function taskReadOptions(options: ReadOutputOptions): ReadOutputOptions {
@@ -2415,6 +2516,7 @@ const searchCommand = addHelpSchema(program.command("search [query]"), {
 addListWindowOptions(searchCommand)
 	.option("--plain", "print plain text output instead of interactive UI")
 	.option("--json", "print versioned machine-readable JSON output")
+	.option("--lang <code>", "display translated task content in this language")
 	.action(async (query: string | undefined, options) => {
 		const listOutput = resolveListOutput(options, searchCommand);
 		if (!listOutput) return;
@@ -2428,6 +2530,12 @@ addListWindowOptions(searchCommand)
 			searchService.dispose();
 			contentStore.dispose();
 		};
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options, registry);
+		if (lang === null) {
+			cleanup();
+			return;
+		}
 		if (hasDuplicateIds && outputMode === "json") {
 			cleanup();
 			return;
@@ -2532,19 +2640,13 @@ addListWindowOptions(searchCommand)
 		if (outputMode !== "interactive") {
 			const printed = searchResultsInPrintedOrder(searchResults, outputMode);
 			if (outputMode === "plain") {
-				printListWindow(printed, listWindow, printSearchResults);
+				printListWindow(printed, listWindow, (rows) => printSearchResults(rows, registry, lang));
 				cleanup();
 				return;
 			}
 			const page = selectListWindow(printed, listWindow);
 			printJson(
-				searchJson(
-					await projectSearchTaskRows(core, page.items),
-					cwd,
-					core.filesystem.docsDir,
-					page,
-					new FieldRegistry(core.filesystem.taskSchema),
-				),
+				searchJson(await projectSearchTaskRows(core, page.items), cwd, core.filesystem.docsDir, page, registry, lang),
 			);
 			cleanup();
 			return;
@@ -2559,7 +2661,7 @@ addListWindowOptions(searchCommand)
 
 		// If no tasks exist at all, show plain text results
 		if (allTasks.length === 0) {
-			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"));
+			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"), registry, lang);
 			cleanup();
 			return;
 		}
@@ -2571,7 +2673,7 @@ addListWindowOptions(searchCommand)
 		const requiresPrefilteredTaskSet = Boolean(modifiedFileFilters?.length);
 		const interactiveTasks = requiresPrefilteredTaskSet ? searchResultTasks : allTasks;
 		if (interactiveTasks.length === 0) {
-			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"));
+			printSearchResults(searchResultsInPrintedOrder(searchResults, "plain"), registry, lang);
 			cleanup();
 			return;
 		}
@@ -2688,23 +2790,29 @@ function searchResultsInPrintedOrder(results: SearchResult[], outputMode: "plain
 	return SEARCH_RESULT_TYPES.flatMap((type) => printable.filter((result) => result.type === type));
 }
 
-function formatSearchResultRow(result: SearchResult): string {
+function formatSearchResultRow(result: SearchResult, registry?: FieldRegistry, lang?: string): string {
 	const scoreText = formatScore(result.score);
 	if (result.type === "task") {
 		const { task } = result;
 		const statusText = task.status ? ` (${task.status})` : "";
 		const priorityText = task.priority ? ` [${task.priority.toUpperCase()}]` : "";
-		return `  ${task.id} - ${task.title}${statusText}${priorityText}${scoreText}`;
+		return `  ${task.id} - ${registry ? plainDisplayField(task, "title", registry, lang) : task.title}${statusText}${priorityText}${scoreText}`;
 	}
 	const { id, title } = result.type === "document" ? result.document : result.decision;
 	return `  ${id} - ${title}${scoreText}`;
 }
 
 /** Prints search results given in plain printed order, under one heading per result type. */
-function printSearchResults(results: SearchResult[]): void {
+function printSearchResults(results: SearchResult[], registry?: FieldRegistry, lang?: string): void {
 	const sections = SEARCH_RESULT_TYPES.flatMap((type) => {
 		const group = results.filter((result) => result.type === type);
-		return group.length > 0 ? [[SEARCH_RESULT_HEADINGS[type], ...group.map(formatSearchResultRow)].join("\n")] : [];
+		return group.length > 0
+			? [
+					[SEARCH_RESULT_HEADINGS[type], ...group.map((result) => formatSearchResultRow(result, registry, lang))].join(
+						"\n",
+					),
+				]
+			: [];
 	});
 	console.log(sections.length > 0 ? sections.join("\n\n") : "No results found.");
 }
@@ -2775,19 +2883,20 @@ function printTaskSections(
 	statuses: string[],
 	showFields: string[] = [],
 	registry?: FieldRegistry,
+	lang?: string,
 ): void {
 	// Use the stdout stream, as JSON output does, so pending pipe writes keep the CLI alive.
 	for (const section of sectionTasks(tasks, sortField, statuses)) {
 		if (section.status === null) {
 			process.stdout.write(`Tasks (sorted by ${sortField ?? "priority"}):\n`);
 			for (const task of section.tasks) {
-				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields, registry })}\n`);
+				process.stdout.write(`${formatPlainTaskListRow(task, { includeStatus: true, showFields, registry, lang })}\n`);
 			}
 			continue;
 		}
 		process.stdout.write(`${section.status || "No Status"}:\n`);
 		for (const task of section.tasks) {
-			process.stdout.write(`${formatPlainTaskListRow(task, { showFields, registry })}\n`);
+			process.stdout.write(`${formatPlainTaskListRow(task, { showFields, registry, lang })}\n`);
 		}
 		process.stdout.write("\n");
 	}
@@ -2810,6 +2919,11 @@ async function runTaskList(
 		core.disposeSearchService();
 		core.disposeContentStore();
 	};
+	const lang = cliDisplayLanguage(options, registry, taskCmd);
+	if (lang === null) {
+		cleanup();
+		return;
+	}
 	if (hasDuplicateIds && outputMode === "json") {
 		cleanup();
 		return;
@@ -2976,10 +3090,15 @@ async function runTaskList(
 			const sorted = options.sort
 				? [...rows].sort((a, b) => {
 						const [key = "", direction = "asc"] = String(options.sort).split(":");
-						const left = registry.getField(a, key);
-						const right = registry.getField(b, key);
+						const left =
+							key === "title" && lang ? registry.resolveDisplay(a, key, lang).value : registry.getField(a, key);
+						const right =
+							key === "title" && lang ? registry.resolveDisplay(b, key, lang).value : registry.getField(b, key);
 						if (left === undefined || right === undefined) return registry.compare(key, left, right);
-						const order = registry.compare(key, left, right);
+						const order =
+							key === "title" && lang
+								? String(left).localeCompare(String(right), lang)
+								: registry.compare(key, left, right);
 						return order === 0 ? a.id.localeCompare(b.id) : direction === "desc" ? -order : order;
 					})
 				: sortTasks(rows, options.sort, taskSchema.fields.priority?.values, registry);
@@ -2998,7 +3117,7 @@ async function runTaskList(
 		const readyRows = options.ready ? readinessRows.filter((row) => row.isReady) : readinessRows;
 		if (outputMode === "json") {
 			const page = selectListWindow(narrowForDisplay(readyRows), listWindow);
-			emitJson(taskListJson(page.items, page, registry));
+			emitJson(taskListJson(page.items, page, registry, lang));
 			cleanup();
 			return;
 		}
@@ -3016,7 +3135,7 @@ async function runTaskList(
 				}
 				return;
 			}
-			printTaskSections(windowTasks, options.sort, statuses, showFields, registry);
+			printTaskSections(windowTasks, options.sort, statuses, showFields, registry, lang);
 		});
 		cleanup();
 		return;
@@ -3271,6 +3390,7 @@ const taskListCommand = addHelpSchema(taskCmd.command("list"), {
 addListWindowOptions(taskListCommand)
 	.option("--plain", "use plain text output instead of interactive UI")
 	.option("--json", "print versioned machine-readable JSON output")
+	.option("--lang <code>", "display translated task content in this language")
 	.option("--watch", "keep emitting changed full JSON lists (requires --json)")
 	.action(async (options) => {
 		if (!options.watch) {
@@ -4325,11 +4445,15 @@ addHelpSchema(taskCmd.command("view <taskId>"), {
 	.description("display task details")
 	.option("--plain", "use plain text output instead of interactive UI")
 	.option("--json", "print versioned machine-readable JSON output")
+	.option("--lang <code>", "display translated task content in this language")
 	.action(async (taskId: string, options) => {
 		const outputMode = getTaskReadOutputMode(options);
 		if (!outputMode) return;
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options, registry, taskCmd);
+		if (lang === null) return;
 		const localTasks = await core.fs.listTasks();
 		const task = await core.getTaskWithSubtasks(taskId, localTasks, { includeCrossBranch: false });
 		if (!task) {
@@ -4344,14 +4468,15 @@ addHelpSchema(taskCmd.command("view <taskId>"), {
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, new FieldRegistry(core.filesystem.taskSchema)));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, registry, lang));
 			return;
 		}
 
 		if (outputMode === "plain") {
 			console.log(
 				formatTaskPlainText(await loadTaskDetail(core, task), {
-					registry: new FieldRegistry(core.filesystem.taskSchema),
+					registry,
+					lang,
 				}),
 			);
 			return;
@@ -4473,11 +4598,14 @@ taskCmd
 	.argument("[taskId]")
 	.option("--plain", "use plain text output")
 	.option("--json", "print versioned machine-readable JSON output")
-	.action(async (taskId: string | undefined, options: { json?: boolean; plain?: boolean }) => {
+	.action(async (taskId: string | undefined, options: { json?: boolean; plain?: boolean; lang?: string }) => {
 		const outputMode = getReadOutputMode(options);
 		if (!outputMode) return;
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options, registry, taskCmd);
+		if (lang === null) return;
 
 		// Don't handle commands that should be handled by specific command handlers
 		const reservedCommands = ["create", "list", "edit", "view", "archive", "delete", "restore", "demote"];
@@ -4507,14 +4635,15 @@ taskCmd
 
 		// Plain text output for non-interactive environments
 		if (outputMode === "json") {
-			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, new FieldRegistry(core.filesystem.taskSchema)));
+			printJson(taskViewJson(await loadTaskDetail(core, task), cwd, registry, lang));
 			return;
 		}
 
 		if (outputMode === "plain") {
 			console.log(
 				formatTaskPlainText(await loadTaskDetail(core, task), {
-					registry: new FieldRegistry(core.filesystem.taskSchema),
+					registry,
+					lang,
 				}),
 			);
 			return;
@@ -4530,28 +4659,30 @@ taskCmd
 		});
 	});
 
-async function viewDraftById(core: Core, taskId: string, options?: { plain?: boolean; json?: boolean }): Promise<void> {
+async function viewDraftById(
+	core: Core,
+	taskId: string,
+	options?: { plain?: boolean; json?: boolean; lang?: string },
+): Promise<void> {
 	try {
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options ?? {}, registry, draftCmd);
+		if (lang === null) return;
 		const draft = await core.filesystem.loadDraft(taskId);
 		if (!draft) {
 			console.error(`Draft ${taskId} not found.`);
 			return;
 		}
 		if (options?.json) {
-			printJson(
-				draftViewJson(
-					await loadTaskDetail(core, draft),
-					await requireProjectRoot(),
-					new FieldRegistry(core.filesystem.taskSchema),
-				),
-			);
+			printJson(draftViewJson(await loadTaskDetail(core, draft), await requireProjectRoot(), registry, lang));
 			return;
 		}
 		const usePlainOutput = isPlainRequested(options) || shouldAutoPlain;
 		if (usePlainOutput) {
 			console.log(
 				formatTaskPlainText(await loadTaskDetail(core, draft), {
-					registry: new FieldRegistry(core.filesystem.taskSchema),
+					registry,
+					lang,
 				}),
 			);
 			return;
@@ -4567,7 +4698,7 @@ async function viewDraftById(core: Core, taskId: string, options?: { plain?: boo
 	}
 }
 
-const draftCmd = program.command("draft");
+const draftCmd = program.command("draft").option("--lang <code>", "display language");
 
 const draftListCommand = addHelpSchema(draftCmd.command("list"), {
 	reads: "Drafts under the configured drafts directory",
@@ -4587,7 +4718,8 @@ const draftListCommand = addHelpSchema(draftCmd.command("list"), {
 addListWindowOptions(draftListCommand)
 	.option("--plain", "use plain text output")
 	.option("--json", "print versioned machine-readable JSON output")
-	.action(async (options: ListWindowOptions & { plain?: boolean; sort?: string }) => {
+	.option("--lang <code>", "display translated task content in this language")
+	.action(async (options: ListWindowOptions & { plain?: boolean; sort?: string; lang?: string }) => {
 		const effectiveOptions = { ...draftCmd.opts(), ...options };
 		const listOutput = resolveListOutput(
 			{ ...effectiveOptions, plain: isPlainRequested(effectiveOptions) },
@@ -4605,17 +4737,22 @@ addListWindowOptions(draftListCommand)
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
 		await core.ensureConfigLoaded();
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options, registry, draftCmd);
+		if (lang === null) return;
 		const drafts = await core.filesystem.listDrafts();
-		const sortedDrafts = sortTasks(
-			drafts,
-			sortField,
-			core.filesystem.taskSchema.fields.priority?.values,
-			new FieldRegistry(core.filesystem.taskSchema),
-		);
+		const sortedDrafts = sortTasks(drafts, sortField, core.filesystem.taskSchema.fields.priority?.values, registry);
+		if (sortField === "title" && lang)
+			sortedDrafts.sort((a, b) =>
+				String(registry.resolveDisplay(a, "title", lang).value ?? "").localeCompare(
+					String(registry.resolveDisplay(b, "title", lang).value ?? ""),
+					lang,
+				),
+			);
 
 		if (outputMode === "json") {
 			const page = selectListWindow(sortedDrafts, listWindow);
-			printJson(draftListJson(page.items, page, new FieldRegistry(core.filesystem.taskSchema)));
+			printJson(draftListJson(page.items, page, registry, lang));
 			return;
 		}
 
@@ -4629,7 +4766,7 @@ addListWindowOptions(draftListCommand)
 				console.log("Drafts:");
 				for (const draft of windowDrafts) {
 					const priorityIndicator = draft.priority ? `[${draft.priority.toUpperCase()}] ` : "";
-					console.log(`  ${priorityIndicator}${draft.id} - ${draft.title}`);
+					console.log(`  ${priorityIndicator}${draft.id} - ${plainDisplayField(draft, "title", registry, lang)}`);
 				}
 			});
 			return;
@@ -4808,6 +4945,7 @@ draftCmd
 	.description("display draft details")
 	.option("--plain", "use plain text output instead of interactive UI")
 	.option("--json", "print versioned machine-readable JSON output")
+	.option("--lang <code>", "display translated task content in this language")
 	.action(async (taskId: string, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
@@ -4818,7 +4956,7 @@ draftCmd
 	.argument("[taskId]")
 	.option("--plain", "use plain text output")
 	.option("--json", "print versioned machine-readable JSON output")
-	.action(async (taskId: string | undefined, options: { plain?: boolean; json?: boolean }) => {
+	.action(async (taskId: string | undefined, options: { plain?: boolean; json?: boolean; lang?: string }) => {
 		if (!taskId) {
 			draftCmd.help();
 			return;
@@ -5161,9 +5299,13 @@ boardCmd
 	.option("--force", "overwrite existing file without confirmation")
 	.option("--readme", "export to README.md with markers")
 	.option("--export-version <version>", "version to include in the export")
+	.option("--lang <code>", "display translated task content in this language")
 	.action(async (filename, options) => {
 		const cwd = await requireProjectRoot();
 		const core = new Core(cwd);
+		const registry = new FieldRegistry(core.filesystem.taskSchema);
+		const lang = cliDisplayLanguage(options, registry);
+		if (lang === null) return;
 		const config = await core.filesystem.loadConfig();
 		const statuses = core.filesystem.taskSchema.fields.status?.values || [];
 		if (await printDuplicateIntegrityWarning(core)) return;
@@ -5177,6 +5319,8 @@ boardCmd
 			finalTasks = await core.loadTasks((msg) => {
 				loadingScreen?.update(msg);
 			});
+			if (lang)
+				finalTasks = finalTasks.map((task) => ({ ...task, title: plainDisplayField(task, "title", registry, lang) }));
 
 			loadingScreen?.update(`Total tasks: ${finalTasks.length}`);
 
