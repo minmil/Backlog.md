@@ -850,8 +850,8 @@ export class BacklogServer {
 	}
 
 	// Task handlers
-	private readDisplayLanguage(req: Request, registry: FieldRegistry): string | Response | undefined {
-		const lang = new URL(req.url).searchParams.get("lang");
+	private readDisplayLanguage(req: Request | undefined, registry: FieldRegistry): string | Response | undefined {
+		const lang = req?.url ? new URL(req.url).searchParams.get("lang") : null;
 		if (lang === null) return undefined;
 		try {
 			return registry.validateDisplayLanguage(lang);
@@ -1307,7 +1307,7 @@ export class BacklogServer {
 	 * One task, as a detail read returns it: the record plus the relationships derived at read time,
 	 * so the browser gets the dependency graph in the same response that opens the task.
 	 */
-	private async handleGetTask(taskId: string, req: Request): Promise<Response> {
+	private async handleGetTask(taskId: string, req?: Request): Promise<Response> {
 		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 		const lang = this.readDisplayLanguage(req, registry);
 		if (lang instanceof Response) return lang;
