@@ -16,7 +16,7 @@ Replace every hard-coded task field and body section with **one schema file**, `
 
 The CLI, the JSON output, the server API and the web UI all read the schema and treat every field the same way. Built-in fields get no special-case operations. The only difference is that **core** fields must stay in the schema.
 
-This is **stage 1: build behavior**. Stage 2, the actual Operations Tracker configuration (categories, clients, enum values), is out of scope. Ship a default schema that reproduces today's behavior, plus one example schema for the tracker use case.
+This is **stage 1: build behavior**. Stage 2, the actual operations tracker configuration (categories, clients, enum values), is out of scope. Ship a default schema that reproduces today's behavior, plus one example schema for the tracker use case.
 
 ### Non-goals for this round
 - No new screens. Every existing screen keeps working with its current layout and look.
