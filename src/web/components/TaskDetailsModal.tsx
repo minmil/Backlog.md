@@ -315,6 +315,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const dependentCount = dependencyGraph?.nodes.filter((node) => node.dependentDepth === 1).length ?? 0;
   const readiness = taskReadiness(task);
   const statusBlocked = task?.status.toLowerCase() === "blocked";
+  const statusTerminal = isTerminalStatus(task?.status, availableStatuses);
   // The verdict answers for the status and the dependencies it was read with, and it belongs to the
   // Dependencies card, so it is shown only while all of that still describes what is on screen. An
   // optimistic edit that has not come back yet - including one whose save failed and left the shown
@@ -1020,8 +1021,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
         <div onClickCapture={confirmNavigationAwayFromEdits}>
         <CollapsibleSection sectionKey={task?.id} summary={<>
             <span className="shrink-0 text-lg font-semibold">Task relationships</span>
-            <span className={`shrink-0 text-xs font-medium ${statusBlocked || shownReadiness?.isBlocked || task?.dependencies?.length && !shownReadiness ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
-              {shownReadiness?.isBlocked ? formatReadinessBlockers(shownReadiness) : statusBlocked ? "Blocked" : shownReadiness?.isReady ? "Ready to start" : task?.dependencies?.length ? "Readiness pending save" : "Ready to start"}
+            <span className={`shrink-0 text-xs font-medium ${statusBlocked || shownReadiness?.isBlocked || task?.dependencies?.length && !shownReadiness && !statusTerminal ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+              {statusTerminal ? task?.status : shownReadiness?.isBlocked ? formatReadinessBlockers(shownReadiness) : statusBlocked ? "Blocked" : shownReadiness?.isReady ? "Ready to start" : task?.dependencies?.length ? "Readiness pending save" : "Ready to start"}
             </span>
             <span className="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
               Depends on {dependencyCount} · Dependents {dependentCount}

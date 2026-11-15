@@ -84,18 +84,21 @@ try {
 	}
 	if (count <= 500) {
 	click(dom.window, document.querySelector("[role='button'][aria-label^='Open TASK-3:']"));
-	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes("TASK-3 — Task 3 日本語"));
-	await new Promise((resolve) => setTimeout(resolve, 100));
+	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes("T-3 — Task 3 日本語"));
+	await waitFor(document, () => Boolean(document.querySelector("[role='dialog'] button[aria-label='Close modal']")));
+	click(dom.window, [...document.querySelectorAll("[role='dialog'] details summary")].find((item) => item.textContent.includes("Task relationships")));
+	await waitFor(document, () => Boolean(document.querySelector("[role='dialog'] a[href^='/board/TASK-2/']")));
 	const taskLink = document.querySelector("[role='dialog'] a[href^='/board/TASK-2/']");
 	assert.ok(taskLink, "Task links are available in the live detail modal");
 	click(dom.window, taskLink);
-	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes("TASK-2 — Task 2 日本語"));
+	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes("T-2 — Task 2 日本語"));
+	await waitFor(document, () => Boolean(document.querySelector("[role='dialog'] button[aria-label='Close modal']")));
 	click(dom.window, document.querySelector("[role='dialog'] button[aria-label='Close modal']"));
 	click(dom.window, document.querySelector("a[href='/tasks']"));
 	await waitFor(document, () => document.body.textContent.includes(`Showing ${count} of ${count} tasks`));
 	const row = [...document.querySelectorAll("tbody tr")].find((item) => item.textContent.includes(`TASK-${count}`));
 	click(dom.window, row);
-	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes(`TASK-${count} — Task ${count} 日本語`));
+	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes(`T-${count} — Task ${count} 日本語`));
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	click(dom.window, [...document.querySelectorAll("[role='dialog'] button")].find((item) => item.textContent.trim() === "Edit"));
 	await waitFor(document, () => Boolean(document.querySelector("input#schema-field-title")));
