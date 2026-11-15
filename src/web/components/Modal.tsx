@@ -116,7 +116,7 @@ const Modal: React.FC<ModalProps> = ({
 
 	return (
 		<div
-			className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-center justify-center z-50 p-4"
+			className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center z-50 p-4"
 			onClick={disableEscapeClose ? undefined : onClose}
 			role="presentation"
 		>

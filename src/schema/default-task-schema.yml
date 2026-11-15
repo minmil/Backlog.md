@@ -40,7 +40,7 @@ ui:
     card: [type, priority, labels, created_date, updated_date, due_date, assignee]
     filters: [assignee, labels, type, priority]
   task_list:
-    columns: [status, priority, ordinal, labels, assignee, milestone, created_date]
+    columns: [id, title, status, priority, ordinal, labels, assignee, milestone, created_date]
     filters: [status, priority, milestone, labels]
   # Add any declared, visible filterable field here to scope every Statistics metric.
   statistics:

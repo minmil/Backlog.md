@@ -8,6 +8,8 @@ import { parseSections, type ChecklistItem, type LogEntry, type LogInput, type S
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
+import SectionBlock from "./schema/SectionBlock.tsx";
+import CollapsibleSection from "./CollapsibleSection.tsx";
 import FieldInput from "./schema/FieldInput.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import { formatReadinessBlockers } from "../../utils/readiness";
@@ -858,6 +860,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
 	const canDemote = Boolean(task && !snapshotMode && !isDraftMode && !isOpenDraft && !isReadOnly);
 	const { title: displayTitle } = useTaskDisplay();
   const displayId = task?.id.replace(/^TASK-/i, "T-") ?? "";
+  const logSectionId = Object.keys(schema.sections).find((id) => schema.sections[id]?.kind === "log");
+  const logEntries = logSectionId && Array.isArray(schemaSections[logSectionId])
+    ? schemaSections[logSectionId].filter((item): item is LogEntry => "body" in item)
+    : [];
+  const lastComment = [...logEntries].reverse().find((entry) => !entry.auto) ?? logEntries.at(-1);
 
   return (
     <Modal
@@ -878,6 +885,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
       disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
+		          {viewMode === "preview" && canDemote && <button type="button" onClick={() => void handleDemote()} disabled={demoting} title="Move task to drafts" className="inline-flex items-center whitespace-nowrap rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16" /></svg>{demoting ? "Re-drafting…" : "Re-draft"}
+		          </button>}
+		          {viewMode === "preview" && task && onArchive && !isReadOnly && <button type="button" onClick={handleArchive} disabled={demoting} title="Move task to archive" className="inline-flex items-center whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
+		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>Archive
+		          </button>}
 		          {viewMode === "preview" && !isCreateMode && !isReadOnly ? (
 		            <button
 		              onClick={() => setMode("edit")}
@@ -986,8 +999,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
       )}
 
       {Boolean((dependencyGraph && dependencyGraph.nodes.length > 1) || shownReadiness || subtasks.length > 0) && (
-        <details key={task?.id} className="mb-4 rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" onClickCapture={confirmNavigationAwayFromEdits}>
-          <summary className="flex cursor-pointer list-none items-center gap-3 overflow-x-auto whitespace-nowrap px-4 py-3 text-sm text-gray-900 marker:hidden dark:text-gray-100">
+        <div onClickCapture={confirmNavigationAwayFromEdits}>
+        <CollapsibleSection sectionKey={task?.id} summary={<>
             <span className="shrink-0 font-semibold">Task relationships</span>
             <span className={`shrink-0 text-xs font-medium ${statusBlocked || shownReadiness?.isBlocked || task?.dependencies?.length && !shownReadiness ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
               {shownReadiness?.isBlocked ? formatReadinessBlockers(shownReadiness) : statusBlocked ? "Blocked" : shownReadiness?.isReady ? "Ready to start" : task?.dependencies?.length ? "Readiness pending save" : "Ready to start"}
@@ -1011,8 +1024,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                 </button>
               );
             })}
-          </summary>
-          <div className="space-y-4 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+          </>}>
             {dependencyGraph && <DependencyGraphSection graph={dependencyGraph} tasks={availableTasks} />}
             {subtasks.length > 0 && (
               <section aria-label="Subtasks">
@@ -1055,8 +1067,22 @@ export const TaskDetailsModal: React.FC<Props> = ({
                 </div>
               </section>
             )}
-          </div>
-        </details>
+        </CollapsibleSection>
+        </div>
+      )}
+
+      {logSectionId && (logEntries.length > 0 || viewMode !== "preview") && (
+        <div onClickCapture={confirmNavigationAwayFromEdits}>
+        <CollapsibleSection sectionKey={`${task?.id ?? "create"}-log`} summary={<>
+          <span className="shrink-0 font-semibold">{schema.sections[logSectionId]?.title ?? "Log"}</span>
+          {lastComment ? <span className="ml-auto flex min-w-0 items-center gap-3 overflow-hidden text-xs text-gray-500 dark:text-gray-400">
+            <span className="shrink-0">{lastComment.date} · {lastComment.author}</span>
+            <span className="truncate text-gray-700 dark:text-gray-300" title={lastComment.body}>{lastComment.body}</span>
+          </span> : <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">No comments yet</span>}
+        </>}>
+          <SectionBlock sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} readOnly={snapshotMode || isReadOnly} />
+        </CollapsibleSection>
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]" onClickCapture={confirmNavigationAwayFromEdits}>
@@ -1069,6 +1095,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
             </div>
           )}
           <SchemaSections
+            exclude={logSectionId ? [logSectionId] : []}
             values={schemaSections}
             other={schemaSectionBaseline.other}
             mode={viewMode === "preview" ? "view" : "edit"}
@@ -1100,35 +1127,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
             overdueFields={task?.overdue}
           />
 
-          {((canDemote && viewMode === "preview") || (task && onArchive && !isReadOnly)) && (
-            <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 xl:col-span-2">
-              {canDemote && viewMode === "preview" && (
-                <button
-                  type="button"
-                  onClick={() => void handleDemote()}
-                  disabled={demoting}
-                  title="Move task to drafts"
-                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-                >
-                  {demoting ? "Demoting…" : "Demote to draft"}
-                </button>
-              )}
-              {task && onArchive && !isReadOnly && (
-                <button
-                  type="button"
-                  onClick={handleArchive}
-                  title="Move this task off the board into the archive"
-                  disabled={demoting}
-                  className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-                >
-                  <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                  </svg>
-                  Archive Task
-                </button>
-              )}
-            </div>
-          )}
         </div>
 	      </div>
 		</fieldset>

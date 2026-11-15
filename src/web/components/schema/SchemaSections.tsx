@@ -22,14 +22,15 @@ interface Props {
 	readOnly?: boolean;
 	onAppendLog?: (id: string, entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (id: string, hasDraft: boolean) => void;
+	exclude?: string[];
 }
 
-export default function SchemaSections({ values, other, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange }: Props) {
+export default function SchemaSections({ values, other, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, exclude = [] }: Props) {
 	const { schema, registry } = useSchema();
 	const { lang, defaultLanguage } = useDisplayLanguage();
 	const order = registry.translationOrder(sectionOrder(schema), mode === "view" ? lang : undefined, "section");
 	return <>
-		{order.map((id) => {
+		{order.filter((id) => !exclude.includes(id)).map((id) => {
 			const section = schema.sections[id];
 			const source = section?.translation_of ?? id;
 			const fallback = mode === "view" && lang && lang !== defaultLanguage && source === id && section?.kind === "markdown" && Boolean(values[id]) && !registry.translationGroup(id, "section").some((member) => member !== id && schema.sections[member]?.lang === lang && values[member]);

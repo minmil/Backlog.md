@@ -274,7 +274,7 @@ const waitForModalClosed = async (container: HTMLElement, title: string) => {
 
 const archiveFromModal = async (container: HTMLElement, title: string) => {
 	await openTaskModal(container, title);
-	await click(findButton(container, (text) => text.includes("Archive Task")));
+	await click(findButton(container, (text) => text.trim() === "Archive"));
 	await waitForModalClosed(container, title);
 };
 
@@ -284,7 +284,7 @@ const demoteFromModal = async (container: HTMLElement, title: string, beforeDemo
 	// Let the detail read land first, as it has by the time a person reaches for the button.
 	await settle();
 	beforeDemote();
-	await click(findButton(container, (text) => text.includes("Demote to draft")));
+	await click(findButton(container, (text) => text.trim() === "Re-draft"));
 };
 
 afterEach(() => {
@@ -395,7 +395,7 @@ describe("dependency cleanup notice", () => {
 
 		try {
 			await openTaskModal(container, "Archive target");
-			await click(findButton(container, (text) => text.includes("Archive Task")));
+			await click(findButton(container, (text) => text.trim() === "Archive"));
 			await waitFor(
 				() => container.querySelector("[role='dialog'] [role='alert']")?.textContent === archiveRefusal,
 				"the refusal in the dialog's alert",

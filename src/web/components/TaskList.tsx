@@ -127,10 +127,13 @@ const TaskList: React.FC<TaskListProps> = ({
 }) => {
 	const { schema, registry } = useSchema();
 	const { resolve: resolveDisplayField, title: displayTitle, showFallback, lang: displayLang } = useTaskDisplay();
-	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const configuredColumnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && (!schema.fields[key]?.hidden || key === "id"));
+	const columnKeys = configuredColumnKeys.includes("id") || configuredColumnKeys.includes("title")
+		? configuredColumnKeys
+		: ["id", "title", ...configuredColumnKeys];
 	const filterKeys = schema.ui.task_list.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
 	const customFilterKeys = filterKeys.filter((key) => !["status", "priority", "milestone", "labels"].includes(key));
-	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
+	const columnWidths = columnKeys.map((key) => key === "id" ? 6 : key === "title" ? null : FIELD_WIDTHS_REM[key] ?? 8);
 	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
 	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
 		if (schema.fields[key]?.lang || registry.translationGroup(key).length > 1) return resolveDisplayField(task, key).value;
@@ -807,9 +810,7 @@ const TaskList: React.FC<TaskListProps> = ({
 								{renderColumnGroup()}
 								<thead>
 									<tr className="text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">
-										{renderSortableHeader("ID", "id")}
-										{renderSortableHeader("Title", "title")}
-										{columnKeys.map((key) => renderSortableHeader(schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
+										{columnKeys.map((key) => renderSortableHeader(key === "id" ? "ID" : schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
 									</tr>
 								</thead>
 							</table>
@@ -832,10 +833,9 @@ const TaskList: React.FC<TaskListProps> = ({
 													: "bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/50"
 											}`}
 										>
-											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
+											{columnKeys.map((key) => key === "id" ? <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
 												{task.id}
-											</td>
-											<td className="px-3 py-2.5">
+											</td> : key === "title" ? <td key={key} className="px-3 py-2.5">
 												<div className="flex items-center gap-2 min-w-0">
 													{progressSlotDigits > 0 && (
 														<span className="flex min-w-12 shrink-0 text-[10px] font-medium tabular-nums" style={{ width: progressSlotWidth }}>
@@ -872,8 +872,7 @@ const TaskList: React.FC<TaskListProps> = ({
 														Due: <StoredDate value={task.dueDate} dateFormat={dateFormat} />
 													</div>
 												)}
-											</td>
-											{columnKeys.map((key) => renderFieldCell(task, key))}
+											</td> : renderFieldCell(task, key))}
 										</tr>
 									);
 								})}

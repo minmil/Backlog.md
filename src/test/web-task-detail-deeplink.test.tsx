@@ -1453,7 +1453,7 @@ describe("task detail routes", () => {
 		);
 
 		const archiveButton = Array.from(container.querySelectorAll("button")).find(
-			(element) => element.textContent?.includes("Archive Task"),
+			(element) => element.textContent?.trim() === "Archive",
 		);
 		expect(archiveButton).toBeTruthy();
 		await clickWithHistory(archiveButton as HTMLButtonElement, [

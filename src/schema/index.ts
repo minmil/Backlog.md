@@ -406,12 +406,10 @@ function validateArea(
 	for (const key of value) {
 		const field = fields[key];
 		if (!field) issues.push({ key: `${path}.${name}`, message: `Unknown field ${key}` });
-		else if (
-			((path === "ui.board" && name === "card") || (path === "ui.task_list" && name === "columns")) &&
-			(key === "id" || key === "title")
-		)
+		else if (path === "ui.board" && name === "card" && (key === "id" || key === "title"))
 			issues.push({ key: `${path}.${name}`, message: `${key} is always shown and must not be listed` });
-		else if (field.hidden) issues.push({ key: `${path}.${name}`, message: `Hidden field ${key} cannot appear here` });
+		else if (field.hidden && !(path === "ui.task_list" && name === "columns" && key === "id"))
+			issues.push({ key: `${path}.${name}`, message: `Hidden field ${key} cannot appear here` });
 		else if (filter && !FILTERABLE_TYPES.has(field.type))
 			issues.push({ key: `${path}.${name}`, message: `Field ${key} (${field.type}) cannot be filtered here` });
 	}
