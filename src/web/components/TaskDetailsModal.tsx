@@ -17,6 +17,7 @@ import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
 import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
 import { useSnapshotMode } from "../contexts/SnapshotModeContext.tsx";
+import { publishedTask } from "../../export/html-snapshot-render.ts";
 
 interface Props {
   task?: Task | TaskDetail; // Optional for create mode
@@ -241,7 +242,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [logDrafts, setLogDrafts] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
-  const isReadOnly = snapshotMode || (task ? isReadOnlyTask(task) : false);
+  const isReadOnly = snapshotMode ? !onProposeEdit : (task ? isReadOnlyTask(task) : false);
   // Promoting a draft replaces it with a new task ID, which the Drafts page does through its own
   // Promote action, so the popup shows the draft status without turning the field into a second one.
   const isOpenDraft = (task?.status ?? "").trim().toLowerCase() === "draft";
@@ -249,7 +250,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const demotionIdentityRef = useRef(demotionIdentity);
   demotionIdentityRef.current = demotionIdentity;
   const [mode, setMode] = useState<Mode>(isCreateMode ? "create" : "preview");
-  const viewMode: Mode = snapshotMode ? "preview" : mode;
+  const viewMode: Mode = mode;
   const modeRef = useRef(mode);
   const previousTaskId = useRef(task?.id ?? "");
   const previousIsOpen = useRef(isOpen);
@@ -558,7 +559,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       references.length > 0 ||
       modifiedFiles.length > 0);
   const hasUnsavedEdits =
-    !snapshotMode && (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
+    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
 
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
@@ -621,6 +622,18 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
 
     try {
+      if (snapshotMode && task && onProposeEdit) {
+        let proposal = publishedTask(task, schema, task.source === "archived");
+        for (const [key, value] of Object.entries(schemaFields)) {
+          if (schema.fields[key]?.managed || areJsonEqual(value, schemaFieldBaseline[key])) continue;
+          proposal = value === null ? registry.clearField(proposal, key) : registry.setField(proposal, key, value);
+        }
+        proposal.sections = { ...schemaSections };
+        onProposeEdit(proposal);
+        setMode("preview");
+        setCommentsChanged(false);
+        return;
+      }
       if (isCreateMode && onSubmit) {
         const fields = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
           key !== "title" && !schema.fields[key]?.managed && value !== null && value !== undefined && value !== "",
@@ -694,6 +707,10 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
   const handleAppendLog = async (section: string, entry: LogInput) => {
     if (isReadOnly) throw new Error("This task is read-only.");
+    if (snapshotMode) {
+      setSchemaSections((current) => ({ ...current, [section]: [...(Array.isArray(current[section]) ? current[section].filter((item): item is LogEntry => "body" in item) : []), { author: entry.author ?? "", date: entry.date ?? new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(), body: entry.body }] }));
+      return;
+    }
     if (!task) {
       if (pendingLog) throw new Error("Create the task before adding another log entry.");
       setPendingLog({ section, entry });
@@ -820,7 +837,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
   };
 
-	const canDemote = Boolean(task && !isDraftMode && !isOpenDraft && !isReadOnly);
+	const canDemote = Boolean(task && !snapshotMode && !isDraftMode && !isOpenDraft && !isReadOnly);
 	const { title: displayTitle } = useTaskDisplay();
   const displayId = task?.id ?? "";
 
@@ -842,11 +859,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
       disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
-		          {snapshotMode && task && onProposeEdit ? (
-		            <button type="button" onClick={() => onProposeEdit(task)} className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium dark:border-gray-600">
-		              Edit task JSON
-		            </button>
-		          ) : null}
 		          {canDemote && viewMode === "preview" && (
 		            <button
 		              onClick={() => void handleDemote()}
@@ -897,7 +909,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                {saving ? "Saving…" : (isCreateMode ? "Create" : "Save")}
+                {saving ? "Saving…" : (isCreateMode ? "Create" : snapshotMode ? "Save proposal" : "Save")}
               </button>
             </div>
           ) : null}
@@ -927,6 +939,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
           </div>
         </div>
       )}
+	  {snapshotMode && onProposeEdit && (
+	    <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200">Edits stay in this review page until you download a new HTML copy. The main backlog is not changed.</div>
+	  )}
 
       {parentTask && task && (
         <nav
@@ -980,9 +995,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
             other={schemaSectionBaseline.other}
             mode={viewMode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
-			onToggleChecklist={handleToggleChecklist}
+			onToggleChecklist={snapshotMode ? undefined : handleToggleChecklist}
 			checklistBusy={checklistBusy}
-			readOnly={isReadOnly}
+			readOnly={snapshotMode || isReadOnly}
             onAppendLog={handleAppendLog}
             onLogDraftChange={(id, hasDraft) => setLogDrafts((current) => ({ ...current, [id]: hasDraft }))}
           />

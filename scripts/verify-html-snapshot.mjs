@@ -50,11 +50,11 @@ const dom = new JSDOM(html, {
 });
 const { document, MouseEvent, Event, HTMLInputElement } = dom.window;
 const waitFor = async (check) => {
-	for (let attempt = 0; attempt < 40; attempt++) {
+	for (let attempt = 0; attempt < 120; attempt++) {
 		if (check()) return;
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	throw new Error(`Timed out waiting for viewer: ${document.getElementById("root")?.textContent?.slice(0, 300)}`);
+	throw new Error(`Timed out waiting for viewer: ${document.getElementById("root")?.textContent?.slice(0, 300)}; alerts: ${[...document.querySelectorAll('[role="alert"]')].map((item) => item.textContent).join(" | ")}; buttons: ${[...document.querySelectorAll('[role="dialog"] button')].map((item) => item.textContent.trim()).slice(0, 12).join(" | ")}; modal: ${document.querySelector('[role="dialog"]')?.textContent.slice(0, 300)}`);
 };
 const click = (element) => {
 	assert.ok(element, "Expected clickable element");
@@ -145,12 +145,7 @@ try {
 	assert.match(dialog.textContent, /Score/);
 	assert.match(dialog.textContent, /Review the result/);
 	assert.equal(dialog.querySelectorAll("input[type='checkbox']:not([disabled])").length, 0);
-	assert.equal(
-		[...dialog.querySelectorAll("button")].some((item) =>
-			/^(Edit|Save|Create|Archive Task)$/.test(item.textContent.trim()),
-		),
-		false,
-	);
+	assert.ok([...dialog.querySelectorAll("button")].some((item) => item.textContent.trim() === "Edit"));
 	assert.ok(dialog.querySelectorAll("a[href='/tasks/TASK-2']").length >= 2, "Markdown and field task links render");
 	click(dialog.querySelector("a[href='/tasks/TASK-2']"));
 	await waitFor(() => document.querySelector("#modal-title")?.textContent.includes("TASK-2 — Task 2 日本語"));
@@ -170,15 +165,20 @@ try {
 	click([...document.querySelectorAll("[data-snapshot-list] tbody tr button")].find((item) => item.textContent === `TASK-${count}`));
 	await waitFor(() => document.querySelector("#modal-title")?.textContent.includes(`TASK-${count} — Task ${count} 日本語`));
 	assert.doesNotMatch(document.querySelector("[role='dialog']").textContent, /Score/);
-	click(button("Edit task JSON"));
-	await waitFor(() => document.querySelector("textarea[aria-label='Task JSON']"));
-	const editor = document.querySelector("textarea[aria-label='Task JSON']");
-	const proposal = JSON.parse(editor.value);
-	proposal.title = `Reviewed task ${count} 日本語 </script><script>window.__reviewInjected=true</script>`;
-	Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value").set.call(editor, JSON.stringify(proposal));
-	editor.dispatchEvent(new Event("input", { bubbles: true }));
+	await new Promise((resolve) => setTimeout(resolve, 100));
+	click([...document.querySelectorAll('[role="dialog"] button')].find((item) => item.textContent.trim() === "Edit"));
+	await waitFor(() => document.querySelector("input#schema-field-title"));
+	const proposedTitle = `Reviewed task ${count} 日本語 </script><script>window.__reviewInjected=true</script>`;
+	setInput(document.querySelector("input#schema-field-title"), proposedTitle);
+	setInput(document.querySelector("input#schema-field-custom_score"), "77");
+	const proposedStatus = document.querySelector("select#schema-field-status");
+	proposedStatus.value = "In Progress";
+	proposedStatus.dispatchEvent(new Event("change", { bubbles: true }));
+	await new Promise((resolve) => setTimeout(resolve, 100));
 	click(button("Save proposal"));
-	await waitFor(() => document.querySelector("textarea[aria-label='Task JSON']") === null);
+	await waitFor(() => document.getElementById("root").textContent.includes("1 proposed edit"));
+	await waitFor(() => [...document.querySelectorAll('[role="dialog"] button')].some((item) => item.textContent.trim() === "Edit"));
+	click(document.querySelector("[role='dialog'] button[aria-label='Close modal']"));
 	click(button("Save HTML copy"));
 	await waitFor(() => savedHtml.includes("proposedEdits"));
 	const revised = new JSDOM(savedHtml, { url: `file://${path}-reviewed`, runScripts: "outside-only", beforeParse(window) {
@@ -189,11 +189,18 @@ try {
 	} });
 	const revisedData = JSON.parse(revised.window.document.querySelector("#backlog-snapshot").textContent);
 	assert.equal(revisedData.tasks[count - 1].title, `Task ${count} 日本語`);
-	assert.equal(revisedData.proposedEdits[`TASK-${count}`].task.title, proposal.title);
+	assert.equal(revisedData.proposedEdits[`TASK-${count}`].task.title, proposedTitle);
+	assert.equal(revisedData.proposedEdits[`TASK-${count}`].task.status, "In Progress");
+	assert.equal(revisedData.proposedEdits[`TASK-${count}`].task.fieldValues.custom_score, 77);
 	assert.equal(revised.window.document.querySelectorAll("script").length, 2);
 	revised.window.eval(revised.window.document.querySelector("script:not([type])").textContent);
 	for (let attempt = 0; attempt < 40 && !revised.window.document.getElementById("root").textContent.includes("1 proposed edit"); attempt++) await new Promise((resolve) => setTimeout(resolve, 25));
 	assert.match(revised.window.document.getElementById("root").textContent, /1 proposed edit/);
+	const reopenedSearch = revised.window.document.querySelector("input[aria-label='Search tasks']");
+	Object.getOwnPropertyDescriptor(revised.window.HTMLInputElement.prototype, "value").set.call(reopenedSearch, `Reviewed task ${count}`);
+	reopenedSearch.dispatchEvent(new revised.window.Event("input", { bubbles: true }));
+	for (let attempt = 0; attempt < 120 && !revised.window.document.querySelector("[role='status']")?.textContent.includes("1 matching tasks"); attempt++) await new Promise((resolve) => setTimeout(resolve, 25));
+	assert.match(revised.window.document.querySelector("[role='status']")?.textContent ?? "", /1 matching tasks/);
 	assert.equal(revised.window.__reviewInjected, undefined);
 	revised.window.close();
 	assert.equal(requests, 0);

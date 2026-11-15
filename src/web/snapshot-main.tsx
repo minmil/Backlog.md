@@ -5,11 +5,9 @@ import type { HtmlSnapshot } from "../export/html-snapshot.ts";
 import { renderHtmlSnapshot } from "../export/html-snapshot-render.ts";
 import { toTaskDetail } from "../core/task-detail.ts";
 import { canonicalTaskId } from "../utils/task-id.ts";
-import type { TaskSchema } from "../schema/types.ts";
 import type { Task } from "../types/index.ts";
 import TaskCard from "./components/TaskCard.tsx";
 import TaskDetailsModal from "./components/TaskDetailsModal.tsx";
-import Modal from "./components/Modal.tsx";
 import FieldValue from "./components/schema/FieldValue.tsx";
 import { SchemaProvider, useSchema } from "./components/schema/SchemaProvider.tsx";
 import TaskDisplayTitle from "./components/schema/TaskDisplayTitle.tsx";
@@ -27,37 +25,6 @@ if (initialSnapshot.formatVersion !== 1) throw new Error(`Unsupported Backlog sn
 function effectiveTasks(snapshot: HtmlSnapshot): { tasks: Task[]; archivedTasks: Task[] } {
 	const apply = (tasks: Task[]) => tasks.map((task) => snapshot.proposedEdits?.[canonicalTaskId(task.id)]?.task ?? task);
 	return { tasks: apply(snapshot.tasks), archivedTasks: apply(snapshot.archivedTasks) };
-}
-
-function validateProposal(value: unknown, original: Task, schema: TaskSchema): Task {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Task JSON must be an object.");
-	const task = value as Task;
-	if (task.id !== original.id) throw new Error("The task ID cannot be changed in a review copy.");
-	if (typeof task.title !== "string" || !task.title.trim()) throw new Error("Title must be a nonempty string.");
-	if (typeof task.status !== "string" || !task.status.trim()) throw new Error("Status must be a nonempty string.");
-	if (typeof task.createdDate !== "string") throw new Error("Created date must be a string.");
-	for (const key of ["assignee", "labels", "dependencies"] as const) {
-		if (!Array.isArray(task[key]) || !task[key]?.every((item) => typeof item === "string"))
-			throw new Error(`${key} must be an array of strings.`);
-	}
-	for (const key of ["references", "documentation", "modifiedFiles", "subtasks"] as const) {
-		if (task[key] !== undefined && (!Array.isArray(task[key]) || !task[key]?.every((item) => typeof item === "string")))
-			throw new Error(`${key} must be an array of strings.`);
-	}
-	if (task.sections !== undefined && (!task.sections || typeof task.sections !== "object" || Array.isArray(task.sections)))
-		throw new Error("Sections must be an object.");
-	for (const [key, section] of Object.entries(task.sections ?? {})) {
-		const definition = schema.sections[key];
-		if (!definition) throw new Error(`Unknown section: ${key}`);
-		if (definition.kind === "markdown" ? typeof section !== "string" : !Array.isArray(section))
-			throw new Error(`Invalid ${key} section value.`);
-	}
-	if (task.fieldValues !== undefined && (!task.fieldValues || typeof task.fieldValues !== "object" || Array.isArray(task.fieldValues)))
-		throw new Error("Field values must be an object.");
-	for (const key of Object.keys(task.fieldValues ?? {})) if (!schema.fields[key]) throw new Error(`Unknown field: ${key}`);
-	const allowed = new Set(["id", "title", "status", "assignee", "reporter", "createdDate", "updatedDate", "dueDate", "labels", "milestone", "dependencies", "references", "documentation", "modifiedFiles", "sections", "other", "parentTaskId", "subtasks", "priority", "type", "project", "fieldValues", "source"]);
-	for (const key of Object.keys(task)) if (!allowed.has(key)) throw new Error(`Unknown task property: ${key}`);
-	return { ...task, source: original.source };
 }
 
 function downloadHtmlCopy(snapshot: HtmlSnapshot): void {
@@ -105,9 +72,6 @@ function SnapshotViewer({ snapshot, onProposeEdit, onSaveCopy }: { snapshot: Htm
 	const [descending, setDescending] = useState(false);
 	const [showArchive, setShowArchive] = useState(false);
 	const [shown, setShown] = useState(PAGE_SIZE);
-	const [editingTask, setEditingTask] = useState<Task | null>(null);
-	const [editorText, setEditorText] = useState("");
-	const [editorError, setEditorError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const statuses = [
 		...new Set([...(schema.fields.status?.values ?? []), ...snapshot.tasks.map((task) => task.status)]),
@@ -169,23 +133,6 @@ function SnapshotViewer({ snapshot, onProposeEdit, onSaveCopy }: { snapshot: Htm
 	}, [selected, snapshot]);
 	const basePath = view === "board" ? "/board" : "/tasks";
 	const openTask = (task: Task) => navigate(`${basePath}/${encodeURIComponent(task.id)}`);
-	const openEditor = (task: Task) => {
-		const stored = taskIndex.get(canonicalTaskId(task.id)) ?? task;
-		setEditingTask(stored);
-		setEditorText(JSON.stringify(stored, null, 2));
-		setEditorError("");
-		navigate(basePath);
-	};
-	const saveProposal = () => {
-		if (!editingTask) return;
-		try {
-			const parsed = validateProposal(JSON.parse(editorText), editingTask, schema);
-			onProposeEdit(parsed);
-			setEditingTask(null);
-		} catch (error) {
-			setEditorError(error instanceof Error ? error.message : String(error));
-		}
-	};
 	const onLinkClick = (event: MouseEvent<HTMLElement>) => {
 		const anchor = (event.target as HTMLElement).closest("a[href]");
 		if (!anchor) return;
@@ -455,13 +402,8 @@ function SnapshotViewer({ snapshot, onProposeEdit, onSaveCopy }: { snapshot: Htm
 				availableStatuses={statuses}
 				onNavigateToTask={openTask}
 				dateFormat={snapshot.dateFormat}
-				onProposeEdit={openEditor}
+				onProposeEdit={onProposeEdit}
 			/>
-			<Modal isOpen={Boolean(editingTask)} onClose={() => setEditingTask(null)} title={`Edit ${editingTask?.id ?? ""} JSON`} maxWidthClass="max-w-4xl" actions={<button type="button" onClick={saveProposal} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white">Save proposal</button>}>
-				<p className="mb-3 text-sm text-gray-600 dark:text-gray-300">Changes stay in this page until you download a new HTML copy. The main backlog is never updated.</p>
-				{editorError ? <p role="alert" className="mb-3 text-sm text-red-600">{editorError}</p> : null}
-				<textarea aria-label="Task JSON" spellCheck={false} value={editorText} onChange={(event) => setEditorText(event.target.value)} className="h-[60vh] w-full rounded-md border border-gray-300 bg-white p-3 font-mono text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100" />
-			</Modal>
 		</div>
 	);
 }

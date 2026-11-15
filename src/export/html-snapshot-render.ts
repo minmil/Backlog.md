@@ -1,4 +1,38 @@
+import type { TaskSchema } from "../schema/types.ts";
+import type { Task } from "../types/index.ts";
 import type { HtmlSnapshot } from "./html-snapshot.ts";
+
+/** Keep only fields deliberately published in the standalone review file. */
+export function publishedTask(task: Task, schema: TaskSchema, archived: boolean): Task {
+	const fieldValues = Object.fromEntries(
+		Object.entries(task.fieldValues ?? {}).filter(([key]) => Boolean(schema.fields[key])),
+	);
+	return {
+		id: task.id,
+		title: task.title,
+		status: task.status,
+		assignee: task.assignee,
+		reporter: task.reporter,
+		createdDate: task.createdDate,
+		updatedDate: task.updatedDate,
+		dueDate: task.dueDate,
+		labels: task.labels,
+		milestone: task.milestone,
+		dependencies: task.dependencies,
+		references: task.references,
+		documentation: task.documentation,
+		modifiedFiles: task.modifiedFiles,
+		sections: task.sections,
+		other: task.other,
+		parentTaskId: task.parentTaskId,
+		subtasks: task.subtasks,
+		priority: task.priority,
+		type: task.type,
+		project: task.project,
+		fieldValues,
+		source: archived ? "archived" : "local",
+	};
+}
 
 export function escapeEmbeddedJson(value: unknown): string {
 	return JSON.stringify(value)

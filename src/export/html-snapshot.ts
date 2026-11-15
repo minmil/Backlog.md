@@ -4,6 +4,7 @@ import type { Core } from "../core/backlog.ts";
 import type { TaskSchema } from "../schema/types.ts";
 import type { Task } from "../types/index.ts";
 import { canonicalTaskId } from "../utils/task-id.ts";
+import { publishedTask } from "./html-snapshot-render.ts";
 
 export const HTML_SNAPSHOT_VERSION = 1;
 
@@ -21,38 +22,6 @@ export interface HtmlSnapshot {
 	archivedTasks: Task[];
 	/** Review proposals keyed by canonical task ID. Original tasks remain unchanged for later import. */
 	proposedEdits?: Record<string, { task: Task; editedAt: string }>;
-}
-
-/** A deliberate publication projection: no file paths, unknown YAML, commands, or config secrets. */
-function publishedTask(task: Task, schema: TaskSchema, archived: boolean): Task {
-	const fieldValues = Object.fromEntries(
-		Object.entries(task.fieldValues ?? {}).filter(([key]) => Boolean(schema.fields[key])),
-	);
-	return {
-		id: task.id,
-		title: task.title,
-		status: task.status,
-		assignee: task.assignee,
-		reporter: task.reporter,
-		createdDate: task.createdDate,
-		updatedDate: task.updatedDate,
-		dueDate: task.dueDate,
-		labels: task.labels,
-		milestone: task.milestone,
-		dependencies: task.dependencies,
-		references: task.references,
-		documentation: task.documentation,
-		modifiedFiles: task.modifiedFiles,
-		sections: task.sections,
-		other: task.other,
-		parentTaskId: task.parentTaskId,
-		subtasks: task.subtasks,
-		priority: task.priority,
-		type: task.type,
-		project: task.project,
-		fieldValues,
-		source: archived ? "archived" : "local",
-	};
 }
 
 export async function createHtmlSnapshot(core: Core): Promise<HtmlSnapshot> {
