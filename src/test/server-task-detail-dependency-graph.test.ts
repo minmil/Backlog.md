@@ -7,7 +7,7 @@ import type { TaskDetail } from "../core/task-detail.ts";
 import { FileSystem } from "../file-system/operations.ts";
 import { BacklogServer } from "../server/index.ts";
 import type { Task } from "../types/index.ts";
-import { createUniqueTestDir, safeCleanup, withTimeout } from "./test-utils.ts";
+import { createUniqueTestDir, retry, safeCleanup, withTimeout } from "./test-utils.ts";
 
 type DetailServerHandlers = {
 	handleGetTask(taskId: string): Promise<Response>;
@@ -74,6 +74,45 @@ describe("BacklogServer task detail dependency graph", () => {
 			{ from: "TASK-2", to: "TASK-1" },
 			{ from: "TASK-3", to: "TASK-2" },
 		]);
+	});
+
+	it("reuses the watched corpus for warm untracked detail reads and sees external edits", async () => {
+		await addTask("task-1", "Foundation");
+		await detailFor("task-1");
+		const filesystem = (server as unknown as { core: Core }).core.filesystem;
+		const originalListTasks = filesystem.listTasks.bind(filesystem);
+		const originalListArchived = filesystem.listArchivedTasks.bind(filesystem);
+		let activeScans = 0;
+		let archivedScans = 0;
+		filesystem.listTasks = async (...args) => {
+			activeScans++;
+			return originalListTasks(...args);
+		};
+		filesystem.listArchivedTasks = async (...args) => {
+			archivedScans++;
+			return originalListArchived(...args);
+		};
+		try {
+			await detailFor("task-1");
+			await detailFor("task-1");
+			expect(activeScans).toBe(0);
+			expect(archivedScans).toBe(0);
+
+			const path = join(testDir, "backlog", "tasks", "task-1 - Foundation.md");
+			await writeFile(path, (await readFile(path, "utf8")).replaceAll("Foundation", "Updated"));
+			await retry(
+				async () => {
+					const detail = await detailFor("task-1");
+					expect(detail.title).toBe("Updated");
+					return detail;
+				},
+				20,
+				25,
+			);
+		} finally {
+			filesystem.listTasks = originalListTasks;
+			filesystem.listArchivedTasks = originalListArchived;
+		}
 	});
 
 	it("does not serve a standalone dependency-graph surface any more", async () => {

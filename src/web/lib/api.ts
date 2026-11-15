@@ -180,16 +180,19 @@ export class ApiClient {
 				const controller = new AbortController();
 				const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-				const response = await fetch(url, {
-					...options,
-					signal: controller.signal,
-					headers: {
-						"Content-Type": "application/json",
-						...options.headers,
-					},
-				});
-
-				clearTimeout(timeoutId);
+				let response: Response;
+				try {
+					response = await fetch(url, {
+						...options,
+						signal: controller.signal,
+						headers: {
+							"Content-Type": "application/json",
+							...options.headers,
+						},
+					});
+				} finally {
+					clearTimeout(timeoutId);
+				}
 
 				if (!response.ok) {
 					let errorData: unknown = null;
@@ -230,8 +233,8 @@ export class ApiClient {
 	}
 
 	// Helper method for JSON responses
-	private async fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
-		const response = await this.fetchWithRetry(url, options);
+	private async fetchJson<T>(url: string, options: RequestInit = {}, retriesOverride?: number): Promise<T> {
+		const response = await this.fetchWithRetry(url, options, retriesOverride);
 		return response.json();
 	}
 	async fetchTasks(options?: {
@@ -339,12 +342,12 @@ export class ApiClient {
 		}
 
 		const url = `${API_BASE}/search${params.toString() ? `?${params.toString()}` : ""}`;
-		return this.fetchJson<SearchResult[]>(url);
+		return this.fetchJson<SearchResult[]>(url, {}, 0);
 	}
 
 	/** Reads one task through the detail path, so the response already carries its dependency graph. */
 	async fetchTask(id: string): Promise<TaskDetail> {
-		return this.fetchJson<TaskDetail>(`${API_BASE}/task/${encodeURIComponent(id)}`);
+		return this.fetchJson<TaskDetail>(`${API_BASE}/task/${encodeURIComponent(id)}`, {}, 0);
 	}
 
 	async createTask(task: Omit<Task, "id" | "createdDate">): Promise<Task> {
@@ -690,17 +693,19 @@ export class ApiClient {
 	}
 
 	async fetchStatistics(where: string[] = []): Promise<
-		Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+		Omit<TaskStatistics, "statusCounts" | "priorityCounts" | "outcomeCounts"> & {
 			statusCounts: Record<string, number>;
 			priorityCounts: Record<string, number>;
+			outcomeCounts: Record<string, number>;
 		}
 	> {
 		const query = new URLSearchParams();
 		for (const condition of where) query.append("where", condition);
 		return this.fetchJson<
-			Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+			Omit<TaskStatistics, "statusCounts" | "priorityCounts" | "outcomeCounts"> & {
 				statusCounts: Record<string, number>;
 				priorityCounts: Record<string, number>;
+				outcomeCounts: Record<string, number>;
 			}
 		>(`${API_BASE}/statistics${query.size ? `?${query}` : ""}`);
 	}

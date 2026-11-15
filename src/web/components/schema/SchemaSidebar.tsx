@@ -10,6 +10,14 @@ export function detailFieldOrder(schema: ReturnType<typeof useSchema>["schema"])
 	const all = Object.keys(schema.fields).filter((key) => !schema.fields[key]?.hidden);
 	const requested = schema.ui.detail.order.filter((key) => all.includes(key));
 	const order = [...new Set([...requested, ...all])];
+	if (schema.fields.outcome && !requested.includes("outcome")) {
+		const generated = ["outcome", ...(schema.fields.outcome_date ? ["outcome_date"] : [])];
+		for (const key of generated) {
+			const index = order.indexOf(key);
+			if (index >= 0) order.splice(index, 1);
+		}
+		order.splice(order.indexOf("status") + 1, 0, ...generated);
+	}
 	const translations = new Map<string, string[]>();
 	for (const key of order) {
 		const source = schema.fields[key]?.translation_of;
@@ -39,6 +47,7 @@ export default function SchemaSidebar({ values, onChange, mode, readOnly, draft,
 		{orderedFields.filter((key) => mode !== "create" || key !== "title").map((key) => {
 			const field = schema.fields[key];
 			if (!field) return null;
+			if ((key === "outcome" || key === "outcome_date") && values.status !== schema.fields.status?.values?.at(-1)) return null;
 			const value = values[key];
 			if (mode === "view" && (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0))) return null;
 			const source = field.translation_of ?? key;

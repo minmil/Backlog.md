@@ -181,7 +181,7 @@ describe("Web task details modal dependency graph", () => {
 
 		const { html, requests } = renderModal(detail);
 
-		expect(html).toContain("Dependency Graph");
+		expect(html).toContain("Task relationships");
 		expect(html).toContain("Depends on");
 		expect(html).toContain("Dependents");
 		expect(html).toContain('href="/tasks/TASK-1/foundation"');
@@ -189,8 +189,19 @@ describe("Web task details modal dependency graph", () => {
 		expect(requests.filter((url) => url.includes("dependency-graph"))).toEqual([]);
 	});
 
+	it("shows a blocked task as blocked even when it has no dependency blockers", () => {
+		const blocked = { ...corpus[1], status: "Blocked", dependencies: ["TASK-1"] } as Task;
+		const detail = toTaskDetail(blocked, {
+			tasks: [corpus[0] as Task, blocked], archivedTasks: [], statuses: ["To Do", "Blocked", "In Progress", "Done"],
+		});
+		const { html } = renderModal(detail);
+		const summary = new JSDOM(html).window.document.querySelector("details summary");
+		expect(summary?.textContent).toContain("Blocked");
+		expect(summary?.textContent).not.toContain("Ready to start");
+	});
+
 	it("shows no graph section for a plain task record", () => {
 		const { html } = renderModal(corpus[1] as Task);
-		expect(html).not.toContain("Dependency Graph");
+		expect(html).not.toContain("Task relationships");
 	});
 });

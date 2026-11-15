@@ -289,8 +289,11 @@ describe("backlog doc archive", () => {
 
 		expect(viewer.timedOut).toBe(false);
 		expect(viewer.exitCode).toBe(0);
-		// The viewer draws the gap between two words by moving the cursor one column, not with a space.
-		expect(viewer.output.replaceAll("\u001b[1C", " ")).toContain(ARCHIVED_LINE);
+		// Terminal renderers can draw spaces by moving the cursor; compare the visible words in order.
+		const terminalControls = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, "g");
+		expect(viewer.output.replaceAll(terminalControls, "").replaceAll(/\s/g, "")).toContain(
+			ARCHIVED_LINE.replaceAll(/\s/g, ""),
+		);
 	});
 
 	it("leaves an archived document out of doc list, doc search and search", async () => {

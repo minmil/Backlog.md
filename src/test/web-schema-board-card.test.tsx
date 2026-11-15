@@ -22,10 +22,13 @@ describe("schema board card", () => {
 		expect(html).not.toContain('data-field="priority"');
 	});
 
-	it("shows a sequence reference on cards even when the card layout omits it", () => {
+	it("shows a sequence reference only when the card layout includes it", () => {
 		const schema = structuredClone(getDefaultTaskSchema());
 		schema.fields.client_ref = { type: "sequence", scope: "project", prefixes: { "Client 1": "C1" }, pad: 3 };
 		const task = { id: "TASK-1", title: "Client task", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25", fieldValues: { client_ref: "C1-007" } } satisfies Task;
+		const omitted = renderToString(<SchemaProvider initialSchema={schema}><TaskCard task={task} onUpdate={() => {}} onEdit={() => {}} /></SchemaProvider>);
+		expect(omitted).not.toContain('data-field="client_ref"');
+		schema.ui.board.card = ["client_ref", ...schema.ui.board.card];
 		const html = renderToString(<SchemaProvider initialSchema={schema}><TaskCard task={task} onUpdate={() => {}} onEdit={() => {}} /></SchemaProvider>);
 		expect(html).toContain('data-field="client_ref"');
 		expect(html).toContain("C1-007");

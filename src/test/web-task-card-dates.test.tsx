@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { JSDOM } from "jsdom";
 import { renderToString } from "react-dom/server";
 import type { Task } from "../types/index.ts";
-import TaskCard from "../web/components/TaskCard.tsx";
+import TaskCard, { getDueUrgencyClass } from "../web/components/TaskCard.tsx";
 import { pinTimeZone } from "./pin-timezone.ts";
 
 const TIME_ZONE = "Asia/Tokyo";
@@ -47,7 +47,7 @@ const renderCard = (task: Task, dateFormat?: string): Element => {
  * They lead the footer, which is the last row of the card.
  */
 const getCardDates = (card: Element): { text: string; hover: string | null }[] =>
-	Array.from(card.lastElementChild?.firstElementChild?.children ?? [], (date) => ({
+	Array.from(card.lastElementChild?.children ?? [], (date) => ({
 		text: date.textContent ?? "",
 		// The created date carries its own hover; the updated date's hover sits on the value after its label.
 		hover: (date.querySelector("[title]") ?? date).getAttribute("title"),
@@ -56,6 +56,18 @@ const getCardDates = (card: Element): { text: string; hover: string | null }[] =
 describe("web board card dates", () => {
 	// The card renders stored timestamps in the viewer's timezone, so pin one.
 	pinTimeZone(TIME_ZONE);
+
+	it("colors future, missing, near, and overdue dates, but not completed tasks", () => {
+		const now = new Date(2026, 10, 15, 12);
+		const urgency = (due: string, status = "In Progress") => getDueUrgencyClass(due, status, ["To Do", "In Progress", "Done"], now);
+		expect(urgency("2026-11-22")).toContain("border-l-emerald-300");
+		expect(urgency("")).toContain("border-l-amber-400");
+		expect(urgency("2026-11-21")).toContain("border-l-red-300");
+		expect(urgency("2026-11-18")).toContain("border-l-red-300");
+		expect(urgency("2026-11-17")).toContain("border-l-red-600");
+		expect(urgency("2026-11-14")).toContain("border-l-red-600");
+		expect(urgency("2026-11-14", "Done")).toBe("");
+	});
 
 	it("reads dates from the current local day as today", () => {
 		const createdDate = toStoredDate(localMoment(0, 0, 0));

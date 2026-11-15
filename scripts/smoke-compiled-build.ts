@@ -238,7 +238,10 @@ try {
 	const taskId = /^id:\s*(\S+)$/m.exec(stored)?.[1];
 	assert(taskId, "The saved task has no ID.");
 	const detail = JSON.parse(await run([executable, "task", "view", taskId, "--json"], smokeRoot));
-	assert(detail.task.description === "Persisted" && detail.task.priority === "high", "Task frontmatter was not read.");
+	assert(
+		detail.task.sections.description === "Persisted" && detail.task.fields.priority === "high",
+		"Task frontmatter was not read.",
+	);
 	const list = JSON.parse(await run([executable, "task", "list", "--json"], smokeRoot));
 	assert(list.tasks.length === 1 && list.tasks[0].id === taskId, "Task listing did not return the saved task.");
 	await run(
@@ -247,7 +250,7 @@ try {
 	);
 	const edited = JSON.parse(await run([executable, "task", "view", taskId, "--json"], smokeRoot));
 	assert(
-		edited.task.title === "Updated packaged task" && edited.task.priority === "medium",
+		edited.task.title === "Updated packaged task" && edited.task.fields.priority === "medium",
 		"The task edit did not persist its title and metadata.",
 	);
 
@@ -308,6 +311,16 @@ try {
 			faviconResponse.headers.get("content-type")?.includes("image/png"),
 			`Unexpected favicon content type: ${faviconResponse.headers.get("content-type")}`,
 		);
+
+		const exportResponse = await fetchWithTimeout(`${baseUrl}/api/export/html`);
+		assert(exportResponse.status === 200, `HTML export returned ${exportResponse.status}.`);
+		assert(
+			exportResponse.headers.get("content-disposition")?.includes("backlog-snapshot.html"),
+			"HTML export did not request a file download.",
+		);
+		const exportedHtml = await exportResponse.text();
+		assert(exportedHtml.includes('id="backlog-snapshot"'), "HTML export has no embedded task data.");
+		assert(exportedHtml.includes("Updated packaged task"), "HTML export missed the current task.");
 	} catch (error) {
 		browserFailure = { error };
 	}

@@ -21,6 +21,7 @@ import FieldValue from "./schema/FieldValue.tsx";
 import FieldFilter from "./schema/FieldFilter.tsx";
 import SelectControl from "./SelectControl.tsx";
 import { useSchema } from "./schema/SchemaProvider.tsx";
+import { milestoneTerminology } from "../utils/milestone-terminology.ts";
 import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
 import { FallbackLanguageCode } from "./schema/DisplayLanguageContext.tsx";
 import CleanupModal from "./CleanupModal";
@@ -126,11 +127,15 @@ const TaskList: React.FC<TaskListProps> = ({
 	isLoading = false,
 }) => {
 	const { schema, registry } = useSchema();
+	const milestoneTerms = milestoneTerminology(schema);
 	const { resolve: resolveDisplayField, title: displayTitle, showFallback, lang: displayLang } = useTaskDisplay();
-	const columnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
+	const configuredColumnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && (!schema.fields[key]?.hidden || key === "id"));
+	const columnKeys = configuredColumnKeys.includes("id") || configuredColumnKeys.includes("title")
+		? configuredColumnKeys
+		: ["id", "title", ...configuredColumnKeys];
 	const filterKeys = schema.ui.task_list.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
 	const customFilterKeys = filterKeys.filter((key) => !["status", "priority", "milestone", "labels"].includes(key));
-	const columnWidths = [6, null, ...columnKeys.map((key) => FIELD_WIDTHS_REM[key] ?? 8)] as const;
+	const columnWidths = columnKeys.map((key) => key === "id" ? 6 : key === "title" ? null : FIELD_WIDTHS_REM[key] ?? 8);
 	const tableMinWidth = columnWidths.reduce<number>((total, width) => total + (width ?? TASK_TITLE_MIN_WIDTH_REM), 0);
 	const fieldValue = (task: Task, key: string): RegistryFieldValue | undefined => {
 		if (schema.fields[key]?.lang || registry.translationGroup(key).length > 1) return resolveDisplayField(task, key).value;
@@ -748,7 +753,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={excludedStatusFilter} onChange={handleExcludeStatusChange} menuId="task-list-exclude-status-menu" label="Exclude status" emptyLabel="None" noOptionsLabel="No statuses" clearLabel="Clear excluded statuses" className="min-w-[210px]" />
 		</React.Fragment>;
 		if (key === "priority") return <SelectControl key={key} minWidthClass="min-w-[120px]" aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)}>{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</SelectControl>;
-		if (key === "milestone") return <SelectControl key={key} minWidthClass="min-w-[160px]" aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)}><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</SelectControl>;
+		if (key === "milestone") return <SelectControl key={key} minWidthClass="min-w-[160px]" aria-label={`Filter by ${milestoneTerms.singularLower}`} value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)}><option value="">All {milestoneTerms.pluralLower}</option><option value="__none">No {milestoneTerms.singularLower}</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</SelectControl>;
 		if (key === "labels") return <LabelFilterDropdown key={key} availableLabels={mergedAvailableLabels} selectedLabels={labelFilter} onChange={handleLabelChange} menuId="task-list-labels-menu" />;
 		return <FieldFilter key={key} fieldKey={key} value={customFilters[key]} onChange={(value) => handleCustomFilterChange(key, value)} />;
 	};
@@ -807,9 +812,7 @@ const TaskList: React.FC<TaskListProps> = ({
 								{renderColumnGroup()}
 								<thead>
 									<tr className="text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-300">
-										{renderSortableHeader("ID", "id")}
-										{renderSortableHeader("Title", "title")}
-										{columnKeys.map((key) => renderSortableHeader(schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
+										{columnKeys.map((key) => renderSortableHeader(key === "id" ? "ID" : schema.fields[key]?.label ?? `${key.charAt(0).toUpperCase()}${key.slice(1)}`, key))}
 									</tr>
 								</thead>
 							</table>
@@ -832,10 +835,9 @@ const TaskList: React.FC<TaskListProps> = ({
 													: "bg-white hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/50"
 											}`}
 										>
-											<td className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
+											{columnKeys.map((key) => key === "id" ? <td key={key} className="px-3 py-2.5 text-xs font-mono text-gray-500 dark:text-gray-400 whitespace-nowrap">
 												{task.id}
-											</td>
-											<td className="px-3 py-2.5">
+											</td> : key === "title" ? <td key={key} className="px-3 py-2.5">
 												<div className="flex items-center gap-2 min-w-0">
 													{progressSlotDigits > 0 && (
 														<span className="flex min-w-12 shrink-0 text-[10px] font-medium tabular-nums" style={{ width: progressSlotWidth }}>
@@ -872,8 +874,7 @@ const TaskList: React.FC<TaskListProps> = ({
 														Due: <StoredDate value={task.dueDate} dateFormat={dateFormat} />
 													</div>
 												)}
-											</td>
-											{columnKeys.map((key) => renderFieldCell(task, key))}
+											</td> : renderFieldCell(task, key))}
 										</tr>
 									);
 								})}

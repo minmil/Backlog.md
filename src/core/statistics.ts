@@ -5,6 +5,7 @@ import { parseStoredUtcDate } from "../utils/utc-timestamp.ts";
 
 export interface TaskStatistics {
 	statusCounts: Map<string, number>;
+	outcomeCounts: Map<string, number>;
 	priorityCounts: Map<string, number>;
 	noPriorityCount: number;
 	totalTasks: number;
@@ -31,8 +32,10 @@ export function getTaskStatistics(
 	statuses: string[],
 	priorityOrder?: readonly string[],
 	dependencyTasks: Task[] = tasks,
+	outcomes?: readonly string[],
 ): TaskStatistics {
 	const statusCounts = new Map<string, number>();
+	const outcomeCounts = new Map<string, number>((outcomes ?? []).map((outcome) => [outcome, 0]));
 	const priorityCounts = new Map<string, number>();
 
 	// Initialize status counts
@@ -69,9 +72,16 @@ export function getTaskStatistics(
 		// Count by status
 		const currentCount = statusCounts.get(task.status) || 0;
 		statusCounts.set(task.status, currentCount + 1);
+		const closed = isTerminalStatus(task.status, statuses);
+		const completed =
+			closed && (!outcomes?.length || !task.fieldValues?.outcome || task.fieldValues.outcome === outcomes[0]);
+		if (closed && outcomes?.length) {
+			const outcome = String(task.fieldValues?.outcome ?? outcomes[0]);
+			outcomeCounts.set(outcome, (outcomeCounts.get(outcome) ?? 0) + 1);
+		}
 
 		// Count completed tasks
-		if (task.status === "Done") {
+		if (completed) {
 			completedTasks++;
 		}
 
@@ -95,9 +105,10 @@ export function getTaskStatistics(
 			// For completed tasks, use the time from creation to completion
 			// For active tasks, use the time from creation to now
 			let ageInDays: number;
-			if (task.status === "Done" && task.updatedDate) {
-				const updatedDate = parseStoredUtcDate(task.updatedDate) ?? new Date(Number.NaN);
-				ageInDays = Math.floor((updatedDate.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
+			if (closed && (task.fieldValues?.outcome_date || task.updatedDate)) {
+				const updatedDate =
+					parseStoredUtcDate(String(task.fieldValues?.outcome_date || task.updatedDate)) ?? new Date(Number.NaN);
+				ageInDays = Math.max(0, Math.floor((updatedDate.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000)));
 			} else {
 				ageInDays = Math.floor((now.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
 			}
@@ -112,8 +123,8 @@ export function getTaskStatistics(
 			}
 		}
 
-		// Identify stale tasks (not updated in 30 days and not done)
-		if (task.status !== "Done") {
+		// Identify stale tasks that have not reached the final status
+		if (!closed) {
 			const lastDate = task.updatedDate || task.createdDate;
 			if (lastDate) {
 				const date = parseStoredUtcDate(lastDate) ?? new Date(Number.NaN);
@@ -123,12 +134,12 @@ export function getTaskStatistics(
 			}
 		}
 
-		// Identify blocked tasks (has dependencies that are not done)
-		if (task.dependencies && task.dependencies.length > 0 && task.status !== "Done") {
-			// Check if any dependency is not done
+		// Identify blocked tasks (has dependencies that have not reached the final status)
+		if (task.dependencies && task.dependencies.length > 0 && !closed) {
+			// Check if any dependency is not complete
 			const hasBlockingDependency = task.dependencies.some((depId) => {
 				const dep = dependencyTasks.find((t) => t.id === depId);
-				return dep && dep.status !== "Done";
+				return dep && !isTerminalStatus(dep.status, statuses);
 			});
 
 			if (hasBlockingDependency) {
@@ -159,6 +170,7 @@ export function getTaskStatistics(
 
 	return {
 		statusCounts,
+		outcomeCounts,
 		priorityCounts,
 		noPriorityCount,
 		totalTasks,

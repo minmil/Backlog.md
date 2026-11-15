@@ -6,6 +6,20 @@ import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import TaskDisplayTitle, { useTaskDisplay } from './schema/TaskDisplayTitle.tsx';
 import { FallbackLanguageCode } from './schema/DisplayLanguageContext.tsx';
+import { useSnapshotMode } from '../contexts/SnapshotModeContext.tsx';
+import { isTerminalStatus } from '../../utils/terminal-status.ts';
+
+export function getDueUrgencyClass(dueDate: string | undefined, status: string, statuses: readonly string[], now = new Date()): string {
+  if (isTerminalStatus(status, statuses)) return '';
+  if (!dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return 'border-l-4 border-l-amber-400 dark:border-l-amber-500';
+  const due = Date.parse(`${dueDate}T00:00:00Z`);
+  if (!Number.isFinite(due)) return 'border-l-4 border-l-amber-400 dark:border-l-amber-500';
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((due - today) / 86_400_000);
+  if (days < 3) return 'border-l-4 border-l-red-600 dark:border-l-red-500';
+  if (days < 7) return 'border-l-4 border-l-red-300 dark:border-l-red-400';
+  return 'border-l-4 border-l-emerald-300 dark:border-l-emerald-500';
+}
 
 interface TaskCardProps {
   task: Task;
@@ -18,6 +32,7 @@ interface TaskCardProps {
   availableTypes?: string[];
   availableProjects?: string[];
   dateFormat?: string;
+  subtaskProgress?: { completed: number; total: number };
   isSelected?: boolean;
   selectionCount?: number;
   onSelect?: (event: { shiftKey: boolean }) => void;
@@ -73,10 +88,12 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onSelect,
   isSelectionDragging = false,
   onSelectionDragChange,
+  subtaskProgress,
 }) => {
   const [isDragging, setIsDragging] = React.useState(false);
   const [showBranchTooltip, setShowBranchTooltip] = React.useState(false);
   const { schema, registry } = useSchema();
+  const snapshotMode = useSnapshotMode();
   const { resolve, title, showFallback } = useTaskDisplay();
   const cardFields = schema.ui.board.card.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const fieldValue = (key: string): RegistryFieldValue | undefined => {
@@ -84,11 +101,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
     const supplied = (task as Task & { fields?: Record<string, RegistryFieldValue> }).fields;
     return supplied?.[key] ?? registry.getField(task, key);
   };
-  const badgeFields = [...new Set([...cardFields.filter((key) => key !== 'priority' && (schema.fields[key]?.type === 'enum' || schema.fields[key]?.type === 'bool')), ...Object.keys(schema.fields).filter((key) => schema.fields[key]?.type === 'sequence' && !schema.fields[key]?.hidden)])];
+  const badgeFields = cardFields.filter((key) => ['enum', 'bool', 'sequence'].includes(schema.fields[key]?.type ?? ''));
   const listFields = cardFields.filter((key) => ['multi-enum', 'string-list', 'task-ref-list'].includes(schema.fields[key]?.type ?? ''));
-  const footerFields = cardFields.filter((key) => !badgeFields.includes(key) && key !== 'priority' && !listFields.includes(key));
-  const adjacentDateFields = footerFields.filter((key) => key === 'created_date' || key === 'updated_date');
-  const trailingFields = footerFields.filter((key) => key !== 'created_date' && key !== 'updated_date');
+  const footerFields = cardFields.filter((key) => !badgeFields.includes(key) && !listFields.includes(key));
 
   // Check if task is from another branch (read-only)
   const isFromOtherBranch = Boolean(task.branch);
@@ -99,7 +114,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
   const handleDragStart = (e: React.DragEvent) => {
     // Prevent dragging cross-branch tasks
-    if (isFromOtherBranch) {
+    if (snapshotMode || isFromOtherBranch) {
       e.preventDefault();
       setShowBranchTooltip(true);
       setTimeout(() => setShowBranchTooltip(false), 3000);
@@ -145,16 +160,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
     onDragEnd?.();
   };
 
-  const getPriorityClass = (priority?: string) => {
-    switch (priority) {
-      case 'high': return 'border-l-4 border-l-red-500 dark:border-l-red-400';
-      case 'medium': return 'border-l-4 border-l-yellow-500 dark:border-l-yellow-400';
-      case 'low': return 'border-l-4 border-l-green-500 dark:border-l-green-400';
-      default: return 'border-l-4 border-l-gray-300 dark:border-l-gray-600';
-    }
-  };
-
-  const priorityValue = cardFields.includes('priority') ? fieldValue('priority') : undefined;
+  const dueDate = fieldValue('due_date');
+  const dueUrgencyClass = getDueUrgencyClass(typeof dueDate === 'string' ? dueDate : undefined, task.status, schema.fields.status?.values ?? []);
 
   return (
     <div className="relative">
@@ -176,7 +183,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
           isFromOtherBranch 
             ? 'opacity-75 cursor-not-allowed border-dashed' 
             : 'cursor-pointer hover:shadow-md dark:hover:shadow-lg hover:border-stone-500 dark:hover:border-stone-400'
-        } ${getPriorityClass(typeof priorityValue === 'string' ? priorityValue : undefined)} ${
+        } ${dueUrgencyClass} ${
           isDragging || (isSelected && isSelectionDragging) ? 'opacity-50 transform rotate-2 scale-105' : ''
         } ${
           isSelected
@@ -184,7 +191,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
             : ''
         }`}
         aria-selected={isSelected}
-        draggable={!isFromOtherBranch}
+        draggable={!snapshotMode && !isFromOtherBranch}
 		role="button"
 		tabIndex={0}
 		aria-label={accessibleLabel}
@@ -223,21 +230,16 @@ const TaskCard: React.FC<TaskCardProps> = ({
           </div>
         )}
 
-        {/* Header row with task metadata. It wraps like the footer: when the id, the badges and the
-            ring and priority group do not fit on one line, the group moves to a second line, still
-            flush right, so the badges are not squeezed to make room for it. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="shrink-0 text-xs text-gray-400 dark:text-gray-500 font-mono transition-colors duration-200">{task.id}</span>
-            {badgeFields.map((key) => { const display = resolve(task, key); return <span key={key}><FieldValue fieldKey={key} value={fieldValue(key)} variant="card" overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>; })}
-          </div>
-          {(acceptanceCriteriaProgress || priorityValue) && (
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <AcceptanceCriteriaProgress task={task} density="card" />
-              {priorityValue !== undefined && <FieldValue fieldKey="priority" value={priorityValue} variant="card" />}
-            </div>
-          )}
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="shrink-0 font-mono text-xs text-gray-400 transition-colors duration-200 dark:text-gray-500">{task.id.replace(/^TASK-/i, 'T-')}</span>
+          {(subtaskProgress || acceptanceCriteriaProgress && acceptanceCriteriaProgress.total > 1) && <span className="flex items-center gap-2">
+            {subtaskProgress && <span className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-medium tabular-nums text-blue-600 dark:text-blue-300" role="progressbar" aria-label="Subtask progress" aria-valuemin={0} aria-valuemax={subtaskProgress.total} aria-valuenow={subtaskProgress.completed} title={`${subtaskProgress.completed} of ${subtaskProgress.total} subtasks complete`}><svg className="h-3 w-3 shrink-0" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 1.5h4l2 2V10.5H3z" /><path d="M7 1.5v2h2M4.5 6h3M4.5 8h3" /></svg>{subtaskProgress.completed}/{subtaskProgress.total}</span>}
+            {acceptanceCriteriaProgress && acceptanceCriteriaProgress.total > 1 && <AcceptanceCriteriaProgress task={task} density="card" />}
+          </span>}
         </div>
+        {badgeFields.length > 0 && <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {badgeFields.map((key) => { const display = resolve(task, key); return <span key={key}><FieldValue fieldKey={key} value={fieldValue(key)} variant="card" overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>; })}
+        </div>}
 
         {/* Title */}
         <h4 className={`font-semibold text-sm line-clamp-2 transition-colors duration-200 ${
@@ -251,17 +253,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
         {listFields.map((key) => { const value = fieldValue(key); const display = resolve(task, key); return value && (!Array.isArray(value) || value.length) ? <div key={key} className="flex flex-wrap gap-1 mt-2"><FieldValue fieldKey={key} value={value} variant="card" overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</div> : null; })}
 
         {/* Footer with dates and assignee */}
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[10px] text-gray-400 dark:text-gray-500 mt-2 pt-1.5 border-t border-gray-100 dark:border-gray-600/50 transition-colors duration-200">
-          {/* Grouped so the updated date sits beside the created date on every card, whatever else the footer shows.
-              The group uses the same gaps as the footer row (gap-x-2 gap-y-1), so change the two together.
-              A new labelled date in the compact style belongs inside this group. */}
-          <span className="flex flex-wrap gap-x-2 gap-y-1">{adjacentDateFields.map((key) => {
-            const value = fieldValue(key);
-            if (value === undefined || value === null || value === '') return null;
-            const display = resolve(task, key);
-            return <span key={key}>{key === 'updated_date' ? 'Updated: ' : ''}<FieldValue fieldKey={key} value={value} variant="card" dateFormat={dateFormat} overdue={task.overdue?.includes(key)} />{showFallback(display.fallback) && <FallbackLanguageCode lang={display.lang} />}</span>;
-          })}</span>
-          {trailingFields.map((key) => {
+        <div className="mt-2 flex flex-col items-start gap-0.5 border-t border-gray-100 pt-1.5 text-[10px] text-gray-400 transition-colors duration-200 dark:border-gray-600/50 dark:text-gray-500">
+          {footerFields.map((key) => {
             const value = fieldValue(key);
             if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return null;
             const label = key === 'created_date' ? '' : key === 'updated_date' ? 'Updated: ' : key === 'due_date' ? 'Due: ' : `${schema.fields[key]?.label ?? key}: `;

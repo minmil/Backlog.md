@@ -115,7 +115,7 @@ const AcceptanceCriteriaEditor: React.FC<Props> = ({
             value={newCriterion}
             onChange={(e) => setNewCriterion(e.target.value)}
             onInput={(e) => autoResize(e.currentTarget)}
-            placeholder="New criterion"
+            placeholder="New item"
             className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-stone-500 dark:focus:ring-stone-400 focus:border-transparent transition-colors duration-200 resize-none overflow-hidden leading-5"
           />
           <button

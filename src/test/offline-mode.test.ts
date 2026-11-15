@@ -44,15 +44,16 @@ describe("Offline Mode Configuration", () => {
 				warnMessages.push(message);
 			};
 
-			// This should not throw and should skip the actual fetch
-			await gitOps.fetch();
-
-			// Verify debug message was logged
-			expect(warnMessages).toContain("Remote operations are disabled in config. Skipping fetch.");
-
-			// Restore
-			process.env.DEBUG = originalDebug;
-			console.warn = originalWarn;
+			try {
+				// This should not throw and should skip the actual fetch
+				await gitOps.fetch();
+				// Verify debug message was logged
+				expect(warnMessages).toContain("Remote operations are disabled in config. Skipping fetch.");
+			} finally {
+				if (originalDebug === undefined) delete process.env.DEBUG;
+				else process.env.DEBUG = originalDebug;
+				console.warn = originalWarn;
+			}
 		});
 
 		it("should proceed with fetch when remoteOperations is true", async () => {

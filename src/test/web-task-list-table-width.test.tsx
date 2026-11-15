@@ -162,18 +162,18 @@ describe("TaskList table width budget", () => {
 	it("uses schema columns and renders custom field values", () => {
 		const schema = structuredClone(getDefaultTaskSchema());
 		schema.fields.effort = { type: "number", label: "Effort" };
-		schema.ui.task_list.columns = ["effort", "status"];
+		schema.ui.task_list.columns = ["status", "effort", "title", "id"];
 		const container = renderTaskList(schema);
 		const headers = Array.from(container.querySelectorAll("thead th")).map((th) => th.textContent?.replace(/[↕▲▼]/g, "").trim());
-		expect(headers).toEqual(["ID", "Title", "Effort", "Status"]);
-		expect(Array.from(container.querySelectorAll("tbody tr td")).map((cell) => cell.textContent?.trim())).toEqual(["task-101", expect.stringContaining("Fit the task table"), "3", "To Do"]);
+		expect(headers).toEqual(["Status", "Effort", "Title", "ID"]);
+		expect(Array.from(container.querySelectorAll("tbody tr td")).map((cell) => cell.textContent?.trim())).toEqual(["To Do", "3", expect.stringContaining("Fit the task table"), "task-101"]);
 	});
 
 	it("sorts and filters configured custom fields", () => {
 		const schema = structuredClone(getDefaultTaskSchema());
 		schema.fields.effort = { type: "number", label: "Effort" };
 		schema.fields.phase = { type: "enum", label: "Phase", values: ["Ready", "Review"] };
-		schema.ui.task_list.columns = ["effort", "phase"];
+		schema.ui.task_list.columns = ["id", "title", "effort", "phase"];
 		schema.ui.task_list.filters = ["phase"];
 		const container = renderTaskList(schema, [
 			createTask({ id: "task-1", title: "Review task", fieldValues: { effort: 5, phase: "Review" } }),

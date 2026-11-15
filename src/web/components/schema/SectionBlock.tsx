@@ -8,6 +8,7 @@ import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
 import SelectControl from "../SelectControl.tsx";
 import { FallbackLanguageCode } from "./DisplayLanguageContext.tsx";
+import LogEntryRow, { logRowGridClass } from "./LogEntryRow.tsx";
 
 interface Props {
 	sectionId: string;
@@ -20,9 +21,10 @@ interface Props {
 	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (hasDraft: boolean) => void;
 	fallbackLang?: string;
+	bare?: boolean;
 }
 
-export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang }: Props): ReactElement | null {
+export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang, bare = false }: Props): ReactElement | null {
 	const { schema } = useSchema();
 	const { theme } = useTheme();
 	const section = schema.sections[sectionId];
@@ -30,6 +32,21 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 	const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
 	const [body, setBody] = useState("");
 	const [appendError, setAppendError] = useState<string | null>(null);
+	const [savingLog, setSavingLog] = useState(false);
+	const saveLog = async () => {
+		if (savingLog || !body.trim() || !author || !onAppendLog) return;
+		setSavingLog(true);
+		try {
+			await onAppendLog({ author, date, body: body.trim() });
+			setBody("");
+			onLogDraftChange?.(false);
+			setAppendError(null);
+		} catch (error) {
+			setAppendError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setSavingLog(false);
+		}
+	};
 	if (!section) return null;
 	const title = section.title;
 	let content: ReactElement | null = null;
@@ -50,21 +67,24 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 	} else {
 		const entries = Array.isArray(value) ? value.filter((item): item is LogEntry => "body" in item) : [];
 		content = (
-			<div className="space-y-4">
-				{entries.map((entry, index) => <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
-				{mode === "edit" ? <div className="space-y-2">
-					<div className="flex gap-2"><SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name}</option>)}</SelectControl><input aria-label="Log date" type="date" className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} /></div>
-					<textarea aria-label="Log entry" value={body} onChange={(event) => { setBody(event.target.value); onLogDraftChange?.(Boolean(event.target.value.trim())); }} className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
-					{appendError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{appendError}</p> : null}
-					<button type="button" disabled={!body.trim() || !author || !onAppendLog} onClick={() => {
-						void (async () => {
-							try { await onAppendLog?.({ author, date, body: body.trim() }); setBody(""); onLogDraftChange?.(false); setAppendError(null); }
-							catch (error) { setAppendError(error instanceof Error ? error.message : String(error)); }
-						})();
-					}} className="px-2 py-1 text-sm bg-blue-500 dark:bg-blue-600 text-white rounded-md hover:bg-blue-600 dark:hover:bg-blue-700">Add</button>
-				</div> : null}
+			<div className={bare ? "" : "space-y-4"}>
+				{mode === "edit" ? <form onSubmit={(event) => { event.preventDefault(); void saveLog(); }} className={logRowGridClass}>
+					<div className="min-w-0 space-y-2 py-2 pr-3">
+						<input aria-label="Log date" type="date" className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-1 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} />
+						<SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" triggerClassName="!h-8 !pl-2 !pr-8 !py-1 !text-[11px]" chevronClassName="!right-2" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.handle}</option>)}</SelectControl>
+						<button type="submit" disabled={!body.trim() || !author || !onAppendLog || savingLog} className="h-7 w-full rounded-md bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600">{savingLog ? "Saving…" : "Save"}</button>
+					</div>
+					<div className="min-w-0 border-l border-gray-300 py-2 pl-4 dark:border-gray-600">
+						<textarea aria-label="Log entry" value={body} onChange={(event) => { setBody(event.target.value); onLogDraftChange?.(Boolean(event.target.value.trim())); }} className="min-h-20 w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" />
+						{appendError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{appendError}</p> : null}
+					</div>
+				</form> : null}
+				{entries.map((entry, index) => bare
+					? <LogEntryRow key={`${entry.createdAt}-${index}`} entry={entry} />
+					: <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
 			</div>
 		);
 	}
+	if (bare) return <div>{content}</div>;
 	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100"><span>{title}</span>{section.lang ? <LanguagePill lang={section.lang} /> : null}</h2>{content}{fallbackLang ? <FallbackLanguageCode lang={fallbackLang} /> : null}</section>;
 }

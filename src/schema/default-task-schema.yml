@@ -8,6 +8,8 @@ fields:
   title: {type: text, core: true, required: true, label: Title}
   # Add a translated field as a separate value tied to its source:
   # title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}
+  # Optional: outcomes: [Done, Deferred, No longer needed], outcome_date: true, outcome_clears: [tech_action]
+  # The last status is terminal. On entry, its outcome and date are stored and listed fields are cleared.
   status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
   assignee: {type: user-list, core: true, label: Assignee}
   reporter: {type: user, core: true, label: Reporter}
@@ -40,7 +42,7 @@ ui:
     card: [type, priority, labels, created_date, updated_date, due_date, assignee]
     filters: [assignee, labels, type, priority]
   task_list:
-    columns: [status, priority, ordinal, labels, assignee, milestone, created_date]
+    columns: [id, title, status, priority, ordinal, labels, assignee, milestone, created_date]
     filters: [status, priority, milestone, labels]
   # Add any declared, visible filterable field here to scope every Statistics metric.
   statistics:

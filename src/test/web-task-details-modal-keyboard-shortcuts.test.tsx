@@ -211,7 +211,7 @@ describe("Web task popup keyboard shortcuts", () => {
 		expect(container.textContent?.split("Read-only:")).toHaveLength(2);
 		expect(container.textContent).not.toContain("Toggle to update");
 		expect(findButton(container, "Edit")).toBeUndefined();
-		expect(findButton(container, "Archive Task")).toBeUndefined();
+		expect(findButton(container, "Archive")).toBeUndefined();
 		expect(findButton(container, "Demote")).toBeUndefined();
 		const event = await press(container.querySelector("[role='dialog']") as Element, "e");
 		expect(event.defaultPrevented).toBe(false);
@@ -234,7 +234,7 @@ describe("Web task popup keyboard shortcuts", () => {
 				archives += 1;
 			},
 		});
-		const archive = findButton(container, "Archive Task");
+		const archive = findButton(container, "Archive");
 		expect(archive).toBeTruthy();
 		window.confirm = (message) => {
 			expect(message).toContain("It moves off the board.");

@@ -158,7 +158,7 @@ describe("list windows", () => {
 			);
 		} finally {
 			errors.mockRestore();
-			process.exitCode = previousExitCode;
+			process.exitCode = previousExitCode ?? 0;
 		}
 	});
 });

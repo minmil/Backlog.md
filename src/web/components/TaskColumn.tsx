@@ -9,6 +9,7 @@ import { SELECT_MENU_CLASS, SELECT_OPTION_CLASS } from './SelectControl.tsx';
 interface TaskColumnProps {
   title: string;
   tasks: Task[];
+  subtaskProgressByTaskId?: ReadonlyMap<string, { completed: number; total: number }>;
   onTaskUpdate: (taskId: string, updates: Partial<Task>) => void;
   onEditTask: (task: Task) => void;
   onTaskReorder?: (payload: ReorderTaskPayload) => void;
@@ -63,6 +64,7 @@ const sortByCreatedDate = (tasks: Task[], direction: CreatedDateSortDirection): 
 const TaskColumn: React.FC<TaskColumnProps> = ({
   title,
   tasks,
+  subtaskProgressByTaskId,
   onTaskUpdate,
   onEditTask,
   onTaskReorder,
@@ -362,6 +364,7 @@ const TaskColumn: React.FC<TaskColumnProps> = ({
             
             <TaskCard
               task={task}
+              subtaskProgress={subtaskProgressByTaskId?.get(task.id)}
               onUpdate={onTaskUpdate}
               onEdit={onEditTask}
               isSelected={selectedTaskIds?.includes(task.id) ?? false}

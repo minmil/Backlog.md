@@ -40,6 +40,24 @@ describe("getTaskStatistics", () => {
 		expect(stats.projectHealth.staleTasks.map((task) => task.id)).toEqual(["task-1"]);
 	});
 
+	test("treats the configured Closed status as completed throughout the statistics", () => {
+		const closedStatuses = ["Not Started", "Closed"];
+		const tasks = [
+			createTask({ id: "task-1", status: "Closed", createdDate: "2024-01-01", updatedDate: "2024-01-03" }),
+			createTask({ id: "task-2", status: "Closed", source: "archived" }),
+			createTask({ id: "task-3", status: "Not Started", dependencies: ["task-2"] }),
+		];
+
+		const stats = getTaskStatistics(tasks, [], closedStatuses);
+		expect(stats.totalTasks).toBe(3);
+		expect(stats.statusCounts.get("Closed")).toBe(2);
+		expect(stats.completedTasks).toBe(2);
+		expect(stats.completionPercentage).toBe(67);
+		expect(stats.projectHealth.staleTasks.map((task) => task.id)).toEqual(["task-3"]);
+		expect(stats.projectHealth.blockedTasks).toEqual([]);
+		expect(getTaskStatistics([tasks[0]!], [], closedStatuses).projectHealth.averageTaskAge).toBe(2);
+	});
+
 	test("measures completion age across legacy and explicit UTC timestamps", () => {
 		const task = createTask({
 			status: "Done",

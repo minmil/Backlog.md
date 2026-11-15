@@ -3,6 +3,7 @@ import { buildDependencyGraph, type DependencyGraph } from "../utils/dependency-
 import { createReadinessGraph, getTaskReadiness, type TaskReadiness } from "../utils/readiness.ts";
 import { canonicalTaskId } from "../utils/task-id.ts";
 import type { Core } from "./backlog.ts";
+import type { TaskCorpusSnapshot } from "./content-store.ts";
 
 /**
  * The records a read is allowed to resolve relationships against, loaded once and shared by every
@@ -98,6 +99,26 @@ export function toTaskDetail(task: Task, corpus: TaskCorpus): TaskDetail {
 		dependencyGraph: buildDependencyGraph(task, corpus),
 		readiness: getTaskReadiness(task, createReadinessGraph(corpus)),
 	};
+}
+
+/** Build a browser detail from the same watched corpus used to resolve its task ID. */
+export function taskDetailFromSnapshot(
+	task: Task,
+	snapshot: TaskCorpusSnapshot,
+	statuses?: readonly string[],
+): TaskDetail {
+	const localIds = new Set(snapshot.activeTasks.map((record) => canonicalTaskId(record.id)));
+	const localArchivedIds = new Set(snapshot.archivedTasks.map((record) => canonicalTaskId(record.id)));
+	const visibleTasks = snapshot.identityIndex?.getTasks(false) ?? snapshot.tasks;
+	const crossBranchArchived = (snapshot.identityIndex?.getTasks(true) ?? []).filter(
+		(record) => record.source === "archived" && !localArchivedIds.has(canonicalTaskId(record.id)),
+	);
+	return toTaskDetail(task, {
+		tasks: [...snapshot.activeTasks, ...visibleTasks.filter((record) => !localIds.has(canonicalTaskId(record.id)))],
+		archivedTasks: [...snapshot.archivedTasks, ...crossBranchArchived],
+		statuses,
+		ambiguousIds: snapshot.identityIndex?.getContestedIds(),
+	});
 }
 
 /**

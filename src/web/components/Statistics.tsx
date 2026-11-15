@@ -3,6 +3,7 @@ import { apiClient } from '../lib/api';
 import type { TaskStatistics } from '../../core/statistics';
 import type { Task } from '../../types';
 import { formatPriorityLabel } from '../../utils/priority-config';
+import { isTerminalStatus } from '../../utils/terminal-status';
 import LoadingSpinner from './LoadingSpinner';
 import StoredDate from './StoredDate';
 import FieldFilter from './schema/FieldFilter.tsx';
@@ -10,8 +11,9 @@ import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue } from '../../schema/field-registry.ts';
 import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
 
-interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts'> {
+interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts' | 'outcomeCounts'> {
 	statusCounts: Record<string, number>;
+	outcomeCounts: Record<string, number>;
 	priorityCounts: Record<string, number>;
 }
 
@@ -180,6 +182,13 @@ const Statistics: React.FC<StatisticsProps> = ({
 	};
 
 	const StatusIcon = ({ status }: { status: string }) => {
+		if (isTerminalStatus(status, schema.fields.status?.values ?? [])) {
+			return (
+				<svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 24 24">
+					<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+				</svg>
+			);
+		}
 		switch (status.toLowerCase()) {
 			case 'to do':
 				return (
@@ -191,12 +200,6 @@ const Statistics: React.FC<StatisticsProps> = ({
 				return (
 					<svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-					</svg>
-				);
-			case 'done':
-				return (
-					<svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 24 24">
-						<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
 					</svg>
 				);
 			default:
@@ -238,10 +241,10 @@ const Statistics: React.FC<StatisticsProps> = ({
 	};
 
 	const getStatusColor = (status: string) => {
+		if (isTerminalStatus(status, schema.fields.status?.values ?? [])) return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200';
 		switch (status.toLowerCase()) {
 			case 'to do': return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
 			case 'in progress': return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200';
-			case 'done': return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200';
 			default: return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
 		}
 	};
@@ -360,7 +363,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 				</div>
 				<div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
 					<span>{statistics.completedTasks} completed</span>
-					<span>{statistics.totalTasks - statistics.completedTasks} remaining</span>
+					<span>{statistics.totalTasks - (statistics.statusCounts[schema.fields.status?.values?.at(-1) ?? ''] ?? 0)} open</span>
 				</div>
 			</div>
 
@@ -396,6 +399,10 @@ const Statistics: React.FC<StatisticsProps> = ({
 								</div>
 							</div>
 						))}
+						{schema.fields.status?.outcomes?.length ? <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+							<p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Closed outcomes</p>
+							{schema.fields.status.outcomes.map((outcome) => <div key={outcome} className="flex justify-between py-1 text-sm text-gray-600 dark:text-gray-400"><span>{outcome}</span><span>{statistics.outcomeCounts?.[outcome] ?? 0}</span></div>)}
+						</div> : null}
 					</div>
 				</div>
 

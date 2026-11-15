@@ -17,6 +17,8 @@ import { apiClient } from '../lib/api';
 import { parseSearchCommandQuery } from '../utils/search-command-query';
 import { buildDocsTree, type DocsTreeNode } from '../lib/docs-tree';
 import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
+import { useSchema } from './schema/SchemaProvider.tsx';
+import { milestoneTerminology } from '../utils/milestone-terminology.ts';
 
 // Utility functions for ID transformations
 const stripIdPrefix = (id: string): string => {
@@ -272,6 +274,8 @@ const SideNavigation = memo(function SideNavigation({
 	error,
 	onRetry
 }: SideNavigationProps) {
+	const { schema } = useSchema();
+	const { plural: milestonePlural } = milestoneTerminology(schema);
 	const [isCollapsed, setIsCollapsed] = useState(() => {
 		const saved = localStorage.getItem('sideNavCollapsed');
 		return saved ? JSON.parse(saved) : false;
@@ -689,7 +693,7 @@ const SideNavigation = memo(function SideNavigation({
 							}
 						>
 							<Icons.Milestone />
-							<span className="ml-3 text-sm font-medium">Milestones</span>
+							<span className="ml-3 text-sm font-medium">{milestonePlural}</span>
 						</NavLink>
 
 						{/* Drafts Navigation */}
@@ -913,7 +917,7 @@ const SideNavigation = memo(function SideNavigation({
 						<NavLink
 							to="/milestones"
 							data-tooltip-id="sidebar-tooltip"
-							data-tooltip-content="Milestones"
+							data-tooltip-content={milestonePlural}
 							className={({ isActive }) =>
 								`flex items-center justify-center p-3 rounded-md transition-colors duration-200 ${
 									isActive

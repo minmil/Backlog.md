@@ -219,6 +219,11 @@ export class ContentStore {
 		return this.initialized;
 	}
 
+	/** A live working-copy watcher keeps local tasks current without a full scan per read. */
+	hasWorkingCopyWatchers(): boolean {
+		return this.initialized && this.hasCurrentRootWatchers();
+	}
+
 	async refreshTasks(): Promise<void> {
 		this.assertOpen();
 		if (!this.initialized) {

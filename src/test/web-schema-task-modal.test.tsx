@@ -42,6 +42,27 @@ afterEach(() => {
 });
 
 describe("schema task modal", () => {
+	it("shows configured client reference, side, and tech action below the title", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.client_ref = { type: "sequence", label: "Client ref" };
+		schema.fields.side = { type: "enum", label: "Side", values: ["them"] };
+		schema.fields.tech_action = { type: "enum", label: "Tech action", values: ["Awaiting client input"] };
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "T-7", title: "Confirm encoding", status: "Blocked", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-22",
+			fieldValues: { client_ref: "OKA-003", side: "them", tech_action: "Awaiting client input" },
+		} as Task;
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); });
+		expect(container.querySelector("#modal-title")?.textContent).toContain("Confirm encoding");
+		const pills = container.querySelector('[aria-label="Task fields"]');
+		expect(pills?.textContent).toContain("OKA-003");
+		expect(pills?.textContent).toContain("them");
+		expect(pills?.textContent).toContain("Awaiting client input");
+		expect(pills?.textContent?.indexOf("OKA-003")).toBeLessThan(pills?.textContent?.indexOf("them") ?? 0);
+	});
+
 	it("toggles multiple checklist sections directly in preview and saves each change", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
@@ -90,7 +111,7 @@ describe("schema task modal", () => {
 		expect(dialog?.scrollTop).toBe(0);
 	});
 
-	it("shows only populated read fields, resolves milestone titles, and puts readiness first", async () => {
+	it("shows only populated read fields, resolves milestone titles, and puts readiness in the graph summary", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
 		schema.fields.project = { type: "enum", core: true, label: "Client", values: ["Client 2"] };
@@ -106,7 +127,8 @@ describe("schema task modal", () => {
 		root = createRoot(container);
 		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} milestoneEntities={[{ id: "m-2", title: "Release 2026-11-13", description: "", rawContent: "" }]} /></SchemaProvider></ThemeProvider>); });
 		const sidebar = container.querySelector(".md\\:col-span-1.space-y-4");
-		expect(sidebar?.firstElementChild?.textContent).toContain("Ready to start");
+		expect(container.querySelector("details summary")?.textContent).toContain("Ready to start");
+		expect(sidebar?.textContent).not.toContain("Ready to start");
 		expect(sidebar?.textContent).toContain("Release 2026-11-13");
 		expect(sidebar?.textContent).not.toContain("Client");
 		const translated = Array.from(container.querySelectorAll("section")).find((section) => section.querySelector("h2")?.textContent?.includes("Description (JA)"));
@@ -136,14 +158,14 @@ describe("schema task modal", () => {
 			setter?.call(side, "Buyer");
 			side?.dispatchEvent(new window.Event("change", { bubbles: true }));
 		});
-		const criterion = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		const criterion = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New item"]');
 		await act(async () => { if (criterion) setNativeInputValue(criterion, "Ready for review"); });
 		const acceptance = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
 		await act(async () => { Array.from(acceptance?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
 		const logBody = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
 		await act(async () => { if (logBody) setNativeInputValue(logBody, "Created by Alice"); });
-		const log = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
-		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		const log = logBody?.closest("details");
+		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save")?.click(); });
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
 		expect(submissions).toEqual([{ title: "New schema task", fields: { status: "To Do", assignee: ["@alice"], reporter: "@alice", side: "Buyer" }, sections: { description: "A schema section" }, checklist: [{ section: "acceptance", op: "add", text: "Ready for review" }], log: { section: "log", body: "Created by Alice", author: "@alice", date: container.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value } }]);
 	});
@@ -156,7 +178,8 @@ describe("schema task modal", () => {
 		const submissions: SchemaTaskWrite[] = [];
 		root = createRoot(container);
 		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal isOpen onClose={() => {}} onSubmit={async (input) => { submissions.push(input); }} /></SchemaProvider></ThemeProvider>); });
-		await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Remove @alice"]')?.click(); });
+		const owner = container.querySelector<HTMLSelectElement>("#schema-field-assignee");
+		await act(async () => { if (owner) { owner.value = ""; owner.dispatchEvent(new window.Event("change", { bubbles: true })); } });
 		const title = container.querySelector<HTMLInputElement>("#schema-field-title");
 		await act(async () => { if (title) setNativeInputValue(title, "Unassigned task"); });
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
@@ -231,7 +254,7 @@ describe("schema task modal", () => {
 		expect(container.textContent).toContain("UAT details");
 		expect(container.textContent).toContain("Preserved loose note");
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
-		const input = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		const input = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New item"]');
 		expect(input).toBeTruthy();
 		await act(async () => { if (input) setNativeInputValue(input, "Ready for review"); });
 		const section = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
@@ -263,8 +286,40 @@ describe("schema task modal", () => {
 		const body = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
 		expect(body).toBeTruthy();
 		await act(async () => { if (body) setNativeInputValue(body, "Reviewed by Alice"); });
-		const logSection = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
-		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		const logSection = body?.closest("details");
+		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save")?.click(); });
 		expect(patches).toEqual([{ log: { section: "log", body: "Reviewed by Alice", author: "@alice", date: date?.value } }]);
+	});
+
+	it("shows the newest dated log and saves a new entry from preview", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		const task = {
+			id: "TASK-4", title: "Log preview", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25",
+			sections: { log: [
+				{ author: "@alice", date: "2026-11-15", createdAt: "2026-11-15T00:00:00.000Z", auto: true, body: "New status" },
+				{ author: "@alice", date: "2026-11-10", createdAt: "2026-11-15T01:00:00.000Z", body: "Older note" },
+			] },
+		} as Task;
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_id, patch) => { patches.push(patch); return task; };
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); });
+		const logSection = Array.from(container.querySelectorAll("details")).find((details) => details.querySelector("summary")?.textContent?.includes("Log"));
+		expect(logSection?.querySelector("summary")?.textContent).toContain("New status");
+		expect(logSection?.querySelector("summary")?.textContent).not.toContain("Older note");
+		expect(logSection?.querySelector('button[aria-label="Add log entry"]')).toBeNull();
+		await act(async () => { logSection?.querySelector("summary")?.click(); });
+		expect(logSection?.open).toBe(true);
+		expect(logSection?.querySelector("form")?.nextElementSibling?.textContent).toContain("New status");
+		const body = logSection?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
+		const date = logSection?.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value;
+		await act(async () => { if (body) setNativeInputValue(body, "Newest note"); });
+		expect(logSection?.querySelector("form > div:first-child button[type=submit]")).toBeTruthy();
+		expect(logSection?.querySelector('button[aria-label="Cancel log entry"]')).toBeNull();
+		await act(async () => { logSection?.querySelector<HTMLButtonElement>('form button[type="submit"]')?.click(); });
+		expect(patches).toEqual([{ log: { section: "log", body: "Newest note", author: "@alice", date } }]);
+		expect(body?.value).toBe("");
 	});
 });

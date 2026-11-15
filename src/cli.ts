@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { stdin as input } from "node:process";
 import { createInterface } from "node:readline/promises";
 import * as clack from "@clack/prompts";
@@ -29,6 +29,8 @@ import { type DuplicateRepairPlan, findLocalDuplicateTaskIds } from "./core/dupl
 import { initializeProject } from "./core/init.ts";
 import { buildMilestoneBuckets, collectArchivedMilestoneKeys, milestoneKey } from "./core/milestones.ts";
 import { loadTaskDetail, loadTaskListItems } from "./core/task-detail.ts";
+import { getViewerBundle } from "./export/embedded-viewer.ts";
+import { createHtmlSnapshot, renderHtmlSnapshot } from "./export/html-snapshot.ts";
 import { isConfigValueError } from "./file-system/operations.ts";
 import {
 	decisionListJson,
@@ -1200,6 +1202,27 @@ program
 	.version(version, "-v, --version", "display version number")
 	.showSuggestionAfterError()
 	.showHelpAfterError("Run with --help to see accepted fields and examples.");
+
+program
+	.command("export")
+	.description("export a read-only project snapshot")
+	.command("html")
+	.description("write a self-contained, read-only HTML task viewer")
+	.requiredOption("--output <file>", "output .html file")
+	.option("--force", "replace an existing output file")
+	.action(async (options: { output: string; force?: boolean }) => {
+		const cwd = await requireProjectRoot();
+		const output = resolve(await requireRuntimeCwd(), options.output);
+		if (!output.toLowerCase().endsWith(".html")) throw new Error("HTML snapshot output must end in .html");
+		const core = new Core(cwd);
+		const snapshot = await createHtmlSnapshot(core);
+		const assets = await getViewerBundle();
+		await writeFile(output, renderHtmlSnapshot(snapshot, assets.javascript, assets.css), {
+			flag: options.force ? "w" : "wx",
+		});
+		console.log(`Exported ${snapshot.taskCount} tasks and ${snapshot.archivedTaskCount} archived tasks to ${output}.`);
+		console.log("Anyone with access to this HTML file can read its embedded task data.");
+	});
 
 const schemaCommand = addHelpSchema(program.command("schema"), {
 	reads: "Task field, user, section, and UI definitions from task-schema.yml",

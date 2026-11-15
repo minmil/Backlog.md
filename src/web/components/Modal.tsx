@@ -4,24 +4,28 @@ interface ModalProps {
 	isOpen: boolean;
 	onClose: () => void;
 	title: React.ReactNode;
+	subtitle?: React.ReactNode;
 	children: React.ReactNode;
 	maxWidthClass?: string; // e.g., "max-w-4xl"
 	disableEscapeClose?: boolean; // when true, Escape and backdrop click won't close (child can handle it)
 	actions?: React.ReactNode; // optional actions rendered in header before close
 	initialFocusRef?: React.RefObject<HTMLElement | null>;
 	scrollKey?: string;
+	hideCloseButton?: boolean;
 }
 
 const Modal: React.FC<ModalProps> = ({
 	isOpen,
 	onClose,
 	title,
+	subtitle,
 	children,
 	maxWidthClass = "max-w-2xl",
 	disableEscapeClose,
 	actions,
 	initialFocusRef,
 	scrollKey,
+	hideCloseButton = false,
 }) => {
 	const dialogRef = useRef<HTMLDivElement | null>(null);
 	const onCloseRef = useRef(onClose);
@@ -114,7 +118,7 @@ const Modal: React.FC<ModalProps> = ({
 
 	return (
 		<div
-			className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-center justify-center z-50 p-4"
+			className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-start justify-center z-50 p-4"
 			onClick={disableEscapeClose ? undefined : onClose}
 			role="presentation"
 		>
@@ -127,13 +131,16 @@ const Modal: React.FC<ModalProps> = ({
 				aria-modal="true"
 				aria-labelledby="modal-title"
 			>
-				<div className="sticky top-0 z-10 flex flex-wrap items-start gap-3 px-6 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75">
-					<h2 id="modal-title" className="min-w-0 flex-1 basis-full break-words text-base font-semibold text-gray-900 dark:text-gray-100 sm:basis-auto">
-						{title}
-					</h2>
-					<div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+				<div className="sticky top-0 z-10 flex items-center gap-4 border-b border-gray-200 bg-white/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/75 dark:border-gray-700 dark:bg-gray-800/95 supports-[backdrop-filter]:dark:bg-gray-800/75">
+					<div className="min-w-0 flex-1">
+						<h2 id="modal-title" className="truncate text-base font-semibold text-gray-900 dark:text-gray-100">
+							{title}
+						</h2>
+						{subtitle ? <div className="mt-1 flex flex-wrap items-center gap-1.5" aria-label="Task fields">{subtitle}</div> : null}
+					</div>
+					<div className="ml-auto flex shrink-0 items-center justify-end gap-2">
 						{actions}
-						<button
+					{!hideCloseButton && <button
 							type="button"
 							onClick={onClose}
 							disabled={disableEscapeClose}
@@ -141,7 +148,7 @@ const Modal: React.FC<ModalProps> = ({
 							aria-label="Close modal"
 						>
 							×
-						</button>
+						</button>}
 					</div>
 				</div>
 				<div className="px-6 pt-4 pb-6">{children}</div>

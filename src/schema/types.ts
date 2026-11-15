@@ -36,6 +36,12 @@ export interface SchemaField {
 	required?: boolean;
 	default?: unknown;
 	values?: string[];
+	/** Outcomes available when the final status is reached (status field only). */
+	outcomes?: string[];
+	/** Record the date on entry to the final status (status field only). */
+	outcome_date?: boolean;
+	/** Clear these fields on entry to the final status (status field only). */
+	outcome_clears?: string[];
 	lang?: string;
 	translation_of?: string;
 	track_changes?: boolean;

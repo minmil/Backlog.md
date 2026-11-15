@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter, Navigate, Route, Routes, useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { useOfflineSave } from './contexts/OfflineModeContext.tsx';
 import Layout from './components/Layout';
 import BoardPage from './components/BoardPage';
 import DocumentationDetail from './components/DocumentationDetail';
@@ -210,6 +211,7 @@ type TaskModalState =
     };
 
 function AppContent() {
+  const offline = useOfflineSave();
   const [modal, setModal] = useState<TaskModalState>({ kind: 'closed' });
   // Each entry into the modal takes the next session number, so a response can name the modal it
   // was read for.
@@ -808,6 +810,7 @@ function AppContent() {
   }, [detailSession, detailId, dataVersion]);
 
   useEffect(() => {
+    if (offline) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}`);
 	let disposed = false;
@@ -854,7 +857,7 @@ function AppContent() {
 		disposed = true;
 		ws.close();
 	};
-  }, [refreshData, refreshMilestoneData, fullRefreshData, loadAllData, applyLoadError]);
+  }, [refreshData, refreshMilestoneData, fullRefreshData, loadAllData, applyLoadError, offline]);
 
   const handleSubmitTask = async (taskData: SchemaTaskWrite) => {
     // Don't catch errors here - let TaskDetailsModal handle them
@@ -1084,6 +1087,7 @@ function AppContent() {
         availableStatuses={isDraftMode ? ['Draft', ...statuses] : statuses}
         availableTasks={tasks}
         onNavigateToTask={handleEditTask}
+        onInternalLink={offline ? (href) => navigate(href) : undefined}
         availableMilestones={milestones}
         availablePriorities={config?.priorities}
         availableTypes={availableTypes}
@@ -1121,10 +1125,10 @@ function AppContent() {
 }
 
 function App() {
+  const offline = useOfflineSave();
+  const content = <DisplayLanguageProvider><AppContent /></DisplayLanguageProvider>;
   return (
-    <BrowserRouter>
-      <DisplayLanguageProvider><AppContent /></DisplayLanguageProvider>
-    </BrowserRouter>
+    offline ? <MemoryRouter initialEntries={['/board']}>{content}</MemoryRouter> : <BrowserRouter>{content}</BrowserRouter>
   );
 }
 

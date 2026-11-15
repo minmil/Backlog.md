@@ -127,7 +127,7 @@ const getCard = (container: HTMLElement, taskId: string): HTMLElement => {
 
 const selectedCardIds = (container: HTMLElement): string[] =>
 	Array.from(container.querySelectorAll('[aria-selected="true"]')).map(
-		(element) => element.querySelector(".font-mono")?.textContent ?? "",
+		(element) => element.getAttribute("aria-label")?.match(/^Open (TASK-[^:]+):/)?.[1] ?? "",
 	);
 
 const clickCard = async (card: HTMLElement, modifiers: { ctrlKey?: boolean; shiftKey?: boolean } = {}) => {

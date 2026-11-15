@@ -36,7 +36,7 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 		);
 	} else if (field.type === "milestone-ref" && milestones) {
 		control = <SelectControl id={inputId} aria-label={label} className="w-full" minWidthClass="w-full" value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
-			<option value="">No milestone</option>
+			<option value="">No {label.toLowerCase()}</option>
 			{current && !milestones.some((milestone) => milestone.id === current) ? <option value={String(current)}>{String(current)}</option> : null}
 			{milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}
 		</SelectControl>;
@@ -49,6 +49,13 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 				{options.map((option) => <option key={option} value={option}>{field.type === "user" ? schema.users.find((user) => user.handle === option)?.name ?? option : option}</option>)}
 			</SelectControl>
 		);
+	} else if (fieldKey === "assignee" && field.type === "user-list" && schema.users.length > 0) {
+		const owner = Array.isArray(value) ? String(value[0] ?? "") : "";
+		control = <SelectControl id={inputId} aria-label={label} className="w-full" minWidthClass="w-full" value={owner} onChange={(event) => onChange(event.target.value ? [event.target.value] : [])}>
+			<option value="">No owner</option>
+			{owner && !schema.users.some((user) => user.handle === owner) ? <option value={owner}>{owner} (not configured)</option> : null}
+			{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name ?? user.handle}</option>)}
+		</SelectControl>;
 	} else if (field.type === "multi-enum" || field.type === "string-list" || field.type === "user-list" || field.type === "task-ref-list") {
 		const items = Array.isArray(value) ? value : [];
 		control = field.type === "task-ref-list" && availableTasks ? (

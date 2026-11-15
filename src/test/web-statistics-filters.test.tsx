@@ -32,7 +32,7 @@ it("refetches statistics using the selected schema field", async () => {
 	apiClient.fetchStatistics = async (where = []) => {
 		requests.push(where);
 		return {
-			statusCounts: { "To Do": 1 }, priorityCounts: {}, noPriorityCount: 0,
+			statusCounts: { "To Do": 1 }, priorityCounts: {}, outcomeCounts: {}, noPriorityCount: 0,
 			totalTasks: 1, completedTasks: 0, completionPercentage: 0, draftCount: 0,
 			recentActivity: { created: [], updated: [] },
 			projectHealth: { averageTaskAge: 0, staleTasks: [], blockedTasks: [] },

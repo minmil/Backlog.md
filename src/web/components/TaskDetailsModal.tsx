@@ -8,7 +8,11 @@ import { parseSections, type ChecklistItem, type LogEntry, type LogInput, type S
 import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
+import SectionBlock from "./schema/SectionBlock.tsx";
+import LogEntryRow from "./schema/LogEntryRow.tsx";
+import CollapsibleSection from "./CollapsibleSection.tsx";
 import FieldInput from "./schema/FieldInput.tsx";
+import FieldValue from "./schema/FieldValue.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import { formatReadinessBlockers } from "../../utils/readiness";
 import { buildTaskIdIndex, resolveTaskReference } from "../utils/task-id-links";
@@ -16,6 +20,8 @@ import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "..
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
 import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
+import { useSnapshotMode } from "../contexts/SnapshotModeContext.tsx";
+import { publishedTask } from "../../export/html-snapshot-render.ts";
 
 interface Props {
   task?: Task | TaskDetail; // Optional for create mode
@@ -28,6 +34,8 @@ interface Props {
   availableStatuses?: string[]; // Available statuses for new tasks
   availableTasks?: Task[]; // Shared task corpus for dependency selection
   onNavigateToTask?: (task: Task) => void; // Opens another task, preserving close/back context
+  onInternalLink?: (href: string) => void; // Route a task link within an offline HTML file
+  onProposeEdit?: (task: Task) => void; // Standalone HTML review copy only
   isDraftMode?: boolean; // Whether creating a draft
   availableMilestones?: string[];
   availablePriorities?: string[];
@@ -219,12 +227,15 @@ export const TaskDetailsModal: React.FC<Props> = ({
   availableStatuses = EMPTY_STATUSES,
   availableTasks = EMPTY_TASKS,
   onNavigateToTask,
+  onInternalLink,
+  onProposeEdit,
   milestoneEntities,
   isDraftMode,
   definitionOfDoneDefaults,
   defaultAssignee,
   dateFormat,
 }) => {
+  const snapshotMode = useSnapshotMode();
   const { schema, registry } = useSchema();
   const isCreateMode = !task;
   const schemaFieldBaseline = useMemo(() => readSchemaFieldValues(task, registry, isDraftMode), [task, registry, isDraftMode]);
@@ -237,7 +248,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [logDrafts, setLogDrafts] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
-  const isReadOnly = task ? isReadOnlyTask(task) : false;
+  const isReadOnly = snapshotMode ? !onProposeEdit : (task ? isReadOnlyTask(task) : false);
   // Promoting a draft replaces it with a new task ID, which the Drafts page does through its own
   // Promote action, so the popup shows the draft status without turning the field into a second one.
   const isOpenDraft = (task?.status ?? "").trim().toLowerCase() === "draft";
@@ -245,6 +256,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const demotionIdentityRef = useRef(demotionIdentity);
   demotionIdentityRef.current = demotionIdentity;
   const [mode, setMode] = useState<Mode>(isCreateMode ? "create" : "preview");
+  const viewMode: Mode = mode;
   const modeRef = useRef(mode);
   const previousTaskId = useRef(task?.id ?? "");
   const previousIsOpen = useRef(isOpen);
@@ -299,7 +311,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
   // Both derived at read time and delivered with the task itself, so there is nothing to resolve
   // or fetch here: the verdict the modal shows is the one every other surface shows.
   const dependencyGraph = taskDependencyGraph(task);
+  const dependencyCount = dependencyGraph ? dependencyGraph.nodes.filter((node) => node.dependencyDepth === 1).length : (task?.dependencies?.length ?? 0);
+  const dependentCount = dependencyGraph?.nodes.filter((node) => node.dependentDepth === 1).length ?? 0;
   const readiness = taskReadiness(task);
+  const statusBlocked = task?.status.toLowerCase() === "blocked";
+  const statusTerminal = isTerminalStatus(task?.status, availableStatuses);
   // The verdict answers for the status and the dependencies it was read with, and it belongs to the
   // Dependencies card, so it is shown only while all of that still describes what is on screen. An
   // optimistic edit that has not come back yet - including one whose save failed and left the shown
@@ -553,16 +569,29 @@ export const TaskDetailsModal: React.FC<Props> = ({
       references.length > 0 ||
       modifiedFiles.length > 0);
   const hasUnsavedEdits =
-    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
+    ((mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || hasCreateModeEntries)) || Object.values(logDrafts).some(Boolean);
 
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
   const confirmNavigationAwayFromEdits = (event: React.MouseEvent<HTMLElement>) => {
-    if (!hasUnsavedEdits || event.defaultPrevented || event.button !== 0) return;
+    if (event.defaultPrevented || event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!link) return;
     if (link.target && link.target !== "_self") return;
+    const localHref = link.getAttribute("href") ?? "";
+    if (onInternalLink && /^\/(?:tasks|board)\/[A-Za-z0-9._-]+(?:\/[^/?#]+)?$/.test(localHref)) {
+      if (hasUnsavedEdits && !window.confirm("Discard unsaved changes and leave this task?")) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onInternalLink(localHref);
+      return;
+    }
+    if (!hasUnsavedEdits) return;
     const destination = new URL(link.href, window.location.href);
     if (destination.protocol !== "http:" && destination.protocol !== "https:") return;
     // Same-page anchors (markdown heading links) do not unload the form.
@@ -616,6 +645,18 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
 
     try {
+      if (snapshotMode && task && onProposeEdit) {
+        let proposal = publishedTask(task, schema, task.source === "archived");
+        for (const [key, value] of Object.entries(schemaFields)) {
+          if (schema.fields[key]?.managed || areJsonEqual(value, schemaFieldBaseline[key])) continue;
+          proposal = value === null ? registry.clearField(proposal, key) : registry.setField(proposal, key, value);
+        }
+        proposal.sections = { ...schemaSections };
+        onProposeEdit(proposal);
+        setMode("preview");
+        setCommentsChanged(false);
+        return;
+      }
       if (isCreateMode && onSubmit) {
         const fields = Object.fromEntries(Object.entries(schemaFields).filter(([key, value]) =>
           key !== "title" && !schema.fields[key]?.managed && value !== null && value !== undefined && value !== "",
@@ -689,6 +730,16 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
   const handleAppendLog = async (section: string, entry: LogInput) => {
     if (isReadOnly) throw new Error("This task is read-only.");
+    if (snapshotMode) {
+      const nextSections = { ...schemaSections, [section]: [...(Array.isArray(schemaSections[section]) ? schemaSections[section].filter((item): item is LogEntry => "body" in item) : []), { author: entry.author ?? "", date: entry.date ?? new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(), body: entry.body }] };
+      setSchemaSections(nextSections);
+      if (task && onProposeEdit) {
+        const proposal = publishedTask(task, schema, task.source === "archived");
+        proposal.sections = nextSections;
+        onProposeEdit(proposal);
+      }
+      return;
+    }
     if (!task) {
       if (pendingLog) throw new Error("Create the task before adding another log entry.");
       setPendingLog({ section, entry });
@@ -815,9 +866,21 @@ export const TaskDetailsModal: React.FC<Props> = ({
     }
   };
 
-	const canDemote = Boolean(task && !isDraftMode && !isOpenDraft && !isReadOnly);
+	const canDemote = Boolean(task && !snapshotMode && !isDraftMode && !isOpenDraft && !isReadOnly);
 	const { title: displayTitle } = useTaskDisplay();
-  const displayId = task?.id ?? "";
+  const displayId = task?.id.replace(/^TASK-/i, "T-") ?? "";
+  const logSectionId = Object.keys(schema.sections).find((id) => schema.sections[id]?.kind === "log");
+  const logEntries = logSectionId && Array.isArray(schemaSections[logSectionId])
+    ? schemaSections[logSectionId].filter((item): item is LogEntry => "body" in item)
+    : [];
+  const latestLogEntry = logEntries.reduce<LogEntry | undefined>((latest, entry) =>
+    !latest || entry.date > latest.date || (entry.date === latest.date && entry.createdAt > latest.createdAt) ? entry : latest, undefined);
+  const headerBadgeFields = task
+    ? (["client_ref", "side", "tech_action"] as const).filter((key) => {
+        const value = schemaFields[key];
+        return schema.fields[key] && value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
+      })
+    : [];
 
   return (
     <Modal
@@ -826,33 +889,28 @@ export const TaskDetailsModal: React.FC<Props> = ({
       onClose={() => {
 		if (demoting) return;
         // When in edit mode, confirm closing if dirty
-        if (mode === "edit" && isDirty) {
+        if (hasUnsavedEdits) {
           if (!window.confirm("Discard unsaved changes and close?")) return;
         }
         refreshAfterCommentChange();
         onClose();
       }}
       title={isCreateMode ? (isDraftMode ? "Create New Draft" : "Create New Task") : <>{displayId} — <TaskDisplayTitle task={task} /></>}
-      maxWidthClass="max-w-5xl"
-      disableEscapeClose={mode === "edit" || mode === "create" || demoting}
+      subtitle={headerBadgeFields.length ? headerBadgeFields.map((key) => (
+        <FieldValue key={key} fieldKey={key} value={schemaFields[key]} variant="card" />
+      )) : undefined}
+      maxWidthClass="max-w-[1600px]"
+	  hideCloseButton={viewMode === "edit" || viewMode === "create"}
+      disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
-		          {canDemote && mode === "preview" && (
-		            <button
-		              onClick={() => void handleDemote()}
-		              disabled={demoting}
-		              className="inline-flex items-center px-3 py-2 sm:px-4 rounded-lg text-sm font-medium text-white bg-amber-500 dark:bg-amber-600 hover:bg-amber-600 dark:hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:focus:ring-amber-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-		              title="Move task to drafts"
-		            >
-		              {demoting ? "Demoting…" : (
-		                <>
-		                  <span className="sm:hidden">Demote</span>
-		                  <span className="hidden sm:inline">Demote to draft</span>
-		                </>
-		              )}
-		            </button>
-		          )}
-		          {mode === "preview" && !isCreateMode && !isReadOnly ? (
+		          {viewMode === "preview" && canDemote && <button type="button" onClick={() => void handleDemote()} disabled={demoting} title="Move task to drafts" className="inline-flex items-center whitespace-nowrap rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:border-amber-500 dark:hover:bg-amber-800/70 dark:hover:text-amber-50">
+		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16" /></svg>{demoting ? "Re-drafting…" : "Re-draft"}
+		          </button>}
+		          {viewMode === "preview" && task && onArchive && !isReadOnly && <button type="button" onClick={handleArchive} disabled={demoting} title="Move task to archive" className="inline-flex items-center whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:border-blue-500 dark:hover:bg-blue-800/70 dark:hover:text-blue-50">
+		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>Archive
+		          </button>}
+		          {viewMode === "preview" && !isCreateMode && !isReadOnly ? (
 		            <button
 		              onClick={() => setMode("edit")}
 		              disabled={demoting}
@@ -865,7 +923,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               </svg>
               Edit
             </button>
-          ) : (mode === "edit" || mode === "create") ? (
+          ) : (viewMode === "edit" || viewMode === "create") ? (
             <div className="flex items-center gap-2">
 	              <button
 		                onClick={handleCancelEdit}
@@ -887,7 +945,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                {saving ? "Saving…" : (isCreateMode ? "Create" : "Save")}
+                {saving ? "Saving…" : (isCreateMode ? "Create" : snapshotMode ? "Save proposal" : "Save")}
               </button>
             </div>
           ) : null}
@@ -907,7 +965,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
           </svg>
           <div className="flex-1">
             <span className="font-medium">Read-only:</span>{" "}
-            {task?.branch ? (
+            {snapshotMode ? (
+              "The original backlog is read-only here. Proposed edits can be saved in a new HTML copy."
+            ) : task?.branch ? (
               <>This task exists in the <span className="font-semibold">{task.branch}</span> branch. Switch to that branch to edit it.</>
             ) : (
               "This task is archived."
@@ -915,6 +975,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
           </div>
         </div>
       )}
+	  {snapshotMode && onProposeEdit && (
+	    <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200">Edits stay in this review page until you download a new HTML copy. The main backlog is not changed.</div>
+	  )}
 
       {parentTask && task && (
         <nav
@@ -954,9 +1017,95 @@ export const TaskDetailsModal: React.FC<Props> = ({
         </nav>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6" onClickCapture={confirmNavigationAwayFromEdits}>
+      {Boolean((dependencyGraph && dependencyGraph.nodes.length > 1) || shownReadiness || subtasks.length > 0) && (
+        <div onClickCapture={confirmNavigationAwayFromEdits}>
+        <CollapsibleSection sectionKey={task?.id} summary={<>
+            <span className="shrink-0 text-lg font-semibold">Task relationships</span>
+            <span className={`shrink-0 text-xs font-medium ${statusBlocked || shownReadiness?.isBlocked || task?.dependencies?.length && !shownReadiness && !statusTerminal ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+              {statusTerminal ? task?.status : shownReadiness?.isBlocked ? formatReadinessBlockers(shownReadiness) : statusBlocked ? "Blocked" : shownReadiness?.isReady ? "Ready to start" : task?.dependencies?.length ? "Readiness pending save" : "Ready to start"}
+            </span>
+            <span className="ml-auto shrink-0 text-xs text-gray-500 dark:text-gray-400">
+              Depends on {dependencyCount} · Dependents {dependentCount}
+              {subtaskProgress ? <> · Subtasks {subtaskProgress.completed}/{subtaskProgress.total}</> : null}
+            </span>
+            {subtasks.map((subtask) => {
+              const clientRef = schema.fields.client_ref ? registry.getField(subtask, "client_ref") : undefined;
+              return (
+                <button
+                  key={subtask.id}
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); onNavigateToTask?.(subtask); }}
+                  disabled={!onNavigateToTask}
+                  aria-label={`Open subtask ${subtask.id}`}
+                  className="shrink-0 rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-700 hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-default dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                >
+                  {typeof clientRef === "string" && clientRef ? clientRef : subtask.id.replace(/^TASK-/i, "T-")}
+                </button>
+              );
+            })}
+          </>}>
+            {dependencyGraph && <DependencyGraphSection graph={dependencyGraph} tasks={availableTasks} />}
+            {subtasks.length > 0 && (
+              <section aria-label="Subtasks">
+                <SectionHeader
+                  title="Subtasks"
+                  right={subtaskProgress ? `${subtaskProgress.completed} of ${subtaskProgress.total} complete` : undefined}
+                />
+                <div className="divide-y divide-gray-100 dark:divide-gray-700" data-subtask-list>
+                  {subtasks.map((subtask) => {
+                    const nested = summarizeSubtaskProgress(subtask, availableTasks, availableStatuses);
+                    return (
+                      <button
+                        key={subtask.id}
+                        type="button"
+                        onClick={() => onNavigateToTask?.(subtask)}
+                        disabled={!onNavigateToTask}
+                        data-subtask-id={subtask.id}
+                        data-subtask-href={createUrlPath('/tasks', subtask.id, subtask.title)}
+                        className="group flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors duration-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/50"
+                        aria-label={`Open subtask ${subtask.id}: ${String(displayTitle(subtask).value ?? "")} (${subtask.status})`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">{subtask.id}</span>
+                            <HierarchyStatusBadge status={subtask.status} statuses={availableStatuses} />
+                            {nested && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400" data-nested-progress={`${nested.completed}/${nested.total}`}>
+                                {nested.completed} of {nested.total} complete
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-1 block break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <TaskDisplayTitle task={subtask} />
+                          </span>
+                        </span>
+                        <HierarchyChevron />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+        </CollapsibleSection>
+        </div>
+      )}
+
+      {logSectionId && (logEntries.length > 0 || viewMode !== "preview" || !isReadOnly) && (
+        <div onClickCapture={confirmNavigationAwayFromEdits}>
+        <CollapsibleSection variant="notebook" sectionKey={`${task?.id ?? "create"}-log`} summary={<>
+          <span className="block text-lg font-semibold">{schema.sections[logSectionId]?.title ?? "Log"}</span>
+          <div className="group-open:hidden">
+            {latestLogEntry ? <LogEntryRow entry={latestLogEntry} preview /> : <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No comments yet</div>}
+          </div>
+        </>}>
+          <SectionBlock bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={isReadOnly ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} readOnly={snapshotMode || isReadOnly} />
+        </CollapsibleSection>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]" onClickCapture={confirmNavigationAwayFromEdits}>
         {/* Main content */}
-        <div className="md:col-span-2 space-y-6">
+        <div className="space-y-6 md:col-span-2 xl:col-span-1">
           {/* Title field for create mode */}
           {isCreateMode && (
             <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
@@ -964,92 +1113,29 @@ export const TaskDetailsModal: React.FC<Props> = ({
             </div>
           )}
           <SchemaSections
+            exclude={logSectionId ? [logSectionId] : []}
             values={schemaSections}
             other={schemaSectionBaseline.other}
-            mode={mode === "preview" ? "view" : "edit"}
+            mode={viewMode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
-			onToggleChecklist={handleToggleChecklist}
+			onToggleChecklist={snapshotMode ? undefined : handleToggleChecklist}
 			checklistBusy={checklistBusy}
-			readOnly={isReadOnly}
+			readOnly={snapshotMode || isReadOnly}
             onAppendLog={handleAppendLog}
             onLogDraftChange={(id, hasDraft) => setLogDrafts((current) => ({ ...current, [id]: hasDraft }))}
           />
 
-          {subtasks.length > 0 && (
-            <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-              <SectionHeader
-                title="Subtasks"
-                right={
-                  subtaskProgress
-                    ? `${subtaskProgress.completed} of ${subtaskProgress.total} complete`
-                    : undefined
-                }
-              />
-              <div className="divide-y divide-gray-100 dark:divide-gray-700" data-subtask-list>
-                {subtasks.map((subtask) => {
-                  const nested = summarizeSubtaskProgress(subtask, availableTasks, availableStatuses);
-                  return (
-                    <button
-                      key={subtask.id}
-                      type="button"
-                      onClick={() => onNavigateToTask?.(subtask)}
-                      disabled={!onNavigateToTask}
-                      data-subtask-id={subtask.id}
-                      data-subtask-href={createUrlPath('/tasks', subtask.id, subtask.title)}
-                      className="group flex w-full items-center gap-3 rounded-md px-2 py-3 text-left transition-colors duration-200 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-gray-700/50"
-                      aria-label={`Open subtask ${subtask.id}: ${String(displayTitle(subtask).value ?? "")} (${subtask.status})`}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
-                            {subtask.id}
-                          </span>
-                          <HierarchyStatusBadge status={subtask.status} statuses={availableStatuses} />
-                          {nested && (
-                            <span
-                              className="text-xs text-gray-500 dark:text-gray-400"
-                              data-nested-progress={`${nested.completed}/${nested.total}`}
-                            >
-                              {nested.completed} of {nested.total} complete
-                            </span>
-                          )}
-                        </span>
-                        <span className="mt-1 block break-words text-sm font-medium text-gray-900 dark:text-gray-100">
-                          <TaskDisplayTitle task={subtask} />
-                        </span>
-                      </span>
-                      <HierarchyChevron />
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {dependencyGraph && dependencyGraph.nodes.length > 1 && (
-            <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-              <SectionHeader title="Dependency Graph" />
-              <DependencyGraphSection graph={dependencyGraph} tasks={availableTasks} />
-            </section>
-          )}
-
         </div>
 
         {/* Sidebar */}
-        <div className="md:col-span-1 space-y-4">
-          {shownReadiness && (
-            <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${shownReadiness.isReady ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'}`}>
-              <span aria-hidden="true">{shownReadiness.isReady ? '✓' : '⏳'}</span>
-              <span>{shownReadiness.isReady ? 'Ready to start' : formatReadinessBlockers(shownReadiness)}</span>
-            </div>
-          )}
+        <div className="space-y-4 md:col-span-1 xl:col-span-2 xl:grid xl:grid-cols-2 xl:content-start xl:gap-4 xl:space-y-0">
           <SchemaSidebar
             values={schemaFields}
             onChange={(key, value) => {
               setSchemaFields((current) => ({ ...current, [key]: value }));
               setFieldErrors((current) => ({ ...current, [key]: "" }));
             }}
-            mode={mode === "preview" ? "view" : mode}
+            mode={viewMode === "preview" ? "view" : viewMode}
             readOnly={isReadOnly}
             draft={isOpenDraft}
             errors={fieldErrors}
@@ -1059,22 +1145,6 @@ export const TaskDetailsModal: React.FC<Props> = ({
             overdueFields={task?.overdue}
           />
 
-          {/* Archive button at bottom of sidebar */}
-		          {task && onArchive && !isReadOnly && (
-		            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
-		              <button
-		                onClick={handleArchive}
-		                title="Move this task off the board into the archive"
-		                disabled={demoting}
-		                className="w-full inline-flex items-center justify-center px-4 py-2 bg-red-500 dark:bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-600 dark:hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800 focus:ring-red-400 dark:focus:ring-red-500 transition-colors duration-200"
-		              >
-		                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-		                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                </svg>
-                Archive Task
-              </button>
-            </div>
-          )}
         </div>
 	      </div>
 		</fieldset>

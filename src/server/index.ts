@@ -7,7 +7,9 @@ import type { ContentStore } from "../core/content-store.ts";
 import { initializeProject } from "../core/init.ts";
 import type { SearchService } from "../core/search-service.ts";
 import { getTaskStatistics } from "../core/statistics.ts";
-import { loadTaskDetail } from "../core/task-detail.ts";
+import { taskDetailFromSnapshot } from "../core/task-detail.ts";
+import { getViewerBundle } from "../export/embedded-viewer.ts";
+import { createHtmlSnapshot, renderHtmlSnapshot } from "../export/html-snapshot.ts";
 import { isCreateLockError, isTaskLockError } from "../file-system/operations.ts";
 import { toSchemaTaskJson } from "../formatters/json-output.ts";
 import { parseSections } from "../markdown/sections.ts";
@@ -356,6 +358,27 @@ export async function findNextAvailablePort(startPort: number, maxPort = MAX_POR
 	return null;
 }
 
+/** Opt-in stage timings. Normal mode logs only reads slower than 200 ms. */
+function webReadTiming(operation: string) {
+	const setting = process.env.BACKLOG_WEB_TIMINGS;
+	if (!setting) return null;
+	const started = performance.now();
+	let previous = started;
+	const stages: Record<string, number> = {};
+	return {
+		mark(stage: string) {
+			const now = performance.now();
+			stages[stage] = Math.round((now - previous) * 10) / 10;
+			previous = now;
+		},
+		finish() {
+			const totalMs = Math.round((performance.now() - started) * 10) / 10;
+			if (setting === "all" || totalMs >= 200)
+				console.error(JSON.stringify({ event: "web-read-timing", operation, totalMs, stages }));
+		},
+	};
+}
+
 export class BacklogServer {
 	private core: Core;
 	private server: Server<unknown> | null = null;
@@ -652,6 +675,9 @@ export class BacklogServer {
 					},
 					"/api/search": {
 						GET: async (req: Request) => await this.handleSearch(req),
+					},
+					"/api/export/html": {
+						GET: async () => await this.handleExportHtml(),
 					},
 					// Serve files placed under backlog/assets at /assets/<relative-path>
 					"/assets/*": {
@@ -968,7 +994,25 @@ export class BacklogServer {
 		);
 	}
 
+	private async handleExportHtml(): Promise<Response> {
+		try {
+			const snapshot = await createHtmlSnapshot(this.core);
+			const assets = await getViewerBundle();
+			return new Response(renderHtmlSnapshot(snapshot, assets.javascript, assets.css), {
+				headers: {
+					"Content-Type": "text/html; charset=utf-8",
+					"Content-Disposition": 'attachment; filename="backlog-snapshot.html"',
+					"Cache-Control": "no-store",
+				},
+			});
+		} catch (error) {
+			console.error("Error exporting HTML snapshot:", error);
+			return Response.json({ error: "HTML snapshot export failed" }, { status: 500 });
+		}
+	}
+
 	private async handleSearch(req: Request): Promise<Response> {
+		const timing = webReadTiming("search");
 		try {
 			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
 			const lang = this.readDisplayLanguage(req, registry);
@@ -1133,18 +1177,27 @@ export class BacklogServer {
 			}
 
 			const servicesWereReady = this.servicesInitialized;
+			timing?.mark("validate");
 			const searchService = await this.getSearchServiceInstance();
+			timing?.mark("initialize");
 			if (servicesWereReady && (!types || types.includes("task"))) {
-				await this.core.refreshTasksForTaskRead();
+				await this.core.refreshTasksForTaskRead({ skipWatchedLocalRefresh: true });
 			}
+			timing?.mark("refresh");
 
 			const results = searchService.search({ query, limit, types, filters });
-			return Response.json(
+			timing?.mark("execute");
+			const response = Response.json(
 				results.map((result) =>
 					result.type === "task" ? { ...result, task: this.taskResponse(result.task, registry, lang) } : result,
 				),
 			);
+			timing?.mark("serialize");
+			timing?.finish();
+			return response;
 		} catch (error) {
+			timing?.mark("error");
+			timing?.finish();
 			console.error("Error performing search:", error);
 			return Response.json({ error: "Search failed" }, { status: 500 });
 		}
@@ -1292,7 +1345,8 @@ export class BacklogServer {
 		}
 		let resolvedTask: Task | null;
 		try {
-			resolvedTask = await this.core.getTask(taskId);
+			await this.core.refreshTasksForTaskRead({ skipWatchedLocalRefresh: true });
+			resolvedTask = await this.core.getTask(taskId, { refreshCrossBranch: false });
 		} catch (error) {
 			if (!isAmbiguousTaskIdError(error)) throw error;
 			const message = error.candidates.some((candidate) => !isAbsolute(candidate))
@@ -1308,15 +1362,28 @@ export class BacklogServer {
 	 * so the browser gets the dependency graph in the same response that opens the task.
 	 */
 	private async handleGetTask(taskId: string, req?: Request): Promise<Response> {
-		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
-		const lang = this.readDisplayLanguage(req, registry);
-		if (lang instanceof Response) return lang;
-		const resolved = await this.resolveDetailTask(taskId);
-		if (resolved instanceof Response) return resolved;
-		await this.ensureServicesReady();
-		return Response.json(
-			this.taskResponse(await loadTaskDetail(this.core, resolved, { includeCrossBranch: true }), registry, lang, true),
-		);
+		const timing = webReadTiming("task-detail");
+		try {
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const lang = this.readDisplayLanguage(req, registry);
+			if (lang instanceof Response) return lang;
+			const resolved = await this.resolveDetailTask(taskId);
+			if (resolved instanceof Response) return resolved;
+			timing?.mark("resolve");
+			const store = await this.getContentStoreInstance();
+			timing?.mark("store");
+			const detail = taskDetailFromSnapshot(
+				resolved,
+				store.getTaskCorpusSnapshot(),
+				registry.schema.fields.status?.values,
+			);
+			timing?.mark("dependencies");
+			const response = Response.json(this.taskResponse(detail, registry, lang, true));
+			timing?.mark("serialize");
+			return response;
+		} finally {
+			timing?.finish();
+		}
 	}
 
 	private async handlePatchTask(req: Request, taskId: string): Promise<Response> {
@@ -2321,12 +2388,20 @@ export class BacklogServer {
 			}
 
 			// Calculate statistics using the exact same function as CLI
-			const statistics = getTaskStatistics(filteredTasks, filteredDrafts, statuses, priorities, tasks);
+			const statistics = getTaskStatistics(
+				filteredTasks,
+				filteredDrafts,
+				statuses,
+				priorities,
+				tasks,
+				schema.fields.status?.outcomes,
+			);
 
 			// Convert Maps to objects for JSON serialization
 			const response = {
 				...statistics,
 				statusCounts: Object.fromEntries(statistics.statusCounts),
+				outcomeCounts: Object.fromEntries(statistics.outcomeCounts),
 				priorityCounts: Object.fromEntries(statistics.priorityCounts),
 			};
 

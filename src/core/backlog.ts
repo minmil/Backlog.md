@@ -76,6 +76,7 @@ import {
 } from "../utils/prefix-config.ts";
 import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
+import { applyStatusOutcome } from "../utils/status-outcome.ts";
 import {
 	normalizeStringList,
 	parseDelimitedStringList,
@@ -1031,51 +1032,98 @@ export class Core {
 	}
 
 	/** Refresh the existing cross-branch store only when relevant config or refs changed. */
-	async refreshTasksForTaskRead(): Promise<boolean> {
-		while (true) {
-			const generation = this.projectGeneration;
-			const filesystem = this.fs;
-			const git = this.git;
-			const backlogRoot = filesystem.backlogDir;
-			const projectChanged = () =>
-				generation !== this.projectGeneration ||
-				filesystem !== this.fs ||
-				git !== this.git ||
-				backlogRoot !== filesystem.backlogDir;
-			const config = await filesystem.loadConfig();
-			if (projectChanged()) continue;
-			await this.refreshRemoteRefsForTaskRead(config, git);
-			if (projectChanged()) continue;
-			const snapshot = await this.getActiveBranchSnapshot(config, generation, filesystem, git);
-			if (projectChanged()) continue;
-			if (snapshot.fingerprint === this.activeBranchFingerprint) {
-				const store = this.contentStore;
-				if (store?.isInitialized()) await store.refreshLocalTaskCorpus();
+	async refreshTasksForTaskRead(options: { skipWatchedLocalRefresh?: boolean } = {}): Promise<boolean> {
+		const timingSetting = process.env.BACKLOG_WEB_TIMINGS;
+		const started = timingSetting ? performance.now() : 0;
+		const stages: Record<string, number> = {};
+		let mode = "none";
+		let outcome = "error";
+		let attempts = 0;
+		const timed = async <T>(stage: string, action: () => Promise<T>): Promise<T> => {
+			if (!timingSetting) return await action();
+			const stageStarted = performance.now();
+			try {
+				return await action();
+			} finally {
+				stages[stage] = (stages[stage] ?? 0) + performance.now() - stageStarted;
+			}
+		};
+		try {
+			while (true) {
+				attempts += 1;
+				const generation = this.projectGeneration;
+				const filesystem = this.fs;
+				const git = this.git;
+				const backlogRoot = filesystem.backlogDir;
+				const projectChanged = () =>
+					generation !== this.projectGeneration ||
+					filesystem !== this.fs ||
+					git !== this.git ||
+					backlogRoot !== filesystem.backlogDir;
+				const config = await timed("config", () => filesystem.loadConfig());
 				if (projectChanged()) continue;
-				return false;
-			}
-
-			const joinedExistingRefresh = this.activeBranchRefreshPromise !== null;
-			if (!this.activeBranchRefreshPromise) {
-				const refreshExistingStore = this.contentStore !== undefined;
-				const refreshPromise = (async () => {
-					const store = await this.getContentStore();
-					if (refreshExistingStore) await store.refreshTasks();
-				})();
-				this.activeBranchRefreshPromise = refreshPromise;
-				const clearRefreshPromise = () => {
-					if (this.activeBranchRefreshPromise === refreshPromise) {
-						this.activeBranchRefreshPromise = null;
+				await timed("remoteRefs", () => this.refreshRemoteRefsForTaskRead(config, git));
+				if (projectChanged()) continue;
+				const snapshot = await timed("branchSnapshot", () =>
+					this.getActiveBranchSnapshot(config, generation, filesystem, git),
+				);
+				if (projectChanged()) continue;
+				if (snapshot.fingerprint === this.activeBranchFingerprint) {
+					const store = this.contentStore;
+					const watchersActive = store?.hasWorkingCopyWatchers() ?? false;
+					if (store?.isInitialized() && (!options.skipWatchedLocalRefresh || !watchersActive)) {
+						mode = "scan";
+						await timed("localCorpus", () => store.refreshLocalTaskCorpus());
+					} else {
+						mode = watchersActive ? "watcher" : "none";
 					}
-				};
-				void refreshPromise.then(clearRefreshPromise, clearRefreshPromise);
-			}
+					if (projectChanged()) continue;
+					outcome = "unchanged";
+					return false;
+				}
 
-			const refreshPromise = this.activeBranchRefreshPromise;
-			await refreshPromise;
-			if (projectChanged()) continue;
-			if (joinedExistingRefresh && this.activeBranchFingerprint !== snapshot.fingerprint) continue;
-			return true;
+				mode = "branch";
+				const joinedExistingRefresh = this.activeBranchRefreshPromise !== null;
+				if (!this.activeBranchRefreshPromise) {
+					const refreshExistingStore = this.contentStore !== undefined;
+					const refreshPromise = (async () => {
+						const store = await this.getContentStore();
+						if (refreshExistingStore) await store.refreshTasks();
+					})();
+					this.activeBranchRefreshPromise = refreshPromise;
+					const clearRefreshPromise = () => {
+						if (this.activeBranchRefreshPromise === refreshPromise) {
+							this.activeBranchRefreshPromise = null;
+						}
+					};
+					void refreshPromise.then(clearRefreshPromise, clearRefreshPromise);
+				}
+
+				const refreshPromise = this.activeBranchRefreshPromise;
+				await timed("branchCorpus", () => refreshPromise);
+				if (projectChanged()) continue;
+				if (joinedExistingRefresh && this.activeBranchFingerprint !== snapshot.fingerprint) continue;
+				outcome = "refreshed";
+				return true;
+			}
+		} finally {
+			if (timingSetting) {
+				const totalMs = Math.round((performance.now() - started) * 10) / 10;
+				if (timingSetting === "all" || totalMs >= 200) {
+					console.error(
+						JSON.stringify({
+							event: "task-read-refresh-timing",
+							totalMs,
+							stages: Object.fromEntries(
+								Object.entries(stages).map(([stage, ms]) => [stage, Math.round(ms * 10) / 10]),
+							),
+							mode,
+							outcome,
+							attempts,
+						}),
+					);
+				}
+			}
 		}
 	}
 
@@ -2076,6 +2124,7 @@ export class Core {
 		}
 
 		normalizeAssignee(task);
+		applyStatusOutcome(task, null, this.fs.taskSchema);
 		return await this.fs.saveTask(task);
 	}
 
@@ -2425,6 +2474,7 @@ export class Core {
 			// The stored record also tells whether the status changed, for the status callback.
 			const originalTask = await this.loadStoredTaskForWrite(task.id);
 			await this.prepareSequenceFields(task, originalTask);
+			applyStatusOutcome(task, originalTask, this.fs.taskSchema);
 			const oldStatus = originalTask?.status ?? "";
 			const newStatus = task.status ?? "";
 			if (hasUpdatedDateRelevantChanges(originalTask, task)) {
@@ -2459,6 +2509,7 @@ export class Core {
 	): Promise<{ task: Task; mutated: boolean }> {
 		let mutated = false;
 		const taskSchema = this.fs.taskSchema;
+		const outcomeBefore: Task = { ...task, fieldValues: { ...task.fieldValues } };
 		const trackedRegistry = new FieldRegistry(taskSchema);
 		const trackedBefore = Object.fromEntries(
 			Object.entries(taskSchema.fields)
@@ -2761,6 +2812,7 @@ export class Core {
 		};
 
 		resolveModifiedFiles();
+		applyStatusOutcome(task, outcomeBefore, taskSchema);
 
 		const setSections = {
 			...(input.description !== undefined && { description: input.description }),
@@ -3057,6 +3109,7 @@ export class Core {
 
 				normalizeAssignee(promotedTask);
 				await this.prepareSequenceFields(promotedTask);
+				applyStatusOutcome(promotedTask, null, this.fs.taskSchema);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(current.filePath).text());
 
 				if (draftPath) {
@@ -4061,6 +4114,7 @@ export class Core {
 
 				normalizeAssignee(promotedTask);
 				await this.prepareSequenceFields(promotedTask);
+				applyStatusOutcome(promotedTask, null, this.fs.taskSchema);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(sourcePath).text());
 				await unlink(sourcePath);
 
