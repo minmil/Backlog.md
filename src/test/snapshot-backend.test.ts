@@ -8,7 +8,7 @@ test("offline moves set the default outcome and date, and edits can choose anoth
 	const schema = parseTaskSchema(
 		getDefaultTaskSchemaText().replace(
 			"  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}",
-			"  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Closed], default: To Do, outcomes: [Done, Deferred, No longer needed], outcome_date: true}",
+			"  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Closed], default: To Do, outcomes: [Done, Deferred, No longer needed], outcome_date: true, outcome_clears: [tech_action]}\n  tech_action: {type: enum, values: [Investigating]}",
 		),
 	);
 	const backend = new SnapshotBackend({
@@ -27,7 +27,7 @@ test("offline moves set the default outcome and date, and edits can choose anoth
 				labels: [],
 				dependencies: [],
 				createdDate: "2026-11-01",
-				fieldValues: {},
+				fieldValues: { tech_action: "Investigating" },
 			},
 		],
 		archivedTasks: [],
@@ -38,6 +38,7 @@ test("offline moves set the default outcome and date, and edits can choose anoth
 	let task = (await (await request("/api/task/TASK-1")).json()) as { fieldValues: Record<string, unknown> };
 	expect(task.fieldValues.outcome).toBe("Done");
 	expect(task.fieldValues.outcome_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	expect(task.fieldValues.tech_action).toBeUndefined();
 	await request("/api/tasks/TASK-1", "PATCH", { fields: { outcome: "Deferred" } });
 	task = (await (await request("/api/task/TASK-1")).json()) as { fieldValues: Record<string, unknown> };
 	expect(task.fieldValues.outcome).toBe("Deferred");

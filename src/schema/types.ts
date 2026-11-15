@@ -40,6 +40,8 @@ export interface SchemaField {
 	outcomes?: string[];
 	/** Record the date on entry to the final status (status field only). */
 	outcome_date?: boolean;
+	/** Clear these fields on entry to the final status (status field only). */
+	outcome_clears?: string[];
 	lang?: string;
 	translation_of?: string;
 	track_changes?: boolean;

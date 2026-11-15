@@ -79,6 +79,7 @@ const FIELD_ATTRIBUTES = new Set([
 	"values",
 	"outcomes",
 	"outcome_date",
+	"outcome_clears",
 	"lang",
 	"translation_of",
 	"track_changes",
@@ -318,6 +319,16 @@ function validateFields(value: unknown, users: SchemaUser[], issues: SchemaIssue
 			});
 		if (key === "status" && item.outcome_date === true && item.outcomes === undefined)
 			issues.push({ key: "fields.status.outcome_date", message: "outcome_date requires outcomes" });
+		if (item.outcome_clears !== undefined) {
+			if (key !== "status")
+				issues.push({ key: `fields.${key}.outcome_clears`, message: "Only status can declare outcome_clears" });
+			if (!stringArray(item.outcome_clears) || item.outcome_clears.some((value) => !value.trim()))
+				issues.push({ key: `fields.${key}.outcome_clears`, message: "Expected a list of field keys" });
+			else if (new Set(item.outcome_clears).size !== item.outcome_clears.length)
+				issues.push({ key: `fields.${key}.outcome_clears`, message: "Field keys must be unique" });
+			if (key === "status" && !item.outcomes)
+				issues.push({ key: "fields.status.outcome_clears", message: "outcome_clears requires outcomes" });
+		}
 		fields[key] = item as unknown as SchemaField;
 	}
 	for (const [key, type] of Object.entries(CORE_FIELD_TYPES)) {
@@ -488,6 +499,12 @@ export function parseTaskSchema(content: string, path?: string): TaskSchema {
 	const users = validateUsers(source.users, issues);
 	const fields = validateFields(source.fields, users, issues);
 	const status = fields.status;
+	for (const key of Array.isArray(status?.outcome_clears) ? status.outcome_clears : []) {
+		const field = fields[key];
+		if (!field) issues.push({ key: "fields.status.outcome_clears", message: `Unknown field ${key}` });
+		else if (field.required || field.managed || field.type === "sequence" || key === "status")
+			issues.push({ key: "fields.status.outcome_clears", message: `Field ${key} cannot be cleared` });
+	}
 	if (Array.isArray(status?.outcomes) && status.outcomes.length > 0) {
 		for (const key of ["outcome", "outcome_date"]) {
 			if (fields[key]) issues.push({ key: `fields.${key}`, message: "Reserved for status outcomes" });

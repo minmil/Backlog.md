@@ -1,3 +1,4 @@
+import { FieldRegistry } from "../schema/field-registry.ts";
 import type { TaskSchema } from "../schema/types.ts";
 import type { Task } from "../types/index.ts";
 import { isTerminalStatus } from "./terminal-status.ts";
@@ -27,4 +28,8 @@ export function applyStatusOutcome(task: Task, previous: Task | null, schema: Ta
 		} else delete values.outcome_date;
 	}
 	task.fieldValues = values;
+	if (terminal && !wasTerminal && status.outcome_clears?.length) {
+		const registry = new FieldRegistry(schema);
+		for (const key of status.outcome_clears) Object.assign(task, registry.clearField(task, key));
+	}
 }

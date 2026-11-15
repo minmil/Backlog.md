@@ -2509,6 +2509,7 @@ export class Core {
 	): Promise<{ task: Task; mutated: boolean }> {
 		let mutated = false;
 		const taskSchema = this.fs.taskSchema;
+		const outcomeBefore: Task = { ...task, fieldValues: { ...task.fieldValues } };
 		const trackedRegistry = new FieldRegistry(taskSchema);
 		const trackedBefore = Object.fromEntries(
 			Object.entries(taskSchema.fields)
@@ -2811,6 +2812,7 @@ export class Core {
 		};
 
 		resolveModifiedFiles();
+		applyStatusOutcome(task, outcomeBefore, taskSchema);
 
 		const setSections = {
 			...(input.description !== undefined && { description: input.description }),
