@@ -77,6 +77,8 @@ const FIELD_ATTRIBUTES = new Set([
 	"required",
 	"default",
 	"values",
+	"outcomes",
+	"outcome_date",
 	"lang",
 	"translation_of",
 	"track_changes",
@@ -302,6 +304,20 @@ function validateFields(value: unknown, users: SchemaUser[], issues: SchemaIssue
 				issues.push({ key: `fields.${key}.values`, message: "Expected a list of label suggestions" });
 		} else if (item.values !== undefined)
 			issues.push({ key: `fields.${key}.values`, message: "Only enum fields can have values" });
+		if (item.outcomes !== undefined) {
+			if (key !== "status") issues.push({ key: `fields.${key}.outcomes`, message: "Only status can declare outcomes" });
+			if (!stringArray(item.outcomes) || item.outcomes.length === 0 || item.outcomes.some((value) => !value.trim()))
+				issues.push({ key: `fields.${key}.outcomes`, message: "Expected a nonempty list of outcomes" });
+			else if (new Set(item.outcomes.map((value) => value.toLowerCase())).size !== item.outcomes.length)
+				issues.push({ key: `fields.${key}.outcomes`, message: "Outcomes must be unique ignoring case" });
+		}
+		if (item.outcome_date !== undefined && (key !== "status" || typeof item.outcome_date !== "boolean"))
+			issues.push({
+				key: `fields.${key}.outcome_date`,
+				message: "Only status can configure outcome_date as true or false",
+			});
+		if (key === "status" && item.outcome_date === true && item.outcomes === undefined)
+			issues.push({ key: "fields.status.outcome_date", message: "outcome_date requires outcomes" });
 		fields[key] = item as unknown as SchemaField;
 	}
 	for (const [key, type] of Object.entries(CORE_FIELD_TYPES)) {
@@ -471,8 +487,25 @@ export function parseTaskSchema(content: string, path?: string): TaskSchema {
 	}
 	const users = validateUsers(source.users, issues);
 	const fields = validateFields(source.fields, users, issues);
+	const status = fields.status;
+	if (Array.isArray(status?.outcomes) && status.outcomes.length > 0) {
+		for (const key of ["outcome", "outcome_date"]) {
+			if (fields[key]) issues.push({ key: `fields.${key}`, message: "Reserved for status outcomes" });
+		}
+		if (!fields.outcome)
+			fields.outcome = { type: "enum", label: "Outcome", values: status.outcomes, track_changes: status.track_changes };
+		if (status.outcome_date === true && !fields.outcome_date)
+			fields.outcome_date = { type: "date", label: "Outcome date", managed: true };
+	}
 	const sections = validateSections(source.sections, issues);
 	const ui = validateUi(source.ui, fields, issues);
+	if (fields.outcome) {
+		const index = ui.detail.order.indexOf("status");
+		const additions = ["outcome", ...(fields.outcome_date ? ["outcome_date"] : [])].filter(
+			(key) => !ui.detail.order.includes(key),
+		);
+		if (index >= 0) ui.detail.order.splice(index + 1, 0, ...additions);
+	}
 	if (issues.length) throw new TaskSchemaError(issues, path);
 	return { users, fields, sections, ui };
 }

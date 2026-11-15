@@ -1,7 +1,49 @@
 import { expect, test } from "bun:test";
 import type { HtmlSnapshot } from "../export/html-snapshot.ts";
 import { getDefaultTaskSchema } from "../schema/default-schema.ts";
+import { getDefaultTaskSchemaText, parseTaskSchema } from "../schema/index.ts";
 import { SnapshotBackend } from "../web/snapshot-backend.ts";
+
+test("offline moves set the default outcome and date, and edits can choose another outcome", async () => {
+	const schema = parseTaskSchema(
+		getDefaultTaskSchemaText().replace(
+			"  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}",
+			"  status: {type: enum, core: true, required: true, values: [To Do, In Progress, Closed], default: To Do, outcomes: [Done, Deferred, No longer needed], outcome_date: true}",
+		),
+	);
+	const backend = new SnapshotBackend({
+		formatVersion: 2,
+		generatedAt: "2026-11-15T00:00:00Z",
+		projectName: "Offline",
+		taskCount: 1,
+		archivedTaskCount: 0,
+		schema,
+		tasks: [
+			{
+				id: "TASK-1",
+				title: "One",
+				status: "To Do",
+				assignee: [],
+				labels: [],
+				dependencies: [],
+				createdDate: "2026-11-01",
+				fieldValues: {},
+			},
+		],
+		archivedTasks: [],
+	});
+	const request = (path: string, method = "GET", body?: unknown) =>
+		backend.fetch(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+	await request("/api/tasks/move", "POST", { taskIds: ["TASK-1"], targetStatus: "Closed" });
+	let task = (await (await request("/api/task/TASK-1")).json()) as { fieldValues: Record<string, unknown> };
+	expect(task.fieldValues.outcome).toBe("Done");
+	expect(task.fieldValues.outcome_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	await request("/api/tasks/TASK-1", "PATCH", { fields: { outcome: "Deferred" } });
+	task = (await (await request("/api/task/TASK-1")).json()) as { fieldValues: Record<string, unknown> };
+	expect(task.fieldValues.outcome).toBe("Deferred");
+	const stats = await (await request("/api/statistics")).json();
+	expect(stats).toMatchObject({ completedTasks: 0, outcomeCounts: { Done: 0, Deferred: 1 } });
+});
 
 test("offline statistics count the configured Closed status as completed", async () => {
 	const backend = new SnapshotBackend({

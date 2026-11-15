@@ -76,6 +76,7 @@ import {
 } from "../utils/prefix-config.ts";
 import { resolveRuntimeCwd } from "../utils/runtime-cwd.ts";
 import { executeStatusCallback } from "../utils/status-callback.ts";
+import { applyStatusOutcome } from "../utils/status-outcome.ts";
 import {
 	normalizeStringList,
 	parseDelimitedStringList,
@@ -2123,6 +2124,7 @@ export class Core {
 		}
 
 		normalizeAssignee(task);
+		applyStatusOutcome(task, null, this.fs.taskSchema);
 		return await this.fs.saveTask(task);
 	}
 
@@ -2472,6 +2474,7 @@ export class Core {
 			// The stored record also tells whether the status changed, for the status callback.
 			const originalTask = await this.loadStoredTaskForWrite(task.id);
 			await this.prepareSequenceFields(task, originalTask);
+			applyStatusOutcome(task, originalTask, this.fs.taskSchema);
 			const oldStatus = originalTask?.status ?? "";
 			const newStatus = task.status ?? "";
 			if (hasUpdatedDateRelevantChanges(originalTask, task)) {
@@ -3104,6 +3107,7 @@ export class Core {
 
 				normalizeAssignee(promotedTask);
 				await this.prepareSequenceFields(promotedTask);
+				applyStatusOutcome(promotedTask, null, this.fs.taskSchema);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(current.filePath).text());
 
 				if (draftPath) {
@@ -4108,6 +4112,7 @@ export class Core {
 
 				normalizeAssignee(promotedTask);
 				await this.prepareSequenceFields(promotedTask);
+				applyStatusOutcome(promotedTask, null, this.fs.taskSchema);
 				const savedPath = await this.fs.saveTask(promotedTask, await Bun.file(sourcePath).text());
 				await unlink(sourcePath);
 

@@ -8,6 +8,8 @@ fields:
   title: {type: text, core: true, required: true, label: Title}
   # Add a translated field as a separate value tied to its source:
   # title_ja: {type: text, label: Title (JA), lang: ja, translation_of: title}
+  # Optional: outcomes: [Done, Deferred, No longer needed], outcome_date: true
+  # The last status is terminal. Outcome and its date are stored on the task when it is reached.
   status: {type: enum, core: true, required: true, values: [To Do, In Progress, Done], default: To Do}
   assignee: {type: user-list, core: true, label: Assignee}
   reporter: {type: user, core: true, label: Reporter}

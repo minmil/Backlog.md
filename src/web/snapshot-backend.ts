@@ -5,6 +5,7 @@ import { publishedTask, renderHtmlSnapshot } from "../export/html-snapshot-rende
 import type { LogEntry } from "../markdown/sections.ts";
 import { FieldRegistry } from "../schema/field-registry.ts";
 import type { BacklogConfig, Decision, Document, Task } from "../types/index.ts";
+import { applyStatusOutcome } from "../utils/status-outcome.ts";
 import { canonicalTaskId } from "../utils/task-id.ts";
 import { createTaskSearchIndex, type TaskSearchIndex } from "../utils/task-search.ts";
 import { isTerminalStatus } from "../utils/terminal-status.ts";
@@ -97,6 +98,7 @@ export class SnapshotBackend {
 
 	private saveTask(task: Task | null, id = task?.id): void {
 		if (!id) throw new Error("Missing task ID");
+		if (task) applyStatusOutcome(task, this.findTask(id) ?? null, this.snapshot.schema);
 		const key = canonicalTaskId(id);
 		this.snapshot = {
 			...this.snapshot,
@@ -223,10 +225,13 @@ export class SnapshotBackend {
 					this.snapshot.drafts ?? [],
 					this.config().statuses,
 					this.config().priorities,
+					this.tasks(),
+					this.snapshot.schema.fields.status?.outcomes,
 				);
 				return response({
 					...statistics,
 					statusCounts: Object.fromEntries(statistics.statusCounts),
+					outcomeCounts: Object.fromEntries(statistics.outcomeCounts),
 					priorityCounts: Object.fromEntries(statistics.priorityCounts),
 				});
 			}

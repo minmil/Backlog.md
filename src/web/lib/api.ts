@@ -693,17 +693,19 @@ export class ApiClient {
 	}
 
 	async fetchStatistics(where: string[] = []): Promise<
-		Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+		Omit<TaskStatistics, "statusCounts" | "priorityCounts" | "outcomeCounts"> & {
 			statusCounts: Record<string, number>;
 			priorityCounts: Record<string, number>;
+			outcomeCounts: Record<string, number>;
 		}
 	> {
 		const query = new URLSearchParams();
 		for (const condition of where) query.append("where", condition);
 		return this.fetchJson<
-			Omit<TaskStatistics, "statusCounts" | "priorityCounts"> & {
+			Omit<TaskStatistics, "statusCounts" | "priorityCounts" | "outcomeCounts"> & {
 				statusCounts: Record<string, number>;
 				priorityCounts: Record<string, number>;
+				outcomeCounts: Record<string, number>;
 			}
 		>(`${API_BASE}/statistics${query.size ? `?${query}` : ""}`);
 	}

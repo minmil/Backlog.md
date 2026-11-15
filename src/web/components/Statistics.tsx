@@ -11,8 +11,9 @@ import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue } from '../../schema/field-registry.ts';
 import TaskDisplayTitle from './schema/TaskDisplayTitle.tsx';
 
-interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts'> {
+interface StatisticsData extends Omit<TaskStatistics, 'statusCounts' | 'priorityCounts' | 'outcomeCounts'> {
 	statusCounts: Record<string, number>;
+	outcomeCounts: Record<string, number>;
 	priorityCounts: Record<string, number>;
 }
 
@@ -362,7 +363,7 @@ const Statistics: React.FC<StatisticsProps> = ({
 				</div>
 				<div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
 					<span>{statistics.completedTasks} completed</span>
-					<span>{statistics.totalTasks - statistics.completedTasks} remaining</span>
+					<span>{statistics.totalTasks - (statistics.statusCounts[schema.fields.status?.values?.at(-1) ?? ''] ?? 0)} open</span>
 				</div>
 			</div>
 
@@ -398,6 +399,10 @@ const Statistics: React.FC<StatisticsProps> = ({
 								</div>
 							</div>
 						))}
+						{schema.fields.status?.outcomes?.length ? <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+							<p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Closed outcomes</p>
+							{schema.fields.status.outcomes.map((outcome) => <div key={outcome} className="flex justify-between py-1 text-sm text-gray-600 dark:text-gray-400"><span>{outcome}</span><span>{statistics.outcomeCounts?.[outcome] ?? 0}</span></div>)}
+						</div> : null}
 					</div>
 				</div>
 

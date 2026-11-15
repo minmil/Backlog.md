@@ -76,9 +76,13 @@ function isStructuredDependency(value: unknown): boolean {
 }
 
 export function parseTask(content: string, _legacySchema?: unknown, suppliedSchema?: TaskSchema): Task {
-	const { frontmatter, content: rawContent } = parseMarkdown(content, ["created_date", "updated_date"]);
-	const id = String(frontmatter.id || "");
 	const taskSchema = suppliedSchema ?? getDefaultTaskSchema();
+	const { frontmatter, content: rawContent } = parseMarkdown(content, [
+		"created_date",
+		"updated_date",
+		...(taskSchema.fields.outcome_date ? ["outcome_date"] : []),
+	]);
+	const id = String(frontmatter.id || "");
 	const fieldValues: Record<string, unknown> = {};
 	const unknownFields: Record<string, unknown> = {};
 	const registry = new FieldRegistry(taskSchema);

@@ -30,7 +30,14 @@ export async function runOverviewCommand(core: Core): Promise<void> {
 
 		// Calculate statistics
 		const statsStart = performance.now();
-		const statistics = getTaskStatistics(activeTasks, drafts, statuses, priorities);
+		const statistics = getTaskStatistics(
+			activeTasks,
+			drafts,
+			statuses,
+			priorities,
+			activeTasks,
+			core.fs.taskSchema.fields.status?.outcomes,
+		);
 		const statsTime = Math.round(performance.now() - statsStart);
 
 		// Display the TUI

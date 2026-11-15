@@ -2388,12 +2388,20 @@ export class BacklogServer {
 			}
 
 			// Calculate statistics using the exact same function as CLI
-			const statistics = getTaskStatistics(filteredTasks, filteredDrafts, statuses, priorities, tasks);
+			const statistics = getTaskStatistics(
+				filteredTasks,
+				filteredDrafts,
+				statuses,
+				priorities,
+				tasks,
+				schema.fields.status?.outcomes,
+			);
 
 			// Convert Maps to objects for JSON serialization
 			const response = {
 				...statistics,
 				statusCounts: Object.fromEntries(statistics.statusCounts),
+				outcomeCounts: Object.fromEntries(statistics.outcomeCounts),
 				priorityCounts: Object.fromEntries(statistics.priorityCounts),
 			};
 
