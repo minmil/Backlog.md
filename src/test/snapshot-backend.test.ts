@@ -3,6 +3,43 @@ import type { HtmlSnapshot } from "../export/html-snapshot.ts";
 import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 import { SnapshotBackend } from "../web/snapshot-backend.ts";
 
+test("offline statistics count the configured Closed status as completed", async () => {
+	const backend = new SnapshotBackend({
+		formatVersion: 2,
+		generatedAt: "2026-01-01T00:00:00Z",
+		projectName: "Offline",
+		taskCount: 2,
+		archivedTaskCount: 0,
+		schema: getDefaultTaskSchema(),
+		config: { projectName: "Offline", statuses: ["To Do", "Closed"], labels: [], dateFormat: "YYYY-MM-DD" },
+		tasks: [
+			{
+				id: "TASK-1",
+				title: "Finished",
+				status: "Closed",
+				assignee: [],
+				labels: [],
+				dependencies: [],
+				createdDate: "2026-01-01",
+			},
+			{
+				id: "TASK-2",
+				title: "Open",
+				status: "To Do",
+				assignee: [],
+				labels: [],
+				dependencies: ["TASK-1"],
+				createdDate: "2026-01-01",
+			},
+		],
+		archivedTasks: [],
+	});
+	const statistics = await (await backend.fetch("/api/statistics")).json();
+	expect(statistics).toMatchObject({ totalTasks: 2, completedTasks: 1, completionPercentage: 50 });
+	expect(statistics.statusCounts.Closed).toBe(1);
+	expect(statistics.projectHealth.blockedTasks).toEqual([]);
+});
+
 test("offline backend applies task edits, creates, moves, and archives in embedded data", async () => {
 	const schema = getDefaultTaskSchema();
 	const snapshot: HtmlSnapshot = {
