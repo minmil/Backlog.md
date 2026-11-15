@@ -29,6 +29,7 @@ interface Props {
   availableStatuses?: string[]; // Available statuses for new tasks
   availableTasks?: Task[]; // Shared task corpus for dependency selection
   onNavigateToTask?: (task: Task) => void; // Opens another task, preserving close/back context
+  onProposeEdit?: (task: Task) => void; // Standalone HTML review copy only
   isDraftMode?: boolean; // Whether creating a draft
   availableMilestones?: string[];
   availablePriorities?: string[];
@@ -220,6 +221,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   availableStatuses = EMPTY_STATUSES,
   availableTasks = EMPTY_TASKS,
   onNavigateToTask,
+  onProposeEdit,
   milestoneEntities,
   isDraftMode,
   definitionOfDoneDefaults,
@@ -840,6 +842,11 @@ export const TaskDetailsModal: React.FC<Props> = ({
       disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
+		          {snapshotMode && task && onProposeEdit ? (
+		            <button type="button" onClick={() => onProposeEdit(task)} className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium dark:border-gray-600">
+		              Edit task JSON
+		            </button>
+		          ) : null}
 		          {canDemote && viewMode === "preview" && (
 		            <button
 		              onClick={() => void handleDemote()}
@@ -911,7 +918,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
           <div className="flex-1">
             <span className="font-medium">Read-only:</span>{" "}
             {snapshotMode ? (
-              "This is a read-only snapshot. Changes made after export are not shown."
+              "The original backlog is read-only here. Proposed edits can be saved in a new HTML copy."
             ) : task?.branch ? (
               <>This task exists in the <span className="font-semibold">{task.branch}</span> branch. Switch to that branch to edit it.</>
             ) : (

@@ -11,11 +11,18 @@ const virtualConsole = new VirtualConsole();
 virtualConsole.on("jsdomError", (error) => errors.push(error.message));
 virtualConsole.on("error", (message) => errors.push(String(message)));
 let requests = 0;
+let savedHtml = "";
 const dom = new JSDOM(html, {
 	url: `file://${path}`,
 	runScripts: "outside-only",
 	virtualConsole,
 	beforeParse(window) {
+		window.Blob = class {
+			constructor(parts) { this.parts = parts; }
+		};
+		window.URL.createObjectURL = (blob) => { savedHtml = blob.parts.join(""); return "blob:review-copy"; };
+		window.URL.revokeObjectURL = () => {};
+		window.HTMLAnchorElement.prototype.click = function () { if (!this.download) throw new Error("Unexpected anchor click"); };
 		window.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
 		window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 		window.cancelAnimationFrame = clearTimeout;
@@ -163,6 +170,32 @@ try {
 	click([...document.querySelectorAll("[data-snapshot-list] tbody tr button")].find((item) => item.textContent === `TASK-${count}`));
 	await waitFor(() => document.querySelector("#modal-title")?.textContent.includes(`TASK-${count} — Task ${count} 日本語`));
 	assert.doesNotMatch(document.querySelector("[role='dialog']").textContent, /Score/);
+	click(button("Edit task JSON"));
+	await waitFor(() => document.querySelector("textarea[aria-label='Task JSON']"));
+	const editor = document.querySelector("textarea[aria-label='Task JSON']");
+	const proposal = JSON.parse(editor.value);
+	proposal.title = `Reviewed task ${count} 日本語 </script><script>window.__reviewInjected=true</script>`;
+	Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value").set.call(editor, JSON.stringify(proposal));
+	editor.dispatchEvent(new Event("input", { bubbles: true }));
+	click(button("Save proposal"));
+	await waitFor(() => document.querySelector("textarea[aria-label='Task JSON']") === null);
+	click(button("Save HTML copy"));
+	await waitFor(() => savedHtml.includes("proposedEdits"));
+	const revised = new JSDOM(savedHtml, { url: `file://${path}-reviewed`, runScripts: "outside-only", beforeParse(window) {
+		window.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
+		window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
+		window.cancelAnimationFrame = clearTimeout;
+		window.fetch = () => { throw new Error("Reviewed copy attempted fetch"); };
+	} });
+	const revisedData = JSON.parse(revised.window.document.querySelector("#backlog-snapshot").textContent);
+	assert.equal(revisedData.tasks[count - 1].title, `Task ${count} 日本語`);
+	assert.equal(revisedData.proposedEdits[`TASK-${count}`].task.title, proposal.title);
+	assert.equal(revised.window.document.querySelectorAll("script").length, 2);
+	revised.window.eval(revised.window.document.querySelector("script:not([type])").textContent);
+	for (let attempt = 0; attempt < 40 && !revised.window.document.getElementById("root").textContent.includes("1 proposed edit"); attempt++) await new Promise((resolve) => setTimeout(resolve, 25));
+	assert.match(revised.window.document.getElementById("root").textContent, /1 proposed edit/);
+	assert.equal(revised.window.__reviewInjected, undefined);
+	revised.window.close();
 	assert.equal(requests, 0);
 	assert.equal(dom.window.__injected, undefined);
 	assert.equal(document.querySelectorAll("script").length, 2);

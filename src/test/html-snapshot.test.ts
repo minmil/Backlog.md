@@ -8,7 +8,7 @@ import { serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
 
 for (const count of [100, 500, 1000])
-	test(`exports a ${count}-task read-only HTML snapshot and runs its embedded viewer from a file URL`, async () => {
+	test(`exports a ${count}-task HTML snapshot and round trips offline review edits`, async () => {
 		const project = await mkdtemp(join(tmpdir(), "backlog-html-snapshot-"));
 		try {
 			const core = new Core(project);
