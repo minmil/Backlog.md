@@ -29,6 +29,19 @@ Task-read refreshes also log `task-read-refresh-timing` with `config`, `remoteRe
 
 A screenshot from the work Windows machine showed one task request spending 2.50 seconds stalled and 7.51 seconds establishing its connection, with four requests for the same task in the Network panel. The selected request had not reached the HTTP response phase, so its timing does not establish a slow task handler. The four attempts match the API client's former default of one request plus three retries at a 10-second timeout. Search and task-detail reads now make one attempt, which prevents that retry amplification. The cause of the slow Windows connection remains unmeasured; compare a simple `/api/status` request with search/detail and collect server timings from an executable built with the current diagnostics.
 
+## Rebuilt executable check
+
+After commit `dfe0e74c`, `bun scripts/build.ts` rebuilt the Linux executable. I compared `bun src/cli.ts browser` and the newly built `dist/backlog browser` as separate processes in the same 100-task untracked Git fixture. Each mode served the bundled browser JavaScript, returned `TASK-1` from search and detail, and emitted 21 server timing records. The compiled-build smoke test passed after updating its task-view assertions to the current schema JSON shape. The table uses 10 warm HTTP requests per operation; p95 is the maximum with this small sample.
+
+| Config and process | Startup | Cold search | Warm search median / p95 | Warm detail median / p95 |
+|---|---:|---:|---:|---:|
+| Cross-branch off, source CLI | 252 ms | 87 ms | 6.7 / 9.0 ms | 2.9 / 6.0 ms |
+| Cross-branch off, compiled CLI | 86 ms | 77 ms | 6.6 / 9.1 ms | 3.8 / 5.3 ms |
+| Cross-branch on, source CLI | 266 ms | 102 ms | 10.6 / 13.3 ms | 8.3 / 11.6 ms |
+| Cross-branch on, compiled CLI | 84 ms | 73 ms | 10.4 / 12.3 ms | 8.0 / 9.0 ms |
+
+These runs cover a Linux executable built from the latest source, not a Windows executable or the work machine's terminal, networking, Git setup, antivirus, or task repository. The fixture has no remote, so it does not exercise a remote fetch. The CLI resolves the task project from `BACKLOG_CWD` or the process working directory; launching the same executable from an IDE terminal can therefore select a different project or inherit different environment variables and Git tools. The `--no-open --non-interactive --port` options remove browser-launch and interactive-port-prompt differences for comparison.
+
 ## Remaining limits
 
 The benchmark counts corpus scans, not individual filesystem read syscalls, and measures process CPU/RSS rather than per-request CPU. Git Trace2 durations are the sum of subprocess runtime, which may overlap. It does not exercise an actual remote fetch or the user's repository. Cold initialization still scales with the corpus, and branch-tip discovery still starts several fast local Git processes per read. Browser render and long-task timing need a full browser profiler trace from the user's project to establish whether the 500 ms visible-detail target is met there.
