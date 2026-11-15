@@ -6,6 +6,7 @@ import { useSchema } from './schema/SchemaProvider.tsx';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import TaskDisplayTitle, { useTaskDisplay } from './schema/TaskDisplayTitle.tsx';
 import { FallbackLanguageCode } from './schema/DisplayLanguageContext.tsx';
+import { useSnapshotMode } from '../contexts/SnapshotModeContext.tsx';
 
 interface TaskCardProps {
   task: Task;
@@ -77,6 +78,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
   const [isDragging, setIsDragging] = React.useState(false);
   const [showBranchTooltip, setShowBranchTooltip] = React.useState(false);
   const { schema, registry } = useSchema();
+  const snapshotMode = useSnapshotMode();
   const { resolve, title, showFallback } = useTaskDisplay();
   const cardFields = schema.ui.board.card.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const fieldValue = (key: string): RegistryFieldValue | undefined => {
@@ -99,7 +101,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
   const handleDragStart = (e: React.DragEvent) => {
     // Prevent dragging cross-branch tasks
-    if (isFromOtherBranch) {
+    if (snapshotMode || isFromOtherBranch) {
       e.preventDefault();
       setShowBranchTooltip(true);
       setTimeout(() => setShowBranchTooltip(false), 3000);
@@ -184,7 +186,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
             : ''
         }`}
         aria-selected={isSelected}
-        draggable={!isFromOtherBranch}
+        draggable={!snapshotMode && !isFromOtherBranch}
 		role="button"
 		tabIndex={0}
 		aria-label={accessibleLabel}

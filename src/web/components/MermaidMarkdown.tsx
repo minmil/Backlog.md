@@ -3,6 +3,7 @@ import MDEditor from "@uiw/react-md-editor";
 import { useTaskIdIndex } from "../contexts/TaskIdIndexContext";
 import { renderMermaidIn } from "../utils/mermaid";
 import { createTaskIdLinkPlugin } from "../utils/task-id-links";
+import { useSnapshotMode } from "../contexts/SnapshotModeContext.tsx";
 
 interface Props {
 	source: string;
@@ -35,12 +36,33 @@ function keepHashLinksInCurrentRoute(url: string, key: string): string {
 	return `${window.location.pathname}${window.location.search}${url}`;
 }
 
+function snapshotImagesAsText() {
+	type Node = { type: string; alt?: string; children?: Node[] };
+	const visit = (node: Node) => {
+		if (!node.children) return;
+		node.children = node.children.map((child) => {
+			if (child.type === "image" || child.type === "imageReference") {
+				return { type: "text", value: child.alt ? `[Image: ${child.alt}]` : "[Image omitted]" } as Node;
+			}
+			visit(child);
+			return child;
+		});
+	};
+	return visit;
+}
+
 export default function MermaidMarkdown({ source }: Props) {
 	const ref = useRef<HTMLDivElement | null>(null);
+	const snapshotMode = useSnapshotMode();
 	const taskIdIndex = useTaskIdIndex();
-	const remarkPlugins = useMemo(() => [treatHtmlAsText, createTaskIdLinkPlugin(taskIdIndex)], [taskIdIndex]);
+	const remarkPlugins = useMemo(
+		() => [treatHtmlAsText, createTaskIdLinkPlugin(taskIdIndex), ...(snapshotMode ? [snapshotImagesAsText] : [])],
+		[taskIdIndex, snapshotMode],
+	);
 
 	useEffect(() => {
+		// The snapshot has no runtime asset loading. Mermaid code remains visible as a code block.
+		if (snapshotMode) return;
 		if (!ref.current) return;
 
 		// Render mermaid diagrams after the markdown has been rendered
@@ -52,15 +74,23 @@ export default function MermaidMarkdown({ source }: Props) {
 		});
 
 		return () => cancelAnimationFrame(frameId);
-	}, [source]);
+	}, [source, snapshotMode]);
+	const urlTransform = (url: string, key: string): string => {
+		if (!snapshotMode) return keepHashLinksInCurrentRoute(url, key);
+		if (key === "src") return /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/i.test(url) ? url : "";
+		if (key !== "href") return "";
+		if (/^\/tasks\/[A-Za-z0-9._-]+$/.test(url) || url.startsWith("#")) return url;
+		try {
+			const parsed = new URL(url);
+			return ["https:", "http:", "mailto:"].includes(parsed.protocol) ? url : "";
+		} catch {
+			return "";
+		}
+	};
 
 	return (
 		<div ref={ref} className="wmde-markdown">
-			<MDEditor.Markdown
-				source={source}
-				urlTransform={keepHashLinksInCurrentRoute}
-				remarkPlugins={remarkPlugins}
-			/>
+			<MDEditor.Markdown source={source} urlTransform={urlTransform} remarkPlugins={remarkPlugins} />
 		</div>
 	);
 }

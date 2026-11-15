@@ -3,6 +3,7 @@ import { FieldRegistry } from "../../../schema/field-registry.ts";
 import { getDefaultTaskSchema } from "../../../schema/default-schema.ts";
 import type { SchemaField, SchemaSection, TaskSchema } from "../../../schema/types.ts";
 import { apiClient } from "../../lib/api.ts";
+import { useSnapshotMode } from "../../contexts/SnapshotModeContext.tsx";
 
 interface SchemaContextValue {
 	schema: TaskSchema;
@@ -22,15 +23,24 @@ const SchemaContext = createContext<SchemaContextValue>({
 	refresh: async () => {},
 });
 
-export function SchemaProvider({ children, initialSchema = fallbackSchema }: { children: ReactNode; initialSchema?: TaskSchema }) {
+export function SchemaProvider({
+	children,
+	initialSchema = fallbackSchema,
+}: {
+	children: ReactNode;
+	initialSchema?: TaskSchema;
+}) {
+	const snapshotMode = useSnapshotMode();
 	const [schema, setSchema] = useState<TaskSchema>(initialSchema);
 	const requestId = useRef(0);
 	const refresh = useCallback(async () => {
+		if (snapshotMode) return;
 		const id = ++requestId.current;
 		const next = await apiClient.fetchSchema();
 		if (id === requestId.current) setSchema(next);
-	}, []);
+	}, [snapshotMode]);
 	useEffect(() => {
+		if (snapshotMode) return;
 		const onUpdate = () => {
 			// An uninitialized project has no server schema yet. The built-in schema stays usable.
 			void refresh().catch(() => {});
@@ -41,7 +51,7 @@ export function SchemaProvider({ children, initialSchema = fallbackSchema }: { c
 			requestId.current += 1;
 			window.removeEventListener("backlog-data-updated", onUpdate);
 		};
-	}, [refresh]);
+	}, [refresh, snapshotMode]);
 	const value = useMemo<SchemaContextValue>(
 		() => ({
 			schema,

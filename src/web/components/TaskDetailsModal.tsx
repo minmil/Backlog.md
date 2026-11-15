@@ -16,6 +16,7 @@ import { findDirectSubtasks, findParentTask, summarizeSubtaskProgress } from "..
 import { isTerminalStatus } from "../../utils/terminal-status.ts";
 import { createUrlPath } from "../utils/urlHelpers";
 import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
+import { useSnapshotMode } from "../contexts/SnapshotModeContext.tsx";
 
 interface Props {
   task?: Task | TaskDetail; // Optional for create mode
@@ -225,6 +226,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   defaultAssignee,
   dateFormat,
 }) => {
+  const snapshotMode = useSnapshotMode();
   const { schema, registry } = useSchema();
   const isCreateMode = !task;
   const schemaFieldBaseline = useMemo(() => readSchemaFieldValues(task, registry, isDraftMode), [task, registry, isDraftMode]);
@@ -237,7 +239,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const [logDrafts, setLogDrafts] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
-  const isReadOnly = task ? isReadOnlyTask(task) : false;
+  const isReadOnly = snapshotMode || (task ? isReadOnlyTask(task) : false);
   // Promoting a draft replaces it with a new task ID, which the Drafts page does through its own
   // Promote action, so the popup shows the draft status without turning the field into a second one.
   const isOpenDraft = (task?.status ?? "").trim().toLowerCase() === "draft";
@@ -245,6 +247,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const demotionIdentityRef = useRef(demotionIdentity);
   demotionIdentityRef.current = demotionIdentity;
   const [mode, setMode] = useState<Mode>(isCreateMode ? "create" : "preview");
+  const viewMode: Mode = snapshotMode ? "preview" : mode;
   const modeRef = useRef(mode);
   const previousTaskId = useRef(task?.id ?? "");
   const previousIsOpen = useRef(isOpen);
@@ -553,7 +556,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       references.length > 0 ||
       modifiedFiles.length > 0);
   const hasUnsavedEdits =
-    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
+    !snapshotMode && (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
 
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
@@ -826,7 +829,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       onClose={() => {
 		if (demoting) return;
         // When in edit mode, confirm closing if dirty
-        if (mode === "edit" && isDirty) {
+        if (viewMode === "edit" && isDirty) {
           if (!window.confirm("Discard unsaved changes and close?")) return;
         }
         refreshAfterCommentChange();
@@ -834,10 +837,10 @@ export const TaskDetailsModal: React.FC<Props> = ({
       }}
       title={isCreateMode ? (isDraftMode ? "Create New Draft" : "Create New Task") : <>{displayId} — <TaskDisplayTitle task={task} /></>}
       maxWidthClass="max-w-5xl"
-      disableEscapeClose={mode === "edit" || mode === "create" || demoting}
+      disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
-		          {canDemote && mode === "preview" && (
+		          {canDemote && viewMode === "preview" && (
 		            <button
 		              onClick={() => void handleDemote()}
 		              disabled={demoting}
@@ -852,7 +855,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
 		              )}
 		            </button>
 		          )}
-		          {mode === "preview" && !isCreateMode && !isReadOnly ? (
+		          {viewMode === "preview" && !isCreateMode && !isReadOnly ? (
 		            <button
 		              onClick={() => setMode("edit")}
 		              disabled={demoting}
@@ -865,7 +868,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               </svg>
               Edit
             </button>
-          ) : (mode === "edit" || mode === "create") ? (
+          ) : (viewMode === "edit" || viewMode === "create") ? (
             <div className="flex items-center gap-2">
 	              <button
 		                onClick={handleCancelEdit}
@@ -907,7 +910,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
           </svg>
           <div className="flex-1">
             <span className="font-medium">Read-only:</span>{" "}
-            {task?.branch ? (
+            {snapshotMode ? (
+              "This is a read-only snapshot. Changes made after export are not shown."
+            ) : task?.branch ? (
               <>This task exists in the <span className="font-semibold">{task.branch}</span> branch. Switch to that branch to edit it.</>
             ) : (
               "This task is archived."
@@ -966,7 +971,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
           <SchemaSections
             values={schemaSections}
             other={schemaSectionBaseline.other}
-            mode={mode === "preview" ? "view" : "edit"}
+            mode={viewMode === "preview" ? "view" : "edit"}
             onChange={(id, value) => setSchemaSections((current) => ({ ...current, [id]: value }))}
 			onToggleChecklist={handleToggleChecklist}
 			checklistBusy={checklistBusy}
@@ -1028,7 +1033,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
           {dependencyGraph && dependencyGraph.nodes.length > 1 && (
             <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-              <SectionHeader title="Dependency Graph" />
+              <SectionHeader title={snapshotMode ? "Direct dependencies" : "Dependency Graph"} />
               <DependencyGraphSection graph={dependencyGraph} tasks={availableTasks} />
             </section>
           )}
@@ -1049,7 +1054,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
               setSchemaFields((current) => ({ ...current, [key]: value }));
               setFieldErrors((current) => ({ ...current, [key]: "" }));
             }}
-            mode={mode === "preview" ? "view" : mode}
+            mode={viewMode === "preview" ? "view" : viewMode}
             readOnly={isReadOnly}
             draft={isOpenDraft}
             errors={fieldErrors}

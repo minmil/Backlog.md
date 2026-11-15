@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import tailwind from "bun-plugin-tailwind";
+import { bundleSnapshotViewer } from "../src/export/viewer-bundle.ts";
 
 type PackageJson = {
 	version: string;
@@ -16,6 +17,7 @@ if (!outdir && target && !executablePath) {
 	throw new Error("Cross-target builds require a checksum-verified BACKLOG_BUILD_EXECUTABLE_PATH");
 }
 const outputDirectory = outdir ?? dirname(outfile);
+const snapshotViewer = await bundleSnapshotViewer();
 
 if (outputDirectory !== ".") {
 	await mkdir(outputDirectory, { recursive: true });
@@ -27,6 +29,8 @@ const result = await Bun.build({
 	minify: true,
 	define: {
 		__EMBEDDED_VERSION__: JSON.stringify(version),
+		__SNAPSHOT_VIEWER_JS__: JSON.stringify(snapshotViewer.javascript),
+		__SNAPSHOT_VIEWER_CSS__: JSON.stringify(snapshotViewer.css),
 		"process.env.NODE_ENV": JSON.stringify("production"),
 	},
 	plugins: [tailwind],
