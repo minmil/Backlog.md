@@ -144,7 +144,7 @@ describe("schema field components", () => {
 		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
 		const editing = renderToStaticMarkup(<ThemeProvider><SchemaProvider initialSchema={schema}><SectionBlock sectionId="log" value={[]} mode="edit" onAppendLog={() => {}} /></SchemaProvider></ThemeProvider>);
 		expect(editing).toContain("Log author");
-		expect(editing).toContain("Alice");
+		expect(editing).toContain("@alice");
 	});
 
 	it("hides empty Other content and shows preserved prose", () => {
