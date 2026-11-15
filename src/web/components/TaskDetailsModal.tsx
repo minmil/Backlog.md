@@ -12,6 +12,7 @@ import SectionBlock from "./schema/SectionBlock.tsx";
 import LogEntryRow from "./schema/LogEntryRow.tsx";
 import CollapsibleSection from "./CollapsibleSection.tsx";
 import FieldInput from "./schema/FieldInput.tsx";
+import FieldValue from "./schema/FieldValue.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
 import { formatReadinessBlockers } from "../../utils/readiness";
 import { buildTaskIdIndex, resolveTaskReference } from "../utils/task-id-links";
@@ -873,6 +874,12 @@ export const TaskDetailsModal: React.FC<Props> = ({
     : [];
   const latestLogEntry = logEntries.reduce<LogEntry | undefined>((latest, entry) =>
     !latest || entry.date > latest.date || (entry.date === latest.date && entry.createdAt > latest.createdAt) ? entry : latest, undefined);
+  const headerBadgeFields = task
+    ? (["client_ref", "side", "tech_action"] as const).filter((key) => {
+        const value = schemaFields[key];
+        return schema.fields[key] && value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
+      })
+    : [];
 
   return (
     <Modal
@@ -888,6 +895,9 @@ export const TaskDetailsModal: React.FC<Props> = ({
         onClose();
       }}
       title={isCreateMode ? (isDraftMode ? "Create New Draft" : "Create New Task") : <>{displayId} — <TaskDisplayTitle task={task} /></>}
+      subtitle={headerBadgeFields.length ? headerBadgeFields.map((key) => (
+        <FieldValue key={key} fieldKey={key} value={schemaFields[key]} variant="card" />
+      )) : undefined}
       maxWidthClass="max-w-[1600px]"
 	  hideCloseButton={viewMode === "edit" || viewMode === "create"}
       disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}

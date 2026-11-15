@@ -4,6 +4,7 @@ interface ModalProps {
 	isOpen: boolean;
 	onClose: () => void;
 	title: React.ReactNode;
+	subtitle?: React.ReactNode;
 	children: React.ReactNode;
 	maxWidthClass?: string; // e.g., "max-w-4xl"
 	disableEscapeClose?: boolean; // when true, Escape and backdrop click won't close (child can handle it)
@@ -17,6 +18,7 @@ const Modal: React.FC<ModalProps> = ({
 	isOpen,
 	onClose,
 	title,
+	subtitle,
 	children,
 	maxWidthClass = "max-w-2xl",
 	disableEscapeClose,
@@ -130,9 +132,12 @@ const Modal: React.FC<ModalProps> = ({
 				aria-labelledby="modal-title"
 			>
 				<div className="sticky top-0 z-10 flex items-center gap-4 border-b border-gray-200 bg-white/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/75 dark:border-gray-700 dark:bg-gray-800/95 supports-[backdrop-filter]:dark:bg-gray-800/75">
-					<h2 id="modal-title" className="min-w-0 flex-1 truncate text-base font-semibold text-gray-900 dark:text-gray-100">
-						{title}
-					</h2>
+					<div className="min-w-0 flex-1">
+						<h2 id="modal-title" className="truncate text-base font-semibold text-gray-900 dark:text-gray-100">
+							{title}
+						</h2>
+						{subtitle ? <div className="mt-1 flex flex-wrap items-center gap-1.5" aria-label="Task fields">{subtitle}</div> : null}
+					</div>
 					<div className="ml-auto flex shrink-0 items-center justify-end gap-2">
 						{actions}
 					{!hideCloseButton && <button

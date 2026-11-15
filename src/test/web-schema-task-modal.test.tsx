@@ -42,6 +42,27 @@ afterEach(() => {
 });
 
 describe("schema task modal", () => {
+	it("shows configured client reference, side, and tech action below the title", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.fields.client_ref = { type: "sequence", label: "Client ref" };
+		schema.fields.side = { type: "enum", label: "Side", values: ["them"] };
+		schema.fields.tech_action = { type: "enum", label: "Tech action", values: ["Awaiting client input"] };
+		apiClient.fetchSchema = async () => schema;
+		const task = {
+			id: "T-7", title: "Confirm encoding", status: "Blocked", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-22",
+			fieldValues: { client_ref: "OKA-003", side: "them", tech_action: "Awaiting client input" },
+		} as Task;
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); });
+		expect(container.querySelector("#modal-title")?.textContent).toContain("Confirm encoding");
+		const pills = container.querySelector('[aria-label="Task fields"]');
+		expect(pills?.textContent).toContain("OKA-003");
+		expect(pills?.textContent).toContain("them");
+		expect(pills?.textContent).toContain("Awaiting client input");
+		expect(pills?.textContent?.indexOf("OKA-003")).toBeLessThan(pills?.textContent?.indexOf("them") ?? 0);
+	});
+
 	it("toggles multiple checklist sections directly in preview and saves each change", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
