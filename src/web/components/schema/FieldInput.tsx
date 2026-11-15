@@ -36,7 +36,7 @@ export default function FieldInput({ fieldKey, value, onChange, error, available
 		);
 	} else if (field.type === "milestone-ref" && milestones) {
 		control = <SelectControl id={inputId} aria-label={label} className="w-full" minWidthClass="w-full" value={String(current)} onChange={(event) => onChange(event.target.value || null)}>
-			<option value="">No milestone</option>
+			<option value="">No {label.toLowerCase()}</option>
 			{current && !milestones.some((milestone) => milestone.id === current) ? <option value={String(current)}>{String(current)}</option> : null}
 			{milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.title}</option>)}
 		</SelectControl>;

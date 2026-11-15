@@ -16,6 +16,7 @@ import LabelFilterDropdown from './LabelFilterDropdown';
 import FieldFilter from './schema/FieldFilter.tsx';
 import SelectControl from './SelectControl.tsx';
 import { useSchema } from './schema/SchemaProvider.tsx';
+import { milestoneTerminology } from '../utils/milestone-terminology.ts';
 import type { FieldValue as RegistryFieldValue } from '../../schema/field-registry.ts';
 import { SuccessToast } from './SuccessToast';
 
@@ -100,6 +101,7 @@ const Board: React.FC<BoardProps> = ({
     return progress;
   }, [tasks, statuses]);
   const { schema, registry } = useSchema();
+  const milestoneTerms = milestoneTerminology(schema);
   const schemaFilterKeys = schema.ui.board.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -760,7 +762,7 @@ const Board: React.FC<BoardProps> = ({
                 type="button"
                 onClick={() => onLaneChange('milestone')}
                 disabled={!hasTasksWithMilestones}
-                title={!hasTasksWithMilestones ? 'No tasks have milestones. Assign milestones to tasks first.' : 'Group tasks by milestone'}
+                title={!hasTasksWithMilestones ? `No tasks have ${milestoneTerms.pluralLower}. Assign ${milestoneTerms.pluralLower} to tasks first.` : `Group tasks by ${milestoneTerms.singularLower}`}
                 className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
                   !hasTasksWithMilestones
                     ? 'text-gray-400 dark:text-gray-600 cursor-not-allowed opacity-50'
@@ -769,7 +771,7 @@ const Board: React.FC<BoardProps> = ({
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                 }`}
               >
-                Milestone
+                {milestoneTerms.singular}
               </button>
             </div>
             {onSchemaFilterChange && schemaFilters ? <div className="flex flex-wrap items-center gap-3" aria-label="Board filters">

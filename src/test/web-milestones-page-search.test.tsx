@@ -9,6 +9,8 @@ import MilestonesPage from "../web/components/MilestonesPage.tsx";
 import { apiClient } from "../web/lib/api.ts";
 import { pinTimeZone } from "./pin-timezone.ts";
 import { setNativeInputValue } from "./react-dom-input.ts";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 
 const createTask = (overrides: Partial<Task>): Task => ({
 	id: "task-1",
@@ -87,15 +89,21 @@ const renderPage = (
 	options: {
 		onRefreshData?: () => Promise<void>;
 		dateFormat?: string;
+		milestoneLabel?: string;
 	} = {},
 ): HTMLElement => {
 	setupDom();
 	const container = document.getElementById("root");
 	expect(container).toBeTruthy();
 	activeRoot = createRoot(container as HTMLElement);
+	const defaultSchema = getDefaultTaskSchema();
+	const schema = options.milestoneLabel
+		? { ...defaultSchema, fields: { ...defaultSchema.fields, milestone: { ...defaultSchema.fields.milestone!, label: options.milestoneLabel } } }
+		: defaultSchema;
 	act(() => {
 		activeRoot?.render(
 			<MemoryRouter>
+				<SchemaProvider initialSchema={schema}>
 				<MilestonesPage
 					tasks={tasks}
 					statuses={["To Do", "In Progress", "Done"]}
@@ -105,6 +113,7 @@ const renderPage = (
 					onRefreshData={options.onRefreshData}
 					dateFormat={options.dateFormat}
 				/>
+				</SchemaProvider>
 			</MemoryRouter>,
 		);
 	});
@@ -162,6 +171,12 @@ afterEach(() => {
 });
 
 describe("Web milestones page search", () => {
+	it("uses the configured milestone label for the page and controls", () => {
+		const container = renderPage(baseTasks, { milestoneLabel: "Release" });
+		expect(container.querySelector("h1")?.textContent).toBe("Releases");
+		expect(container.textContent).toContain("+ Add release");
+		expect(container.querySelector("input[aria-label='Search releases']")).not.toBeNull();
+	});
 	// The browser renders stored timestamps in the viewer's timezone, so pin one.
 	pinTimeZone("Asia/Tokyo");
 

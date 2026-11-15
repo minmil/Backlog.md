@@ -21,6 +21,7 @@ import FieldValue from "./schema/FieldValue.tsx";
 import FieldFilter from "./schema/FieldFilter.tsx";
 import SelectControl from "./SelectControl.tsx";
 import { useSchema } from "./schema/SchemaProvider.tsx";
+import { milestoneTerminology } from "../utils/milestone-terminology.ts";
 import TaskDisplayTitle, { useTaskDisplay } from "./schema/TaskDisplayTitle.tsx";
 import { FallbackLanguageCode } from "./schema/DisplayLanguageContext.tsx";
 import CleanupModal from "./CleanupModal";
@@ -126,6 +127,7 @@ const TaskList: React.FC<TaskListProps> = ({
 	isLoading = false,
 }) => {
 	const { schema, registry } = useSchema();
+	const milestoneTerms = milestoneTerminology(schema);
 	const { resolve: resolveDisplayField, title: displayTitle, showFallback, lang: displayLang } = useTaskDisplay();
 	const configuredColumnKeys = schema.ui.task_list.columns.filter((key) => schema.fields[key] && (!schema.fields[key]?.hidden || key === "id"));
 	const columnKeys = configuredColumnKeys.includes("id") || configuredColumnKeys.includes("title")
@@ -751,7 +753,7 @@ const TaskList: React.FC<TaskListProps> = ({
 			<LabelFilterDropdown availableLabels={statusOptions} selectedLabels={excludedStatusFilter} onChange={handleExcludeStatusChange} menuId="task-list-exclude-status-menu" label="Exclude status" emptyLabel="None" noOptionsLabel="No statuses" clearLabel="Clear excluded statuses" className="min-w-[210px]" />
 		</React.Fragment>;
 		if (key === "priority") return <SelectControl key={key} minWidthClass="min-w-[120px]" aria-label="Filter by priority" value={priorityFilter} onChange={(event) => handlePriorityChange(event.target.value)}>{priorityOptions.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}</SelectControl>;
-		if (key === "milestone") return <SelectControl key={key} minWidthClass="min-w-[160px]" aria-label="Filter by milestone" value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)}><option value="">All milestones</option><option value="__none">No milestone</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</SelectControl>;
+		if (key === "milestone") return <SelectControl key={key} minWidthClass="min-w-[160px]" aria-label={`Filter by ${milestoneTerms.singularLower}`} value={milestoneFilter} onChange={(event) => handleMilestoneChange(event.target.value)}><option value="">All {milestoneTerms.pluralLower}</option><option value="__none">No {milestoneTerms.singularLower}</option>{milestoneOptions.map((milestone) => <option key={milestone} value={milestone}>{getMilestoneLabel(milestone, milestoneEntities)}</option>)}</SelectControl>;
 		if (key === "labels") return <LabelFilterDropdown key={key} availableLabels={mergedAvailableLabels} selectedLabels={labelFilter} onChange={handleLabelChange} menuId="task-list-labels-menu" />;
 		return <FieldFilter key={key} fieldKey={key} value={customFilters[key]} onChange={(value) => handleCustomFilterChange(key, value)} />;
 	};

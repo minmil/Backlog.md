@@ -3,6 +3,8 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import BoardPage from "../web/components/BoardPage";
 import SideNavigation from "../web/components/SideNavigation";
+import { SchemaProvider } from "../web/components/schema/SchemaProvider.tsx";
+import { getDefaultTaskSchema } from "../schema/default-schema.ts";
 
 const storage = new Map<string, string>();
 globalThis.localStorage = {
@@ -16,9 +18,14 @@ globalThis.localStorage = {
 	},
 } as Storage;
 
-const renderNavigation = (isLoading: boolean, taskCount: number, error?: Error): string =>
-	renderToString(
+const renderNavigation = (isLoading: boolean, taskCount: number, error?: Error, milestoneLabel?: string): string => {
+	const defaultSchema = getDefaultTaskSchema();
+	const schema = milestoneLabel
+		? { ...defaultSchema, fields: { ...defaultSchema.fields, milestone: { ...defaultSchema.fields.milestone!, label: milestoneLabel } } }
+		: defaultSchema;
+	return renderToString(
 		<MemoryRouter>
+			<SchemaProvider initialSchema={schema}>
 			<SideNavigation
 				taskCount={taskCount}
 				docs={[]}
@@ -28,8 +35,10 @@ const renderNavigation = (isLoading: boolean, taskCount: number, error?: Error):
 				onRetry={async () => {}}
 				onRefreshData={async () => {}}
 			/>
+			</SchemaProvider>
 		</MemoryRouter>,
 	);
+};
 
 const renderBoard = (isLoading: boolean, error?: Error): string =>
 	renderToString(
@@ -51,6 +60,17 @@ const renderBoard = (isLoading: boolean, error?: Error): string =>
 	);
 
 describe("SideNavigation task loading", () => {
+	it("uses the configured milestone label in both sidebar layouts", () => {
+		const expanded = renderNavigation(false, 3, undefined, "Release");
+		expect(expanded).toContain(">Releases</span>");
+		storage.set("sideNavCollapsed", "true");
+		try {
+			const collapsed = renderNavigation(false, 3, undefined, "Release");
+			expect(collapsed).toContain('data-tooltip-content="Releases"');
+		} finally {
+			storage.delete("sideNavCollapsed");
+		}
+	});
 	it("keeps navigation mounted while only the task count is loading", () => {
 		const loading = renderNavigation(true, 0);
 		expect(loading).toContain("Kanban Board");
