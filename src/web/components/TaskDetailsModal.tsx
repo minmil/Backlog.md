@@ -9,6 +9,7 @@ import { useSchema } from "./schema/SchemaProvider.tsx";
 import SchemaSidebar from "./schema/SchemaSidebar.tsx";
 import SchemaSections from "./schema/SchemaSections.tsx";
 import SectionBlock from "./schema/SectionBlock.tsx";
+import LogEntryRow from "./schema/LogEntryRow.tsx";
 import CollapsibleSection from "./CollapsibleSection.tsx";
 import FieldInput from "./schema/FieldInput.tsx";
 import { DependencyGraphSection } from "./DependencyGraphSection";
@@ -1073,14 +1074,13 @@ export const TaskDetailsModal: React.FC<Props> = ({
 
       {logSectionId && (logEntries.length > 0 || viewMode !== "preview") && (
         <div onClickCapture={confirmNavigationAwayFromEdits}>
-        <CollapsibleSection sectionKey={`${task?.id ?? "create"}-log`} summary={<>
-          <span className="shrink-0 font-semibold">{schema.sections[logSectionId]?.title ?? "Log"}</span>
-          {lastComment ? <span className="ml-auto flex min-w-0 items-center gap-3 overflow-hidden text-xs text-gray-500 dark:text-gray-400">
-            <span className="shrink-0">{lastComment.date} · {lastComment.author}</span>
-            <span className="truncate text-gray-700 dark:text-gray-300" title={lastComment.body}>{lastComment.body}</span>
-          </span> : <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">No comments yet</span>}
+        <CollapsibleSection variant="notebook" sectionKey={`${task?.id ?? "create"}-log`} summary={<>
+          <span className="block font-semibold">{schema.sections[logSectionId]?.title ?? "Log"}</span>
+          <div className="group-open:hidden">
+            {lastComment ? <LogEntryRow entry={lastComment} preview /> : <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No comments yet</div>}
+          </div>
         </>}>
-          <SectionBlock sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} readOnly={snapshotMode || isReadOnly} />
+          <SectionBlock bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} readOnly={snapshotMode || isReadOnly} />
         </CollapsibleSection>
         </div>
       )}

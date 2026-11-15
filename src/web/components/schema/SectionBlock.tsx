@@ -8,6 +8,7 @@ import { useSchema } from "./SchemaProvider.tsx";
 import LanguagePill from "./LanguagePill.tsx";
 import SelectControl from "../SelectControl.tsx";
 import { FallbackLanguageCode } from "./DisplayLanguageContext.tsx";
+import LogEntryRow from "./LogEntryRow.tsx";
 
 interface Props {
 	sectionId: string;
@@ -20,9 +21,10 @@ interface Props {
 	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (hasDraft: boolean) => void;
 	fallbackLang?: string;
+	bare?: boolean;
 }
 
-export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang }: Props): ReactElement | null {
+export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang, bare = false }: Props): ReactElement | null {
 	const { schema } = useSchema();
 	const { theme } = useTheme();
 	const section = schema.sections[sectionId];
@@ -50,8 +52,10 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 	} else {
 		const entries = Array.isArray(value) ? value.filter((item): item is LogEntry => "body" in item) : [];
 		content = (
-			<div className="space-y-4">
-				{entries.map((entry, index) => <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
+			<div className={bare ? "" : "space-y-4"}>
+				{entries.map((entry, index) => bare
+					? <LogEntryRow key={`${entry.createdAt}-${index}`} entry={entry} />
+					: <div key={`${entry.createdAt}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"><div className="text-xs text-gray-500 dark:text-gray-400">{entry.author} · {entry.date}</div><div className="prose prose-sm !max-w-none wmde-markdown" data-color-mode={theme}><MermaidMarkdown source={entry.body} /></div></div>)}
 				{mode === "edit" ? <div className="space-y-2">
 					<div className="flex gap-2"><SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.name}</option>)}</SelectControl><input aria-label="Log date" type="date" className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} /></div>
 					<textarea aria-label="Log entry" value={body} onChange={(event) => { setBody(event.target.value); onLogDraftChange?.(Boolean(event.target.value.trim())); }} className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
@@ -66,5 +70,6 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 			</div>
 		);
 	}
+	if (bare) return <div>{content}</div>;
 	return <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"><h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100"><span>{title}</span>{section.lang ? <LanguagePill lang={section.lang} /> : null}</h2>{content}{fallbackLang ? <FallbackLanguageCode lang={fallbackLang} /> : null}</section>;
 }

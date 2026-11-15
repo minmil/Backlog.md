@@ -143,7 +143,7 @@ describe("schema task modal", () => {
 		await act(async () => { Array.from(acceptance?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
 		const logBody = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
 		await act(async () => { if (logBody) setNativeInputValue(logBody, "Created by Alice"); });
-		const log = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
+		const log = logBody?.closest("details");
 		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
 		expect(submissions).toEqual([{ title: "New schema task", fields: { status: "To Do", assignee: ["@alice"], reporter: "@alice", side: "Buyer" }, sections: { description: "A schema section" }, checklist: [{ section: "acceptance", op: "add", text: "Ready for review" }], log: { section: "log", body: "Created by Alice", author: "@alice", date: container.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value } }]);
@@ -265,7 +265,7 @@ describe("schema task modal", () => {
 		const body = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
 		expect(body).toBeTruthy();
 		await act(async () => { if (body) setNativeInputValue(body, "Reviewed by Alice"); });
-		const logSection = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Log");
+		const logSection = body?.closest("details");
 		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
 		expect(patches).toEqual([{ log: { section: "log", body: "Reviewed by Alice", author: "@alice", date: date?.value } }]);
 	});
