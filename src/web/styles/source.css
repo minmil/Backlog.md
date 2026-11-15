@@ -19,6 +19,14 @@
         cursor: not-allowed;
     }
 
+    input[type="date"] {
+        color-scheme: light;
+    }
+
+    .dark input[type="date"] {
+        color-scheme: dark;
+    }
+
     /* Scrollbars: no track, only a thumb tinted for the active theme. scrollbar-color
        inherits, so every scroll container picks it up - page, tables, modals, dropdowns. */
     html {

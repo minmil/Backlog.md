@@ -5,18 +5,20 @@ type Props = Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "className"> & 
 	minWidthClass?: string;
 	className?: string;
 	fieldLabel?: string;
+	triggerClassName?: string;
+	chevronClassName?: string;
 };
 
 export const SELECT_TRIGGER_CLASS = "h-10 appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-10 text-left text-sm text-gray-900 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-stone-500 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-stone-400";
 export const SELECT_MENU_CLASS = "z-50 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/5";
 export const SELECT_OPTION_CLASS = "w-full rounded-lg px-3 py-2 text-left text-sm text-gray-800 transition-colors hover:bg-blue-50 focus:bg-blue-50 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-700 dark:focus:bg-gray-700";
 
-export function SelectChevron(): React.ReactElement {
-	return <svg aria-hidden="true" className="pointer-events-none absolute right-4 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-500 dark:text-gray-400" viewBox="0 0 12 12" fill="none"><path d="m2 4 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+export function SelectChevron({ className = "" }: { className?: string }): React.ReactElement {
+	return <svg aria-hidden="true" className={`pointer-events-none absolute right-4 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-500 dark:text-gray-400 ${className}`} viewBox="0 0 12 12" fill="none"><path d="m2 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
 /** Shared select treatment, including a styled option panel. The hidden select keeps form and keyboard integrations working. */
-export default function SelectControl({ minWidthClass = "min-w-[140px]", className = "", fieldLabel, children, value, onChange, disabled, id, ...props }: Props): React.ReactElement {
+export default function SelectControl({ minWidthClass = "min-w-[140px]", className = "", fieldLabel, triggerClassName = "", chevronClassName = "", children, value, onChange, disabled, id, ...props }: Props): React.ReactElement {
 	const [open, setOpen] = useState(false);
 	const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
 	const triggerRef = useRef<HTMLButtonElement>(null);
@@ -65,10 +67,10 @@ export default function SelectControl({ minWidthClass = "min-w-[140px]", classNa
 
 	return <span className={`relative inline-flex ${className}`}>
 		<select id={id} {...props} value={value} onChange={onChange} disabled={disabled} tabIndex={-1} aria-hidden="true" className="pointer-events-none absolute h-px w-px opacity-0" onFocus={() => { triggerRef.current?.focus(); setOpen(true); }}>{children}</select>
-		<button ref={triggerRef} type="button" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-invalid={props["aria-invalid"]} aria-describedby={props["aria-describedby"]} disabled={disabled} onClick={() => setOpen((current) => !current)} onKeyDown={onKeyDown} className={`${minWidthClass} ${SELECT_TRIGGER_CLASS}`}>
+		<button ref={triggerRef} type="button" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-invalid={props["aria-invalid"]} aria-describedby={props["aria-describedby"]} disabled={disabled} onClick={() => setOpen((current) => !current)} onKeyDown={onKeyDown} className={`${minWidthClass} ${SELECT_TRIGGER_CLASS} ${triggerClassName}`}>
 			<span className="block truncate">{fieldLabel ? <strong className="mr-2 font-medium">{fieldLabel}</strong> : null}{selected?.props.children ?? ""}</span>
 		</button>
-		<SelectChevron />
+		<SelectChevron className={chevronClassName} />
 		{open && createPortal(<div id={menuId} ref={menuRef} role="listbox" aria-label={label} className={SELECT_MENU_CLASS} style={menuStyle}>
 			{options.map((option, index) => {
 				const optionValue = String(option.props.value ?? option.props.children);

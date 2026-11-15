@@ -873,6 +873,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const logEntries = logSectionId && Array.isArray(schemaSections[logSectionId])
     ? schemaSections[logSectionId].filter((item): item is LogEntry => "body" in item)
     : [];
+  const logFormId = logSectionId ? `task-log-composer-${logSectionId}` : undefined;
   const latestLogEntry = logEntries.reduce<LogEntry | undefined>((latest, entry) =>
     !latest || entry.date > latest.date || (entry.date === latest.date && entry.createdAt > latest.createdAt) ? entry : latest, undefined);
 
@@ -1088,14 +1089,26 @@ export const TaskDetailsModal: React.FC<Props> = ({
           <div className="group-open:hidden">
             {latestLogEntry ? <LogEntryRow entry={latestLogEntry} preview /> : <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No comments yet</div>}
           </div>
-          {!isReadOnly && <button type="button" title="Add log entry" aria-label="Add log entry" onClick={(event) => {
+          {!isReadOnly && viewMode === "preview" && (logComposerOpen ? <span className="absolute right-16 top-1.5 flex items-center gap-1">
+            <button type="button" aria-label="Save log entry" disabled={!logDrafts[logSectionId]} onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              (document.getElementById(logFormId!) as HTMLFormElement | null)?.requestSubmit();
+            }} className="h-7 rounded-md bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600">Save</button>
+            <button type="button" aria-label="Cancel log entry" onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setLogDrafts((current) => ({ ...current, [logSectionId]: false }));
+              setLogComposerOpen(false);
+            }} className="h-7 rounded-md border border-gray-300 px-2 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">Cancel</button>
+          </span> : <button type="button" title="Add log entry" aria-label="Add log entry" onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
             event.currentTarget.closest("details")!.open = true;
             setLogComposerOpen(true);
-          }} className="absolute right-16 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100">+</button>}
+          }} className="absolute right-16 top-2 inline-flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100">+</button>)}
         </>}>
-          <SectionBlock bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" && !logComposerOpen ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} onLogSaved={() => setLogComposerOpen(false)} readOnly={snapshotMode || isReadOnly} />
+          <SectionBlock key={logComposerOpen ? "composer" : "log"} bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" && !logComposerOpen ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} onLogSaved={() => setLogComposerOpen(false)} logFormId={logFormId} logSaveInHeader={logComposerOpen && viewMode === "preview"} readOnly={snapshotMode || isReadOnly} />
         </CollapsibleSection>
         </div>
       )}
