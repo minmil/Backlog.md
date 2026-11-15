@@ -1031,7 +1031,7 @@ export class Core {
 	}
 
 	/** Refresh the existing cross-branch store only when relevant config or refs changed. */
-	async refreshTasksForTaskRead(): Promise<boolean> {
+	async refreshTasksForTaskRead(options: { skipWatchedLocalRefresh?: boolean } = {}): Promise<boolean> {
 		while (true) {
 			const generation = this.projectGeneration;
 			const filesystem = this.fs;
@@ -1050,7 +1050,9 @@ export class Core {
 			if (projectChanged()) continue;
 			if (snapshot.fingerprint === this.activeBranchFingerprint) {
 				const store = this.contentStore;
-				if (store?.isInitialized()) await store.refreshLocalTaskCorpus();
+				if (store?.isInitialized() && (!options.skipWatchedLocalRefresh || !store.hasWorkingCopyWatchers())) {
+					await store.refreshLocalTaskCorpus();
+				}
 				if (projectChanged()) continue;
 				return false;
 			}

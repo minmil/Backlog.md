@@ -1,0 +1,30 @@
+# Browser read performance investigation
+
+## Reproduction and environment
+
+The reproducible command is `bun scripts/benchmark-web-reads.ts 100 untracked 5`. It creates a disposable project with 100, 500, or 1,000 Markdown tasks, configured numeric custom field, Japanese and English text, dependencies, a checklist, and a structured log. Modes are `untracked`, `committed`, `filesystem`, and `branches` (with a branch-only task). The script starts a real HTTP server, reads `/api/search` and `/api/task/:id`, and records cold and warm request times, local and archived corpus scans, CPU time, Git Trace2 subprocess counts and durations, and process memory. It also opens two different tasks and sends concurrent search and detail requests. `BACKLOG_BENCHMARK_KEEP=1` retains the synthetic project for browser inspection.
+
+Measurements below were taken on Linux 7.0.0, AMD Ryzen 5 PRO 4650G, Bun 1.4.3, Git 2.53.0, with five warm samples per operation. This is a local synthetic workload, not the user's separate task repository. The baseline ran from `main` in a detached temporary worktree; the fixed run used `feat/web-performance-static-viewer`. Timing includes HTTP and JSON transfer. With five samples, p95 is effectively the maximum; it is a useful regression signal but not a statistically stable percentile.
+
+| Untracked tasks | Baseline search median / p95 | Fixed search median / p95 | Baseline detail median / p95 | Fixed detail median / p95 |
+|---:|---:|---:|---:|---:|
+| 100 | 38 / 48 ms | 5 / 9 ms | 72 / 79 ms | 3 / 7 ms |
+| 500 | 204 / 257 ms | 20 / 23 ms | 317 / 345 ms | 11 / 17 ms |
+| 1,000 | 259 / 268 ms | 40 / 48 ms | 604 / 763 ms | 25 / 39 ms |
+
+Each five-request baseline search series made five active and five archived corpus scans; each five-request detail series made 15 of each. All fixed warm series made zero corpus scans. On the fixed 100-task branch-aware fixture, warm search and detail medians were 8 ms each; Git Trace2 recorded 122 processes totaling 88 ms over startup and 17 requests, so branch discovery remains frequent but was not the dominant local cost. The 100-task untracked fixed run used 10 MB of heap and 87 MB RSS after the measured reads. A first `/api/search` request on the realistic fixed fixture took 97 ms at 100 tasks, 217 ms at 500, and 369 ms at 1,000. Those cold times include content-store and search-index initialization. The script reports raw values for other modes and CPU/RSS as well.
+
+## Request flow and findings
+
+- `BacklogServer.ensureServicesReady` coalesces first-use content-store and search-service initialization. `ContentStore.ensureInitialized` coalesces its loader and installs filesystem watchers. `SearchService` builds the Fuse index from the resulting corpus, then updates on store events. These paths already avoid duplicate cold initialization.
+- On every warm task search, `handleSearch` called `Core.refreshTasksForTaskRead`. Its unchanged-branch path called `ContentStore.refreshLocalTaskCorpus`, parsing all active and archived task files, even though the server had active watchers. This explains the five scans per five search requests.
+- A detail request first called `Core.getTask`, which refreshed the same corpus. `loadTaskDetail` then called `loadTaskCorpus`, which reread the working copy and archived files and made another cross-branch query/refresh. This explains three scans per detail read. Dependency graph and readiness calculation themselves remained in memory and were not the dominant cost.
+- The fix lets the server skip the local scan only while the current working-copy watchers are active. If watcher setup fails, the read path still scans. The detail endpoint derives graph and readiness from the same `ContentStore` snapshot that resolved the task, retaining local precedence, archived dependencies, contested-ID behavior, and cross-branch records. A regression test confirms repeated untracked detail reads do not scan and an external file edit still appears.
+- The browser's `App` effect performs one detail fetch per modal session, task ID, and data version. Its WebSocket handler refreshes search after a task update. The synthetic 100-task board, list, and detail all rendered in a Chromium-based in-app browser. Opening the first task produced one dialog with 99 dependency nodes and about 3,825 DOM elements. The browser tooling did not expose resource or long-task entries in its read-only page scope, so client click p95, duplicate-request counts, and handler duration remain unmeasured here.
+- The equivalent upstream read path also calls `refreshTasksForTaskRead` on warm searches and reads the corpus for details. The repeated scan is inherited; the schema fork adds response projection work, but the measurements do not isolate a material schema-specific cost. The user's reported 8–30 second stalls were not reproduced on this synthetic local setup. A slow remote Git fetch, watcher churn, or a deeper dependency graph could contribute in the separate project; optional stage logs can distinguish them there.
+
+Set `BACKLOG_WEB_TIMINGS=1` to log JSON stage timings for search/detail requests taking at least 200 ms. Set it to `all` to log every read during a short diagnostic session. Logging is off by default and includes no task content or IDs. Search stages are validation, initialization, refresh, execution, and serialization; detail stages are resolution, store access, dependency derivation, and serialization.
+
+## Remaining limits
+
+The benchmark counts corpus scans, not individual filesystem read syscalls, and measures process CPU/RSS rather than per-request CPU. Git Trace2 durations are the sum of subprocess runtime, which may overlap. It does not exercise an actual remote fetch or the user's repository. Cold initialization still scales with the corpus, and branch-tip discovery still starts several fast local Git processes per read. Browser render and long-task timing need a full browser profiler trace from the user's project to establish whether the 500 ms visible-detail target is met there.
