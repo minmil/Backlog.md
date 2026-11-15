@@ -26,6 +26,13 @@ const Navigation: React.FC<NavigationProps> = ({projectName, loadingMessage}) =>
                 </div>
                 <div className="flex items-center gap-3">
                     <BranchIndexingIndicator message={loadingMessage} />
+                    <a
+                        href="/api/export/html"
+                        download="backlog-snapshot.html"
+                        className="rounded-md border border-stone-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-stone-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                        Export HTML
+                    </a>
                     <LanguageToggle />
                     <ThemeToggle />
                 </div>

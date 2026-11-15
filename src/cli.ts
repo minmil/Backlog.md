@@ -29,8 +29,8 @@ import { type DuplicateRepairPlan, findLocalDuplicateTaskIds } from "./core/dupl
 import { initializeProject } from "./core/init.ts";
 import { buildMilestoneBuckets, collectArchivedMilestoneKeys, milestoneKey } from "./core/milestones.ts";
 import { loadTaskDetail, loadTaskListItems } from "./core/task-detail.ts";
+import { getViewerBundle } from "./export/embedded-viewer.ts";
 import { createHtmlSnapshot, renderHtmlSnapshot } from "./export/html-snapshot.ts";
-import { bundleSnapshotViewer } from "./export/viewer-bundle.ts";
 import { isConfigValueError } from "./file-system/operations.ts";
 import {
 	decisionListJson,
@@ -155,9 +155,6 @@ import { getTerminalStatus } from "./utils/terminal-status.ts";
 import { formatUtcDateForDisplay } from "./utils/utc-date-display.ts";
 import { formatUtcTimestamp } from "./utils/utc-timestamp.ts";
 import { getVersion } from "./utils/version.ts";
-
-declare const __SNAPSHOT_VIEWER_JS__: string | undefined;
-declare const __SNAPSHOT_VIEWER_CSS__: string | undefined;
 
 type IntegrationMode = "mcp" | "cli" | "none";
 
@@ -1219,10 +1216,7 @@ program
 		if (!output.toLowerCase().endsWith(".html")) throw new Error("HTML snapshot output must end in .html");
 		const core = new Core(cwd);
 		const snapshot = await createHtmlSnapshot(core);
-		const assets =
-			typeof __SNAPSHOT_VIEWER_JS__ !== "undefined" && typeof __SNAPSHOT_VIEWER_CSS__ !== "undefined"
-				? { javascript: __SNAPSHOT_VIEWER_JS__, css: __SNAPSHOT_VIEWER_CSS__ }
-				: await bundleSnapshotViewer();
+		const assets = await getViewerBundle();
 		await writeFile(output, renderHtmlSnapshot(snapshot, assets.javascript, assets.css), {
 			flag: options.force ? "w" : "wx",
 		});

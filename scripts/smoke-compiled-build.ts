@@ -311,6 +311,16 @@ try {
 			faviconResponse.headers.get("content-type")?.includes("image/png"),
 			`Unexpected favicon content type: ${faviconResponse.headers.get("content-type")}`,
 		);
+
+		const exportResponse = await fetchWithTimeout(`${baseUrl}/api/export/html`);
+		assert(exportResponse.status === 200, `HTML export returned ${exportResponse.status}.`);
+		assert(
+			exportResponse.headers.get("content-disposition")?.includes("backlog-snapshot.html"),
+			"HTML export did not request a file download.",
+		);
+		const exportedHtml = await exportResponse.text();
+		assert(exportedHtml.includes('id="backlog-snapshot"'), "HTML export has no embedded task data.");
+		assert(exportedHtml.includes("Updated packaged task"), "HTML export missed the current task.");
 	} catch (error) {
 		browserFailure = { error };
 	}

@@ -6,6 +6,8 @@ From a Backlog.md task repository, run:
 backlog export html --output ./backlog-snapshot.html
 ```
 
+The live browser also has **Export HTML** in its header. Clicking it downloads a fresh `backlog-snapshot.html` from the current local task files; it does not write to the repository. The command-line export lets you choose a destination and use `--force` to replace a previous file.
+
 Open the generated file directly in a current Chromium browser, or place it in a shared drive for colleagues to open. It contains the board, list, search, filters, sorting, task details, configured schema fields and sections, logs, checklists, and links between tasks. It needs no Backlog.md server, Git installation, CDN, or internet connection on the viewer's machine. Use `--force` to replace an existing file.
 
 The export reads the **current local working copy**, including untracked task files. Active tasks appear on the board and list. Archived tasks are embedded for dependency context and can be shown in the list with **Include archive**. Tasks that exist only on other Git branches are excluded. Export again to publish changes; the page never updates itself.

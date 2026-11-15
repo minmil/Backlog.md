@@ -8,6 +8,8 @@ import { initializeProject } from "../core/init.ts";
 import type { SearchService } from "../core/search-service.ts";
 import { getTaskStatistics } from "../core/statistics.ts";
 import { taskDetailFromSnapshot } from "../core/task-detail.ts";
+import { getViewerBundle } from "../export/embedded-viewer.ts";
+import { createHtmlSnapshot, renderHtmlSnapshot } from "../export/html-snapshot.ts";
 import { isCreateLockError, isTaskLockError } from "../file-system/operations.ts";
 import { toSchemaTaskJson } from "../formatters/json-output.ts";
 import { parseSections } from "../markdown/sections.ts";
@@ -674,6 +676,9 @@ export class BacklogServer {
 					"/api/search": {
 						GET: async (req: Request) => await this.handleSearch(req),
 					},
+					"/api/export/html": {
+						GET: async () => await this.handleExportHtml(),
+					},
 					// Serve files placed under backlog/assets at /assets/<relative-path>
 					"/assets/*": {
 						GET: async (req: Request) => await this.handleAssetRequest(req),
@@ -987,6 +992,23 @@ export class BacklogServer {
 				.filter((task) => overdueKeys.length === 0 || overdueKeys.some((key) => registry.isOverdue(task, key)))
 				.map((task) => this.taskResponse(task, registry, lang)),
 		);
+	}
+
+	private async handleExportHtml(): Promise<Response> {
+		try {
+			const snapshot = await createHtmlSnapshot(this.core);
+			const assets = await getViewerBundle();
+			return new Response(renderHtmlSnapshot(snapshot, assets.javascript, assets.css), {
+				headers: {
+					"Content-Type": "text/html; charset=utf-8",
+					"Content-Disposition": 'attachment; filename="backlog-snapshot.html"',
+					"Cache-Control": "no-store",
+				},
+			});
+		} catch (error) {
+			console.error("Error exporting HTML snapshot:", error);
+			return Response.json({ error: "HTML snapshot export failed" }, { status: 500 });
+		}
 	}
 
 	private async handleSearch(req: Request): Promise<Response> {
