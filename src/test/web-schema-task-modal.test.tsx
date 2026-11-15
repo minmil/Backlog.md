@@ -144,7 +144,7 @@ describe("schema task modal", () => {
 		const logBody = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
 		await act(async () => { if (logBody) setNativeInputValue(logBody, "Created by Alice"); });
 		const log = logBody?.closest("details");
-		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		await act(async () => { Array.from(log?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save")?.click(); });
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
 		expect(submissions).toEqual([{ title: "New schema task", fields: { status: "To Do", assignee: ["@alice"], reporter: "@alice", side: "Buyer" }, sections: { description: "A schema section" }, checklist: [{ section: "acceptance", op: "add", text: "Ready for review" }], log: { section: "log", body: "Created by Alice", author: "@alice", date: container.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value } }]);
 	});
@@ -266,7 +266,35 @@ describe("schema task modal", () => {
 		expect(body).toBeTruthy();
 		await act(async () => { if (body) setNativeInputValue(body, "Reviewed by Alice"); });
 		const logSection = body?.closest("details");
-		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
+		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save")?.click(); });
 		expect(patches).toEqual([{ log: { section: "log", body: "Reviewed by Alice", author: "@alice", date: date?.value } }]);
+	});
+
+	it("shows the newest dated log and saves a new entry from preview", async () => {
+		const container = setupDom();
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.users = [{ handle: "@alice", name: "Alice", default: true }];
+		const task = {
+			id: "TASK-4", title: "Log preview", status: "To Do", assignee: [], labels: [], dependencies: [], createdDate: "2026-10-25",
+			sections: { log: [
+				{ author: "@alice", date: "2026-11-15", createdAt: "2026-11-15T00:00:00.000Z", auto: true, body: "New status" },
+				{ author: "@alice", date: "2026-11-10", createdAt: "2026-11-15T01:00:00.000Z", body: "Older note" },
+			] },
+		} as Task;
+		const patches: SchemaTaskWrite[] = [];
+		apiClient.patchSchemaTask = async (_id, patch) => { patches.push(patch); return task; };
+		root = createRoot(container);
+		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} /></SchemaProvider></ThemeProvider>); });
+		const logSection = Array.from(container.querySelectorAll("details")).find((details) => details.querySelector("summary")?.textContent?.includes("Log"));
+		expect(logSection?.querySelector("summary")?.textContent).toContain("New status");
+		expect(logSection?.querySelector("summary")?.textContent).not.toContain("Older note");
+		await act(async () => { logSection?.querySelector<HTMLButtonElement>('button[aria-label="Add log entry"]')?.click(); });
+		expect(logSection?.open).toBe(true);
+		const body = logSection?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Log entry"]');
+		const date = logSection?.querySelector<HTMLInputElement>('input[aria-label="Log date"]')?.value;
+		await act(async () => { if (body) setNativeInputValue(body, "Newest note"); });
+		await act(async () => { Array.from(logSection?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Save")?.click(); });
+		expect(patches).toEqual([{ log: { section: "log", body: "Newest note", author: "@alice", date } }]);
+		expect(logSection?.querySelector('textarea[aria-label="Log entry"]')).toBeNull();
 	});
 });

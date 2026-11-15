@@ -245,6 +245,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const schemaSectionBaselineRef = useRef(schemaSectionBaseline.sections);
   const [pendingLog, setPendingLog] = useState<{ section: string; entry: LogInput } | null>(null);
   const [logDrafts, setLogDrafts] = useState<Record<string, boolean>>({});
+  const [logComposerOpen, setLogComposerOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // A task from another branch or in the archive is shown but cannot be changed here.
   const isReadOnly = snapshotMode ? !onProposeEdit : (task ? isReadOnlyTask(task) : false);
@@ -513,6 +514,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
     schemaSectionBaselineRef.current = schemaSectionBaseline.sections;
     setPendingLog(null);
     setLogDrafts({});
+    setLogComposerOpen(false);
     setFieldErrors({});
     setDescription(nextFormState.description);
     setPlan(nextFormState.plan);
@@ -567,7 +569,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       references.length > 0 ||
       modifiedFiles.length > 0);
   const hasUnsavedEdits =
-    (mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || Object.values(logDrafts).some(Boolean) || hasCreateModeEntries);
+    ((mode === "edit" || mode === "create") && (isDirty || hasCommentDraft || hasCreateModeEntries)) || Object.values(logDrafts).some(Boolean);
 
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
@@ -729,7 +731,13 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const handleAppendLog = async (section: string, entry: LogInput) => {
     if (isReadOnly) throw new Error("This task is read-only.");
     if (snapshotMode) {
-      setSchemaSections((current) => ({ ...current, [section]: [...(Array.isArray(current[section]) ? current[section].filter((item): item is LogEntry => "body" in item) : []), { author: entry.author ?? "", date: entry.date ?? new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(), body: entry.body }] }));
+      const nextSections = { ...schemaSections, [section]: [...(Array.isArray(schemaSections[section]) ? schemaSections[section].filter((item): item is LogEntry => "body" in item) : []), { author: entry.author ?? "", date: entry.date ?? new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(), body: entry.body }] };
+      setSchemaSections(nextSections);
+      if (task && onProposeEdit) {
+        const proposal = publishedTask(task, schema, task.source === "archived");
+        proposal.sections = nextSections;
+        onProposeEdit(proposal);
+      }
       return;
     }
     if (!task) {
@@ -865,7 +873,8 @@ export const TaskDetailsModal: React.FC<Props> = ({
   const logEntries = logSectionId && Array.isArray(schemaSections[logSectionId])
     ? schemaSections[logSectionId].filter((item): item is LogEntry => "body" in item)
     : [];
-  const lastComment = [...logEntries].reverse().find((entry) => !entry.auto) ?? logEntries.at(-1);
+  const latestLogEntry = logEntries.reduce<LogEntry | undefined>((latest, entry) =>
+    !latest || entry.date > latest.date || (entry.date === latest.date && entry.createdAt > latest.createdAt) ? entry : latest, undefined);
 
   return (
     <Modal
@@ -874,7 +883,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
       onClose={() => {
 		if (demoting) return;
         // When in edit mode, confirm closing if dirty
-        if (viewMode === "edit" && isDirty) {
+        if (hasUnsavedEdits) {
           if (!window.confirm("Discard unsaved changes and close?")) return;
         }
         refreshAfterCommentChange();
@@ -886,10 +895,10 @@ export const TaskDetailsModal: React.FC<Props> = ({
       disableEscapeClose={viewMode === "edit" || viewMode === "create" || demoting}
       actions={
 		<div className="flex flex-nowrap items-center justify-end gap-2">
-		          {viewMode === "preview" && canDemote && <button type="button" onClick={() => void handleDemote()} disabled={demoting} title="Move task to drafts" className="inline-flex items-center whitespace-nowrap rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
+		          {viewMode === "preview" && canDemote && <button type="button" onClick={() => void handleDemote()} disabled={demoting} title="Move task to drafts" className="inline-flex items-center whitespace-nowrap rounded-lg border border-amber-400 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:border-amber-500 dark:hover:bg-amber-800/70 dark:hover:text-amber-50">
 		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16" /></svg>{demoting ? "Re-drafting…" : "Re-draft"}
 		          </button>}
-		          {viewMode === "preview" && task && onArchive && !isReadOnly && <button type="button" onClick={handleArchive} disabled={demoting} title="Move task to archive" className="inline-flex items-center whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200">
+		          {viewMode === "preview" && task && onArchive && !isReadOnly && <button type="button" onClick={handleArchive} disabled={demoting} title="Move task to archive" className="inline-flex items-center whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:border-blue-500 dark:hover:bg-blue-800/70 dark:hover:text-blue-50">
 		            <svg className="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>Archive
 		          </button>}
 		          {viewMode === "preview" && !isCreateMode && !isReadOnly ? (
@@ -1072,15 +1081,21 @@ export const TaskDetailsModal: React.FC<Props> = ({
         </div>
       )}
 
-      {logSectionId && (logEntries.length > 0 || viewMode !== "preview") && (
+      {logSectionId && (logEntries.length > 0 || viewMode !== "preview" || !isReadOnly) && (
         <div onClickCapture={confirmNavigationAwayFromEdits}>
         <CollapsibleSection variant="notebook" sectionKey={`${task?.id ?? "create"}-log`} summary={<>
           <span className="block font-semibold">{schema.sections[logSectionId]?.title ?? "Log"}</span>
           <div className="group-open:hidden">
-            {lastComment ? <LogEntryRow entry={lastComment} preview /> : <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No comments yet</div>}
+            {latestLogEntry ? <LogEntryRow entry={latestLogEntry} preview /> : <div className="py-2 text-xs text-gray-500 dark:text-gray-400">No comments yet</div>}
           </div>
+          {!isReadOnly && <button type="button" title="Add log entry" aria-label="Add log entry" onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.closest("details")!.open = true;
+            setLogComposerOpen(true);
+          }} className="absolute right-16 top-2.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-lg leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100">+</button>}
         </>}>
-          <SectionBlock bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} readOnly={snapshotMode || isReadOnly} />
+          <SectionBlock bare sectionId={logSectionId} value={schemaSections[logSectionId]} mode={viewMode === "preview" && !logComposerOpen ? "view" : "edit"} onAppendLog={(entry) => handleAppendLog(logSectionId, entry)} onLogDraftChange={(hasDraft) => setLogDrafts((current) => ({ ...current, [logSectionId]: hasDraft }))} onLogSaved={() => setLogComposerOpen(false)} readOnly={snapshotMode || isReadOnly} />
         </CollapsibleSection>
         </div>
       )}
