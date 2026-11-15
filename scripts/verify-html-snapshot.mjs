@@ -72,6 +72,16 @@ try {
 	assert.ok(document.querySelector("[role='button'][aria-label^='Open TASK-']"), "Live task cards are present");
 	assert.ok(document.querySelector("[draggable='true']"), "Task cards retain the live drag affordance");
 	assert.equal(dom.window.__injected, undefined);
+	if (count === 100) {
+		assert.match(document.body.textContent, /Documents \(1\)/);
+		assert.match(document.body.textContent, /Decisions \(1\)/);
+		click(dom.window, document.querySelector("a[href='/drafts']"));
+		await waitFor(document, () => document.body.textContent.includes("Review draft"));
+		click(dom.window, document.querySelector("a[href='/milestones']"));
+		await waitFor(document, () => document.body.textContent.includes("Review milestone"));
+		click(dom.window, document.querySelector("a[href='/board']"));
+		await waitFor(document, () => Boolean(document.querySelector("[role='button'][aria-label^='Open TASK-3:']")));
+	}
 	if (count <= 500) {
 	click(dom.window, document.querySelector("[role='button'][aria-label^='Open TASK-3:']"));
 	await waitFor(document, () => document.querySelector("[role='dialog']")?.textContent.includes("TASK-3 — Task 3 日本語"));
@@ -108,6 +118,12 @@ try {
 		assert.equal(data.proposedEdits[`TASK-${count}`].task.title, proposedTitle);
 		assert.equal(data.proposedEdits[`TASK-${count}`].task.status, "In Progress");
 		assert.equal(data.proposedEdits[`TASK-${count}`].task.fieldValues.custom_score, 77);
+		if (count === 100) {
+			assert.equal(data.docs[0].title, "Review guide");
+			assert.equal(data.decisions[0].title, "Review decision");
+			assert.equal(data.drafts[0].title, "Review draft");
+			assert.equal(data.milestones[0].title, "Review milestone");
+		}
 		await start(revised);
 		assert.equal(revised.window.__reviewInjected, undefined);
 	} finally {

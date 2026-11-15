@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Core } from "../core/backlog.ts";
 import { createHtmlSnapshot, escapeEmbeddedJson } from "../export/html-snapshot.ts";
-import { serializeTask } from "../markdown/serializer.ts";
+import { serializeDocument, serializeTask } from "../markdown/serializer.ts";
 import type { Task } from "../types/index.ts";
 
 for (const count of [100, 500, 1000])
@@ -89,6 +89,40 @@ for (const count of [100, 500, 1000])
 					fs.taskSchema,
 				),
 			);
+			if (count === 100) {
+				await fs.saveDraft({
+					id: "DRAFT-1",
+					title: "Review draft",
+					status: "Draft",
+					assignee: [],
+					labels: [],
+					createdDate: "2026-01-01",
+					dependencies: [],
+					sections: { description: "Draft body" },
+				});
+				await fs.saveDocument(
+					{
+						id: "doc-1",
+						title: "Review guide",
+						type: "guide",
+						createdDate: "2026-01-01",
+						rawContent: "Guide body",
+						tags: ["review"],
+					},
+					"guides",
+				);
+				await fs.saveDecision({
+					id: "decision-1",
+					title: "Review decision",
+					date: "2026-01-01",
+					status: "proposed",
+					context: "Context",
+					decision: "Decide",
+					consequences: "Consequence",
+					rawContent: "## Context\n\nContext",
+				});
+				await fs.createMilestone("Review milestone", "Milestone body");
+			}
 			const output = join(project, "snapshot.html");
 			const cli = Bun.spawn(
 				[process.execPath, resolve(import.meta.dir, "../cli.ts"), "export", "html", "--output", output],
@@ -105,8 +139,21 @@ for (const count of [100, 500, 1000])
 			expect(html).toContain(`"taskCount":${count}`);
 			const data = JSON.parse(
 				html.match(/<script type="application\/json" id="backlog-snapshot">([\s\S]*?)<\/script>/)?.[1] ?? "null",
-			) as { tasks: Task[] };
+			) as {
+				tasks: Task[];
+				drafts: Task[];
+				docs: Array<{ path?: string; title: string }>;
+				decisions: Array<{ path?: string; title: string }>;
+				milestones: Array<{ title: string }>;
+			};
 			expect(data.tasks).toHaveLength(count);
+			if (count === 100) {
+				expect(data.drafts.map((draft) => draft.title)).toEqual(["Review draft"]);
+				expect(data.docs.map((doc) => doc.title)).toEqual(["Review guide"]);
+				expect(data.docs[0]?.path).toMatch(/^guides\//);
+				expect(data.decisions.map((decision) => decision.title)).toEqual(["Review decision"]);
+				expect(data.milestones.map((milestone) => milestone.title)).toEqual(["Review milestone"]);
+			}
 			expect(JSON.stringify(data)).not.toContain("PRIVATE_COMMAND");
 			expect(JSON.stringify(data)).not.toContain("PRIVATE_TOKEN");
 			expect(data.tasks[0]).not.toHaveProperty("onStatusChange");
@@ -142,7 +189,7 @@ test("escapes HTML script delimiters and Unicode line separators in embedded JSO
 	expect(JSON.parse(embedded)).toEqual({ value: "</script><script>evil()</script>\u2028\u2029&" });
 });
 
-test.skipIf(process.platform === "win32")("refuses task symlinks that leave the project", async () => {
+test.skipIf(process.platform === "win32")("refuses record symlinks that leave the project", async () => {
 	const project = await mkdtemp(join(tmpdir(), "backlog-html-symlink-"));
 	const external = await mkdtemp(join(tmpdir(), "backlog-html-external-"));
 	try {
@@ -174,8 +221,23 @@ test.skipIf(process.platform === "win32")("refuses task symlinks that leave the 
 				core.filesystem.taskSchema,
 			),
 		);
-		await symlink(outside, join(core.filesystem.tasksDir, "task-1 - Linked.md"));
+		const taskLink = join(core.filesystem.tasksDir, "task-1 - Linked.md");
+		await symlink(outside, taskLink);
 		await expect(createHtmlSnapshot(core)).rejects.toThrow("resolves outside the project");
+		await rm(taskLink);
+		const outsideDoc = join(external, "doc-1.md");
+		await writeFile(
+			outsideDoc,
+			serializeDocument({
+				id: "doc-1",
+				title: "Private document",
+				type: "guide",
+				createdDate: "2026-01-01",
+				rawContent: "Secret",
+			}),
+		);
+		await symlink(outsideDoc, join(core.filesystem.docsDir, "doc-1 - Linked.md"));
+		await expect(createHtmlSnapshot(core)).rejects.toThrow("document doc-1 resolves outside the project");
 	} finally {
 		await rm(project, { recursive: true, force: true });
 		await rm(external, { recursive: true, force: true });
