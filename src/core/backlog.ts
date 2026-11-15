@@ -1032,52 +1032,97 @@ export class Core {
 
 	/** Refresh the existing cross-branch store only when relevant config or refs changed. */
 	async refreshTasksForTaskRead(options: { skipWatchedLocalRefresh?: boolean } = {}): Promise<boolean> {
-		while (true) {
-			const generation = this.projectGeneration;
-			const filesystem = this.fs;
-			const git = this.git;
-			const backlogRoot = filesystem.backlogDir;
-			const projectChanged = () =>
-				generation !== this.projectGeneration ||
-				filesystem !== this.fs ||
-				git !== this.git ||
-				backlogRoot !== filesystem.backlogDir;
-			const config = await filesystem.loadConfig();
-			if (projectChanged()) continue;
-			await this.refreshRemoteRefsForTaskRead(config, git);
-			if (projectChanged()) continue;
-			const snapshot = await this.getActiveBranchSnapshot(config, generation, filesystem, git);
-			if (projectChanged()) continue;
-			if (snapshot.fingerprint === this.activeBranchFingerprint) {
-				const store = this.contentStore;
-				if (store?.isInitialized() && (!options.skipWatchedLocalRefresh || !store.hasWorkingCopyWatchers())) {
-					await store.refreshLocalTaskCorpus();
-				}
+		const timingSetting = process.env.BACKLOG_WEB_TIMINGS;
+		const started = timingSetting ? performance.now() : 0;
+		const stages: Record<string, number> = {};
+		let mode = "none";
+		let outcome = "error";
+		let attempts = 0;
+		const timed = async <T>(stage: string, action: () => Promise<T>): Promise<T> => {
+			if (!timingSetting) return await action();
+			const stageStarted = performance.now();
+			try {
+				return await action();
+			} finally {
+				stages[stage] = (stages[stage] ?? 0) + performance.now() - stageStarted;
+			}
+		};
+		try {
+			while (true) {
+				attempts += 1;
+				const generation = this.projectGeneration;
+				const filesystem = this.fs;
+				const git = this.git;
+				const backlogRoot = filesystem.backlogDir;
+				const projectChanged = () =>
+					generation !== this.projectGeneration ||
+					filesystem !== this.fs ||
+					git !== this.git ||
+					backlogRoot !== filesystem.backlogDir;
+				const config = await timed("config", () => filesystem.loadConfig());
 				if (projectChanged()) continue;
-				return false;
-			}
-
-			const joinedExistingRefresh = this.activeBranchRefreshPromise !== null;
-			if (!this.activeBranchRefreshPromise) {
-				const refreshExistingStore = this.contentStore !== undefined;
-				const refreshPromise = (async () => {
-					const store = await this.getContentStore();
-					if (refreshExistingStore) await store.refreshTasks();
-				})();
-				this.activeBranchRefreshPromise = refreshPromise;
-				const clearRefreshPromise = () => {
-					if (this.activeBranchRefreshPromise === refreshPromise) {
-						this.activeBranchRefreshPromise = null;
+				await timed("remoteRefs", () => this.refreshRemoteRefsForTaskRead(config, git));
+				if (projectChanged()) continue;
+				const snapshot = await timed("branchSnapshot", () =>
+					this.getActiveBranchSnapshot(config, generation, filesystem, git),
+				);
+				if (projectChanged()) continue;
+				if (snapshot.fingerprint === this.activeBranchFingerprint) {
+					const store = this.contentStore;
+					const watchersActive = store?.hasWorkingCopyWatchers() ?? false;
+					if (store?.isInitialized() && (!options.skipWatchedLocalRefresh || !watchersActive)) {
+						mode = "scan";
+						await timed("localCorpus", () => store.refreshLocalTaskCorpus());
+					} else {
+						mode = watchersActive ? "watcher" : "none";
 					}
-				};
-				void refreshPromise.then(clearRefreshPromise, clearRefreshPromise);
-			}
+					if (projectChanged()) continue;
+					outcome = "unchanged";
+					return false;
+				}
 
-			const refreshPromise = this.activeBranchRefreshPromise;
-			await refreshPromise;
-			if (projectChanged()) continue;
-			if (joinedExistingRefresh && this.activeBranchFingerprint !== snapshot.fingerprint) continue;
-			return true;
+				mode = "branch";
+				const joinedExistingRefresh = this.activeBranchRefreshPromise !== null;
+				if (!this.activeBranchRefreshPromise) {
+					const refreshExistingStore = this.contentStore !== undefined;
+					const refreshPromise = (async () => {
+						const store = await this.getContentStore();
+						if (refreshExistingStore) await store.refreshTasks();
+					})();
+					this.activeBranchRefreshPromise = refreshPromise;
+					const clearRefreshPromise = () => {
+						if (this.activeBranchRefreshPromise === refreshPromise) {
+							this.activeBranchRefreshPromise = null;
+						}
+					};
+					void refreshPromise.then(clearRefreshPromise, clearRefreshPromise);
+				}
+
+				const refreshPromise = this.activeBranchRefreshPromise;
+				await timed("branchCorpus", () => refreshPromise);
+				if (projectChanged()) continue;
+				if (joinedExistingRefresh && this.activeBranchFingerprint !== snapshot.fingerprint) continue;
+				outcome = "refreshed";
+				return true;
+			}
+		} finally {
+			if (timingSetting) {
+				const totalMs = Math.round((performance.now() - started) * 10) / 10;
+				if (timingSetting === "all" || totalMs >= 200) {
+					console.error(
+						JSON.stringify({
+							event: "task-read-refresh-timing",
+							totalMs,
+							stages: Object.fromEntries(
+								Object.entries(stages).map(([stage, ms]) => [stage, Math.round(ms * 10) / 10]),
+							),
+							mode,
+							outcome,
+							attempts,
+						}),
+					);
+				}
+			}
 		}
 	}
 

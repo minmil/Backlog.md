@@ -1174,6 +1174,8 @@ export class BacklogServer {
 			timing?.finish();
 			return response;
 		} catch (error) {
+			timing?.mark("error");
+			timing?.finish();
 			console.error("Error performing search:", error);
 			return Response.json({ error: "Search failed" }, { status: 500 });
 		}
@@ -1339,24 +1341,27 @@ export class BacklogServer {
 	 */
 	private async handleGetTask(taskId: string, req?: Request): Promise<Response> {
 		const timing = webReadTiming("task-detail");
-		const registry = new FieldRegistry(this.core.filesystem.taskSchema);
-		const lang = this.readDisplayLanguage(req, registry);
-		if (lang instanceof Response) return lang;
-		const resolved = await this.resolveDetailTask(taskId);
-		if (resolved instanceof Response) return resolved;
-		timing?.mark("resolve");
-		const store = await this.getContentStoreInstance();
-		timing?.mark("store");
-		const detail = taskDetailFromSnapshot(
-			resolved,
-			store.getTaskCorpusSnapshot(),
-			registry.schema.fields.status?.values,
-		);
-		timing?.mark("dependencies");
-		const response = Response.json(this.taskResponse(detail, registry, lang, true));
-		timing?.mark("serialize");
-		timing?.finish();
-		return response;
+		try {
+			const registry = new FieldRegistry(this.core.filesystem.taskSchema);
+			const lang = this.readDisplayLanguage(req, registry);
+			if (lang instanceof Response) return lang;
+			const resolved = await this.resolveDetailTask(taskId);
+			if (resolved instanceof Response) return resolved;
+			timing?.mark("resolve");
+			const store = await this.getContentStoreInstance();
+			timing?.mark("store");
+			const detail = taskDetailFromSnapshot(
+				resolved,
+				store.getTaskCorpusSnapshot(),
+				registry.schema.fields.status?.values,
+			);
+			timing?.mark("dependencies");
+			const response = Response.json(this.taskResponse(detail, registry, lang, true));
+			timing?.mark("serialize");
+			return response;
+		} finally {
+			timing?.finish();
+		}
 	}
 
 	private async handlePatchTask(req: Request, taskId: string): Promise<Response> {
