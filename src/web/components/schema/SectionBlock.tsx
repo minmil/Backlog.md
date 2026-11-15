@@ -20,14 +20,11 @@ interface Props {
 	readOnly?: boolean;
 	onAppendLog?: (entry: LogInput) => void | Promise<void>;
 	onLogDraftChange?: (hasDraft: boolean) => void;
-	onLogSaved?: () => void;
-	logFormId?: string;
-	logSaveInHeader?: boolean;
 	fallbackLang?: string;
 	bare?: boolean;
 }
 
-export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, onLogSaved, logFormId, logSaveInHeader = false, fallbackLang, bare = false }: Props): ReactElement | null {
+export default function SectionBlock({ sectionId, value, mode, onChange, onToggleChecklist, checklistBusy, readOnly, onAppendLog, onLogDraftChange, fallbackLang, bare = false }: Props): ReactElement | null {
 	const { schema } = useSchema();
 	const { theme } = useTheme();
 	const section = schema.sections[sectionId];
@@ -44,7 +41,6 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 			setBody("");
 			onLogDraftChange?.(false);
 			setAppendError(null);
-			onLogSaved?.();
 		} catch (error) {
 			setAppendError(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -72,15 +68,15 @@ export default function SectionBlock({ sectionId, value, mode, onChange, onToggl
 		const entries = Array.isArray(value) ? value.filter((item): item is LogEntry => "body" in item) : [];
 		content = (
 			<div className={bare ? "" : "space-y-4"}>
-				{mode === "edit" ? <form id={logFormId} onSubmit={(event) => { event.preventDefault(); void saveLog(); }} className={logRowGridClass}>
+				{mode === "edit" ? <form onSubmit={(event) => { event.preventDefault(); void saveLog(); }} className={logRowGridClass}>
 					<div className="min-w-0 space-y-2 py-2 pr-3">
 						<input aria-label="Log date" type="date" className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-1 py-1 text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" value={date} onChange={(event) => setDate(event.target.value)} />
-						<SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" triggerClassName="!h-8 !pl-2 !pr-5 !py-1 !text-[11px]" chevronClassName="!right-2" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.handle}</option>)}</SelectControl>
+						<SelectControl aria-label="Log author" className="w-full" minWidthClass="w-full" triggerClassName="!h-8 !pl-2 !pr-8 !py-1 !text-[11px]" chevronClassName="!right-2" value={author} onChange={(event) => setAuthor(event.target.value)}>{schema.users.map((user) => <option key={user.handle} value={user.handle}>{user.handle}</option>)}</SelectControl>
+						<button type="submit" disabled={!body.trim() || !author || !onAppendLog || savingLog} className="h-7 w-full rounded-md bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600">{savingLog ? "Saving…" : "Save"}</button>
 					</div>
 					<div className="min-w-0 border-l border-gray-300 py-2 pl-4 dark:border-gray-600">
 						<textarea aria-label="Log entry" value={body} onChange={(event) => { setBody(event.target.value); onLogDraftChange?.(Boolean(event.target.value.trim())); }} className="min-h-20 w-full resize-y rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" />
 						{appendError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{appendError}</p> : null}
-						{!logSaveInHeader && <div className="mt-2 flex justify-end"><button type="submit" disabled={!body.trim() || !author || !onAppendLog || savingLog} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600">{savingLog ? "Saving…" : "Save"}</button></div>}
 					</div>
 				</form> : null}
 				{entries.map((entry, index) => bare
