@@ -30,6 +30,7 @@ interface Props {
   availableStatuses?: string[]; // Available statuses for new tasks
   availableTasks?: Task[]; // Shared task corpus for dependency selection
   onNavigateToTask?: (task: Task) => void; // Opens another task, preserving close/back context
+  onInternalLink?: (href: string) => void; // Route a task link within an offline HTML file
   onProposeEdit?: (task: Task) => void; // Standalone HTML review copy only
   isDraftMode?: boolean; // Whether creating a draft
   availableMilestones?: string[];
@@ -222,6 +223,7 @@ export const TaskDetailsModal: React.FC<Props> = ({
   availableStatuses = EMPTY_STATUSES,
   availableTasks = EMPTY_TASKS,
   onNavigateToTask,
+  onInternalLink,
   onProposeEdit,
   milestoneEntities,
   isDraftMode,
@@ -564,11 +566,24 @@ export const TaskDetailsModal: React.FC<Props> = ({
   // Links inside the modal (dependency chips, auto-linked task IDs in markdown) leave this
   // task behind, so they ask the same question closing does before the navigation happens.
   const confirmNavigationAwayFromEdits = (event: React.MouseEvent<HTMLElement>) => {
-    if (!hasUnsavedEdits || event.defaultPrevented || event.button !== 0) return;
+    if (event.defaultPrevented || event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!link) return;
     if (link.target && link.target !== "_self") return;
+    const localHref = link.getAttribute("href") ?? "";
+    if (onInternalLink && /^\/(?:tasks|board)\/[A-Za-z0-9._-]+(?:\/[^/?#]+)?$/.test(localHref)) {
+      if (hasUnsavedEdits && !window.confirm("Discard unsaved changes and leave this task?")) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onInternalLink(localHref);
+      return;
+    }
+    if (!hasUnsavedEdits) return;
     const destination = new URL(link.href, window.location.href);
     if (destination.protocol !== "http:" && destination.protocol !== "https:") return;
     // Same-page anchors (markdown heading links) do not unload the form.

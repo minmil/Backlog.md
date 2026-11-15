@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { useHealthCheck } from '../hooks/useHealthCheck';
+import { useOfflineSave } from './OfflineModeContext.tsx';
 
 interface HealthCheckContextType {
 	isOnline: boolean;
@@ -11,6 +12,12 @@ interface HealthCheckContextType {
 const HealthCheckContext = createContext<HealthCheckContextType | undefined>(undefined);
 
 export function HealthCheckProvider({ children }: { children: ReactNode }) {
+	const offline = useOfflineSave();
+	if (offline) return <HealthCheckContext.Provider value={{ isOnline: true, wasDisconnected: false, retry: () => {} }}>{children}</HealthCheckContext.Provider>;
+	return <LiveHealthCheckProvider>{children}</LiveHealthCheckProvider>;
+}
+
+function LiveHealthCheckProvider({ children }: { children: ReactNode }) {
 	const healthCheck = useHealthCheck();
 	
 	return (

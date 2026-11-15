@@ -63,7 +63,7 @@ Backlog.md itself. The full task ledger lives in this repo's [backlog folder](ba
 * 📊 **Terminal Kanban** -- `backlog board` paints a live board in your shell; `backlog board export` creates shareable markdown reports
 
 * 🌐 **Web UI** -- `backlog browser` serves a local Kanban board with drag-and-drop and task editing forms
-* 📄 **Standalone snapshot** -- `backlog export html --output ./backlog-snapshot.html` creates a self-contained, read-only viewer for sharing without a server ([details](docs/html-snapshot.md))
+* 📄 **Standalone snapshot** -- `backlog export html --output ./backlog-snapshot.html` creates a self-contained browser copy for task review and editing without a server ([details](docs/html-snapshot.md))
 
 * 🔍 **Search** -- fuzzy search across tasks, docs & decisions with `backlog search`
 
