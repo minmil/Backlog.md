@@ -10,6 +10,7 @@ interface ModalProps {
 	actions?: React.ReactNode; // optional actions rendered in header before close
 	initialFocusRef?: React.RefObject<HTMLElement | null>;
 	scrollKey?: string;
+	hideCloseButton?: boolean;
 }
 
 const Modal: React.FC<ModalProps> = ({
@@ -22,6 +23,7 @@ const Modal: React.FC<ModalProps> = ({
 	actions,
 	initialFocusRef,
 	scrollKey,
+	hideCloseButton = false,
 }) => {
 	const dialogRef = useRef<HTMLDivElement | null>(null);
 	const onCloseRef = useRef(onClose);
@@ -127,13 +129,13 @@ const Modal: React.FC<ModalProps> = ({
 				aria-modal="true"
 				aria-labelledby="modal-title"
 			>
-				<div className="sticky top-0 z-10 flex flex-wrap items-start gap-3 px-6 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 supports-[backdrop-filter]:dark:bg-gray-800/75">
-					<h2 id="modal-title" className="min-w-0 flex-1 basis-full break-words text-base font-semibold text-gray-900 dark:text-gray-100 sm:basis-auto">
+				<div className="sticky top-0 z-10 flex items-center gap-4 border-b border-gray-200 bg-white/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/75 dark:border-gray-700 dark:bg-gray-800/95 supports-[backdrop-filter]:dark:bg-gray-800/75">
+					<h2 id="modal-title" className="min-w-0 flex-1 truncate text-base font-semibold text-gray-900 dark:text-gray-100">
 						{title}
 					</h2>
-					<div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+					<div className="ml-auto flex shrink-0 items-center justify-end gap-2">
 						{actions}
-						<button
+					{!hideCloseButton && <button
 							type="button"
 							onClick={onClose}
 							disabled={disableEscapeClose}
@@ -141,7 +143,7 @@ const Modal: React.FC<ModalProps> = ({
 							aria-label="Close modal"
 						>
 							×
-						</button>
+						</button>}
 					</div>
 				</div>
 				<div className="px-6 pt-4 pb-6">{children}</div>

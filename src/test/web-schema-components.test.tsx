@@ -82,6 +82,25 @@ describe("schema field components", () => {
 		});
 	}
 
+	it("lets Owner select one configured user", async () => {
+		const schema = structuredClone(getDefaultTaskSchema());
+		schema.users = [{ handle: "@alice", name: "Alice" }, { handle: "@bob", name: "Bob" }];
+		const container = document.createElement("div");
+		const root = createRoot(container);
+		let selected: unknown = null;
+		try {
+			await act(async () => { root.render(<SchemaProvider initialSchema={schema}><FieldInput fieldKey="assignee" value={["@alice"]} onChange={(value) => { selected = value; }} /></SchemaProvider>); });
+			const input = container.querySelector<HTMLSelectElement>("#schema-field-assignee");
+			expect(input?.value).toBe("@alice");
+			expect([...input!.options].map((option) => option.textContent)).toEqual(["No owner", "Alice", "Bob"]);
+			expect(container.querySelector("#chip-input-assignee")).toBeNull();
+			await act(async () => { input!.value = "@bob"; input!.dispatchEvent(new window.Event("change", { bubbles: true })); });
+			expect(selected).toEqual(["@bob"]);
+		} finally {
+			await act(async () => { root.unmount(); });
+		}
+	});
+
 	it("renders overdue dates using the existing validation error text color", () => {
 		const html = renderToStaticMarkup(<SchemaProvider initialSchema={schemaWithField("date")}><FieldValue fieldKey="sample" value="2026-10-24" variant="cell" overdue /></SchemaProvider>);
 		expect(html).toContain("text-red-600 dark:text-red-400");
@@ -114,7 +133,7 @@ describe("schema field components", () => {
 		expect(html).toContain("Verified");
 		expect(html).toContain("checked");
 		const editing = renderToStaticMarkup(<ThemeProvider><SchemaProvider><SectionBlock sectionId="acceptance" value={[]} mode="edit" onChange={() => {}} /></SchemaProvider></ThemeProvider>);
-		expect(editing).toContain("New criterion");
+		expect(editing).toContain("New item");
 	});
 
 	it("renders a log section", () => {

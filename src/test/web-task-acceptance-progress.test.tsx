@@ -55,10 +55,10 @@ const setupDom = (): HTMLElement => {
 	return container as HTMLElement;
 };
 
-const renderCard = (task: Task): HTMLElement => {
+const renderCard = (task: Task, subtaskProgress?: { completed: number; total: number }): HTMLElement => {
 	const container = setupDom();
 	act(() => {
-		activeRoot?.render(<TaskCard task={task} onUpdate={() => {}} onEdit={() => {}} />);
+		activeRoot?.render(<TaskCard task={task} subtaskProgress={subtaskProgress} onUpdate={() => {}} onEdit={() => {}} />);
 	});
 	return container;
 };
@@ -91,11 +91,10 @@ const renderList = (...tasks: Task[]): HTMLElement => {
 const getProgress = (container: HTMLElement): HTMLElement | null =>
 	container.querySelector("[data-acceptance-criteria-progress]");
 
-// The header row is the metadata line that precedes the card title. jsdom has no layout, so the
-// check pins the class that lets the row wrap instead of squeezing the type and project badges.
+// The first card line keeps the short task ID on the left and progress on the right.
 const getHeaderRow = (container: HTMLElement): HTMLElement => {
-	const header = container.querySelector("h4")?.previousElementSibling as HTMLElement | null;
-	expect(header?.className).toContain("flex-wrap");
+	const header = container.querySelector("[role='button']")?.firstElementChild as HTMLElement | null;
+	expect(header?.className).toContain("justify-between");
 	return header as HTMLElement;
 };
 
@@ -178,7 +177,7 @@ describe("browser task acceptance criteria progress", () => {
 		expect(getProgress(container)).toBeNull();
 	});
 
-	it("renders the card ring in the header row beside the priority badge", () => {
+	it("renders progress on the first line and priority on the badge line", () => {
 		const container = renderCard(createTask({ priority: "high", acceptanceCriteriaItems: createCriteria(4, 7) }));
 		const header = getHeaderRow(container);
 		const progress = getProgress(container);
@@ -187,14 +186,19 @@ describe("browser task acceptance criteria progress", () => {
 		expect(header.contains(progress)).toBe(true);
 		expectRing(progress, 4, 7);
 
-		// The ring joins the priority badge in a group that never shrinks. The group is pushed flush
-		// right, so the badge sits where cards without progress already put it: on the first header
-		// line, or alone on a second one when the id and badges need the first.
-		const rightGroup = header.lastElementChild as HTMLElement;
-		expect(rightGroup.className).toContain("shrink-0");
-		expect(rightGroup.className).toContain("ml-auto");
-		expect(rightGroup.contains(progress)).toBe(true);
-		expect(rightGroup.lastElementChild?.textContent).toBe("High");
+		expect(header.lastElementChild?.contains(progress)).toBe(true);
+		expect(header.textContent).toBe("T-14/7");
+		expect(header.nextElementSibling?.textContent).toContain("High");
+	});
+
+	it("shows subtask progress before acceptance progress", () => {
+		const container = renderCard(createTask({ acceptanceCriteriaItems: createCriteria(1, 3) }), { completed: 2, total: 4 });
+		const subtask = container.querySelector('[role="progressbar"][aria-label="Subtask progress"]');
+		const acceptance = getProgress(container);
+		expect(subtask?.textContent).toBe("2/4");
+		expect(subtask?.getAttribute("aria-valuenow")).toBe("2");
+		expect(subtask?.parentElement?.textContent).toBe("2/41/3");
+		expect(acceptance).toBeTruthy();
 	});
 
 	it("renders the card ring in the header row when the task has no priority", () => {
@@ -203,15 +207,16 @@ describe("browser task acceptance criteria progress", () => {
 		const progress = getProgress(container);
 
 		expect(header.contains(progress)).toBe(true);
-		expect(header.textContent).toBe("task-12/3");
+		expect(header.textContent).toBe("T-12/3");
 	});
 
-	it("keeps the priority badge alone in the header row when the task has no criteria", () => {
+	it("keeps priority on the badge line when the task has no criteria", () => {
 		const container = renderCard(createTask({ priority: "medium" }));
 		const header = getHeaderRow(container);
 
 		expect(getProgress(container)).toBeNull();
-		expect(header.textContent).toBe("task-1Med");
+		expect(header.textContent).toBe("T-1");
+		expect(header.nextElementSibling?.textContent).toContain("Med");
 	});
 
 	it("renders nothing beside the id when the task has neither criteria nor priority", () => {
@@ -220,7 +225,12 @@ describe("browser task acceptance criteria progress", () => {
 
 		expect(getProgress(container)).toBeNull();
 		expect(header.children.length).toBe(1);
-		expect(header.textContent).toBe("task-1");
+		expect(header.textContent).toBe("T-1");
+	});
+
+	it("omits the card progress when there is only one acceptance item", () => {
+		const container = renderCard(createTask({ acceptanceCriteriaItems: createCriteria(0, 1) }));
+		expect(getProgress(container)).toBeNull();
 	});
 
 	it("renders a partial progress ring at list density in the wide list summary", () => {

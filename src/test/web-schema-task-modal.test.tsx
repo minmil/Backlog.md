@@ -90,7 +90,7 @@ describe("schema task modal", () => {
 		expect(dialog?.scrollTop).toBe(0);
 	});
 
-	it("shows only populated read fields, resolves milestone titles, and puts readiness first", async () => {
+	it("shows only populated read fields, resolves milestone titles, and puts readiness in the graph summary", async () => {
 		const container = setupDom();
 		const schema = structuredClone(getDefaultTaskSchema());
 		schema.fields.project = { type: "enum", core: true, label: "Client", values: ["Client 2"] };
@@ -106,7 +106,8 @@ describe("schema task modal", () => {
 		root = createRoot(container);
 		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal task={task} isOpen onClose={() => {}} milestoneEntities={[{ id: "m-2", title: "Release 2026-11-13", description: "", rawContent: "" }]} /></SchemaProvider></ThemeProvider>); });
 		const sidebar = container.querySelector(".md\\:col-span-1.space-y-4");
-		expect(sidebar?.firstElementChild?.textContent).toContain("Ready to start");
+		expect(container.querySelector("details summary")?.textContent).toContain("Ready to start");
+		expect(sidebar?.textContent).not.toContain("Ready to start");
 		expect(sidebar?.textContent).toContain("Release 2026-11-13");
 		expect(sidebar?.textContent).not.toContain("Client");
 		const translated = Array.from(container.querySelectorAll("section")).find((section) => section.querySelector("h2")?.textContent?.includes("Description (JA)"));
@@ -136,7 +137,7 @@ describe("schema task modal", () => {
 			setter?.call(side, "Buyer");
 			side?.dispatchEvent(new window.Event("change", { bubbles: true }));
 		});
-		const criterion = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		const criterion = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New item"]');
 		await act(async () => { if (criterion) setNativeInputValue(criterion, "Ready for review"); });
 		const acceptance = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");
 		await act(async () => { Array.from(acceptance?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Add")?.click(); });
@@ -156,7 +157,8 @@ describe("schema task modal", () => {
 		const submissions: SchemaTaskWrite[] = [];
 		root = createRoot(container);
 		await act(async () => { root?.render(<ThemeProvider><SchemaProvider initialSchema={schema}><TaskDetailsModal isOpen onClose={() => {}} onSubmit={async (input) => { submissions.push(input); }} /></SchemaProvider></ThemeProvider>); });
-		await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Remove @alice"]')?.click(); });
+		const owner = container.querySelector<HTMLSelectElement>("#schema-field-assignee");
+		await act(async () => { if (owner) { owner.value = ""; owner.dispatchEvent(new window.Event("change", { bubbles: true })); } });
 		const title = container.querySelector<HTMLInputElement>("#schema-field-title");
 		await act(async () => { if (title) setNativeInputValue(title, "Unassigned task"); });
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Save"]')?.click(); });
@@ -231,7 +233,7 @@ describe("schema task modal", () => {
 		expect(container.textContent).toContain("UAT details");
 		expect(container.textContent).toContain("Preserved loose note");
 		await act(async () => { container.querySelector<HTMLButtonElement>('button[title="Edit"]')?.click(); });
-		const input = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New criterion"]');
+		const input = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="New item"]');
 		expect(input).toBeTruthy();
 		await act(async () => { if (input) setNativeInputValue(input, "Ready for review"); });
 		const section = Array.from(container.querySelectorAll("section")).find((item) => item.querySelector("h2")?.textContent === "Acceptance Criteria");

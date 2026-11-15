@@ -4,7 +4,7 @@ import { apiClient, type ReorderTaskPayload } from '../lib/api';
 import { buildLanes, DEFAULT_LANE_KEY, groupTasksByLaneAndStatus, type LaneMode, sortTasksForStatus } from '../lib/lanes';
 import { collectAvailableLabels, labelsToLower } from '../../utils/label-filter';
 import { collectArchivedMilestoneKeys, milestoneKey } from '../utils/milestones';
-import { getTerminalStatus } from '../../utils/terminal-status';
+import { getTerminalStatus, isTerminalStatus } from '../../utils/terminal-status';
 import { getPriorityOptions, normalizePriorityValue } from '../../utils/priority-config';
 import { getProjectValues, matchesProjectFilter } from '../../utils/project-config';
 import { getTaskTypeValues, matchesTaskTypeFilter } from '../../utils/task-type-config';
@@ -88,6 +88,17 @@ const Board: React.FC<BoardProps> = ({
   hideEmptyColumns = false,
   dateFormat,
 }) => {
+  const subtaskProgressByTaskId = useMemo(() => {
+    const progress = new Map<string, { completed: number; total: number }>();
+    for (const task of tasks) {
+      if (!task.parentTaskId) continue;
+      const current = progress.get(task.parentTaskId) ?? { completed: 0, total: 0 };
+      current.total += 1;
+      if (isTerminalStatus(task.status, statuses)) current.completed += 1;
+      progress.set(task.parentTaskId, current);
+    }
+    return progress;
+  }, [tasks, statuses]);
   const { schema, registry } = useSchema();
   const schemaFilterKeys = schema.ui.board.filters.filter((key) => schema.fields[key] && !schema.fields[key]?.hidden);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -907,6 +918,7 @@ const Board: React.FC<BoardProps> = ({
                           <TaskColumn
                             title={status}
                             tasks={getTasksForLane(lane.key, status)}
+                            subtaskProgressByTaskId={subtaskProgressByTaskId}
                             onTaskUpdate={handleTaskUpdate}
                             onEditTask={onEditTask}
                             onTaskReorder={handleTaskReorder}
@@ -940,6 +952,7 @@ const Board: React.FC<BoardProps> = ({
                 <TaskColumn
                   title={status}
                   tasks={getTasksForLane(DEFAULT_LANE_KEY, status)}
+                  subtaskProgressByTaskId={subtaskProgressByTaskId}
                   onTaskUpdate={handleTaskUpdate}
                   onEditTask={onEditTask}
                   onTaskReorder={handleTaskReorder}
